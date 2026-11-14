@@ -399,7 +399,9 @@ fn map_kernel(builder: &mut PageTableBuilder<'_>, layout: &Layout) -> Result<(),
 
 /// MMIO Device: UART0 **4 KiB** + **hai cửa sổ PLIC 2 MiB** (KT-48 — priority/pending/enable ở
 /// cửa sổ thấp, threshold/claim ở cửa sổ cao; đủ context 15 của `MAX_HARTS = 8`). Không map CLINT
-/// (timer qua SBI — KT-47).
+/// (timer qua SBI — KT-47; KT-50 đọc/xoá `sip.SSIP` bằng CSR vì PMP của firmware **không** mở
+/// ACLINT cho S-mode — đo được `load access fault` ở `0x0200_0004`, xem `v2/docs/k3-riscv64.md`
+/// §13.4).
 fn map_mmio(builder: &mut PageTableBuilder<'_>) -> Result<(), MapError> {
     builder.map(
         UART0_BASE as u64,

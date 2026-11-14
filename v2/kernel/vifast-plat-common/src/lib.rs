@@ -39,11 +39,20 @@
 //! DTB bị từ chối, không panic cả máy). [`timer`]/[`plic`] chuyển bộ đếm từ **một hart toàn cục**
 //! (KT-47/KT-48) sang **PerHart** (`TIMER_STATS.get(hart)`/`PLIC_STATS.get(hart)`).
 //!
-//! **Không** thuộc KT-49: IPI (KT-50), ASID/shootdown (KT-51), object layer (KT-52), U-mode
-//! (KT-53), preemption/hotplug — xem `v2/docs/k3-riscv64.md` §12.
+//! KT-50 mở module [`ipi`]: **SBI IPI** (EID `0x735049`), **hộp thư theo hart coalesce theo
+//! kind** (`TlbFlush`/`VmKick`/`Wake`) + bộ đếm `sent/coalesced/local/traps/delivered/spurious`,
+//! hằng **ACLINT MSWI** (dữ kiện nền tảng + host test; arch **không** map/không đọc — D2-76, dùng
+//! `sip.SSIP`) và [`ipi::wait_with_drain`] — vòng chờ **drain
+//! trước** mỗi bước, **timeout luôn kết thúc** (bài học D2-68: chờ ack mà không drain ⇒ deadlock).
+//! [`trap`] thêm ngắt **mã 1** (`scause = (1<<63)|1`, S-software) ⇒ [`trap::Event::Ipi`] — nhánh
+//! **riêng**, không fatal, không nhầm timer (5) hay external (9).
+//!
+//! **Không** thuộc KT-49/50: ASID/shootdown (KT-51), object layer (KT-52), U-mode (KT-53),
+//! preemption/hotplug — xem `v2/docs/k3-riscv64.md` §12/§13.
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod ipi;
 pub mod mmu;
 pub mod plic;
 pub mod smp;

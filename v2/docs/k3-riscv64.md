@@ -125,7 +125,8 @@ stack hart này đè guard hart khác).
   **luôn fatal** (`report_guard_fault` + halt).
 - `PanicHandler` + trait `Platform` + logic trap/MMU thuần nằm ở `vifast-plat-common` nên **các ảnh
   dùng chung một handler**, không chép đôi code.
-- KT-49: ảnh test chính **20 TAP** (`expected.txt` đọc kế hoạch/số `ok`) và `ktest.sh` chạy
+- KT-49/50: ảnh test chính **25 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24) — `expected.txt`
+  đọc kế hoạch/số `ok`; `ktest.sh` chạy
   **matrix `-smp 1|2|4`** (`bash ktest.sh 50 matrix`, log riêng từng N); harness TAP đầy đủ cho
   **toàn bộ** `.scn`/conformance vẫn là **KT-54/55**.
 - KT-47: ảnh **sản phẩm** arm timer + chờ **≥1 tick** (timeout 1 s) rồi in `# timer: ticks=…` —
@@ -144,7 +145,7 @@ stack hart này đè guard hart khác).
 ```bash
 bash v2/test/boot/run.sh 1        # ảnh sản phẩm, 1 boot, 1 hart (D2-72 Q2, KHÔNG icount)
 bash v2/test/boot/run.sh 50       # 50 boot 0 lỗi (DoD KT-46/47)
-bash v2/test/boot/ktest.sh 1 1    # 2 ảnh test: 20 TAP chính + 3 TAP guard (`-icount shift=6`)
+bash v2/test/boot/ktest.sh 1 1    # 2 ảnh test: 25 TAP chính + 3 TAP guard (`-icount shift=6`)
 bash v2/test/boot/ktest.sh 1 matrix  # matrix smp 1/2/4 (KT-49), log riêng từng N
 bash v2/test/boot/ktest.sh 50 matrix # 50 boot **mỗi** N (DoD KT-49)
 bash v2/test/boot/run.sh 50 1     # ảnh sản phẩm 1 hart (không icount)
@@ -276,8 +277,9 @@ Cổng đo (do script thực thi, không phải người):
   instruction (2/4 byte); page fault/access fault/misaligned/`Unknown` **fatal**.
   **KT-47**: `scause = (1<<63) | 5` ⇒ `Event::Timer` (**không** phải exception) — handler đếm tick,
   nạp deadline kế rồi **resume** bằng `sret`. **KT-48**: `scause = (1<<63) | 9` ⇒
-  `Event::Interrupt { code: 9 }` đi vào PLIC **claim → xử lý → complete** (không fatal); ngắt mã
-  khác 5/9 (vd IPI 1 — KT-50) vẫn fatal.
+  `Event::Interrupt { code: 9 }` đi vào PLIC **claim → xử lý → complete** (không fatal).
+  **KT-50**: `scause = (1<<63) | 1` ⇒ `Event::Ipi` (nhánh riêng, không fatal — §13); ngắt mã
+  **khác 1/5/9** vẫn fatal.
 - **`sstatus.SIE` (P2a, KT-47)**: `trap_entry`/handler **không** ghi `sstatus`. Hardware khi trap:
   `SPIE ← SIE`, `SIE ← 0`, `SPP ← 1` ⇒ trapframe có `SPIE=1` (bị ngắt khi đang bật ngắt) và
   `SIE=0`; handler chạy với `SIE=0` nên **không** trap lồng; `sret` khôi phục `SIE ← SPIE`.
@@ -503,7 +505,7 @@ chạy host (D2-72 Q12).
   liên tiếp, có icount), `kt47-boot50.log` (product, không icount),
   `kt47-qemu-no-icount-vs-icount.log` (A/B cùng ảnh) — tài liệu **không** chép số tay (QD §9 Q12).
 
-### 10.6 TAP timer + bằng chứng (ảnh test chính, `1..20` — timer `11..14`)
+### 10.6 TAP timer + bằng chứng (ảnh test chính, `1..25` — timer `11..14`)
 
 | TAP | Điều kiện đo |
 |---|---|
@@ -604,7 +606,7 @@ PLIC nên trả priority 0 là an toàn và `init` đặt lại `priority[10] = 
 | `ok 9 - uart irq` | `IER.TX-empty` + `sie.SEIE` bật; `uart_irqs = UART_IRQ_LIMIT (= 8 `[TK]`) ≥ 1`; `claims == completes`; `last_irq = 10`; `last_iir = 0x2` (TX-empty); handler đã tắt `IER` + enable; `traps_delta == claims`; 0 exception |
 | `ok 10 - plic no fake irq` | **0 IRQ giả**: `spurious = unexpected = 0`; claim sau khi tắt = 0; `external_traps == claims + spurious`; `interrupts_delta == external_traps`; cổng external tắt **im lặng** ~1 ms; 0 exception |
 | `ok 11..14 - timer …` | 4 TAP timer KT-47 chạy **sau** PLIC trong **cùng boot** ⇒ hồi quy timer sau khi bật PLIC (100 tick đơn điệu, 1.000 tick không mất, `scause=0x8…005`, drift [9,11] ms) |
-| `ok 20 - trap nested panic` | trap lồng fatal như KT-45 (boot kết thúc `PANIC` có chủ đích); TAP 15..19 là SMP KT-49 (§12) |
+| `ok 20..24 - ipi …` / `ok 25 - trap nested panic` | KT-50: 5 TAP IPI (20..24, §13.5) rồi trap lồng fatal (KT-45, boot kết thúc `PANIC` có chủ đích); TAP 15..19 là SMP KT-49 (§12) |
 
 Bằng chứng in ra (runner `grep` đúng các dòng, `ktest.sh` — số đo thật nằm trong log, không chép
 tay): `# plic: … ndev=… ctx=… plat_off=1 plat_on=1 threshold=0 priority_uart=1 enable_ctx=1
@@ -771,10 +773,11 @@ barrier_wait_release(round)      hart: chờ released ≥ round
 | `ok 17 - per-hart timer` | mỗi hart tự arm SBI TIME, nhận **100 tick** trong slot PerHart của mình, `first = rdtime` lúc arm, `non_monotonic = 0`; số dòng `# timer hart=h … ok=1` = N |
 | `ok 18 - plic ctx per hart` | mỗi hart context `2*h+1`, context M-mode `2*h` **không** bật, threshold 0, priority UART 1, enable IRQ UART round-trip (bật → đọc lại 1, tắt → đọc lại 0) trên **context của hart**; các context khác nhau; `PLIC_STATS` PerHart không lẫn; số dòng `# plic hart=h … ok=1` = N |
 | `ok 19 - barrier` | vòng 5: đủ arrival, `timeout=0`, hart chậm trễ thật (`slow_delayed=1`); vòng 6: `timeout=1`, `missing` đúng hart không online, `wait_ticks < 1 s`, máy tiếp tục |
-| `ok 20 - trap nested panic` | trap lồng vẫn fatal (KT-45 P2b) — boot kết thúc `PANIC: nested trap …` |
+| `ok 25 - trap nested panic` | trap lồng vẫn fatal (KT-45 P2b) — boot kết thúc `PANIC: nested trap …` |
 
 - `expected.txt` (`v2/test/boot/expected.txt` + sidecar `.license` theo R3) là nguồn duy nhất của
-  kế hoạch/số `ok` (KT-49: ktest 20/20, ktest-guard 3/3); `ktest.sh` kiểm `1..K`, tập `ok 1..K`
+  kế hoạch/số `ok` (KT-49: ktest 20/20; **KT-50: 25/25**, ktest-guard 3/3); `ktest.sh` kiểm
+  `1..K`, tập `ok 1..K`
   không thiếu/lặp, đếm số dòng `ok`. Pha SMP test nằm ở `vifast-kbin-riscv64/src/ktest_smp.rs`.
 - Matrix: `bash v2/test/boot/ktest.sh 50 matrix` chạy **50 boot mỗi N=1/2/4** (main + guard), log
   riêng `/tmp/k3-ktest-{main,guard}-smp<N>-<i>.log`, tổng kết theo N; `ktest.sh` kiểm thêm banner
@@ -823,7 +826,138 @@ barrier_wait_release(round)      hart: chờ released ≥ round
 
 ### 12.9 Không thuộc KT-49
 
-IPI thật + hộp thư drain + `VmKick`/`TlbFlush` (KT-50), ASID/TLB shootdown (KT-51), object layer
-(KT-52), U-mode/syscall (KT-53), harness TAP đầy đủ/conformance (KT-54/55), `FaultKind`/W^X
-(KT-56), soak 1.000 + K3-DOD (KT-57), port core `no_std` (K3b — D2-72 Q13), hotplug/suspend,
-scheduler/preemption đa hart. Xem bảng §9.
+IPI thật + hộp thư drain + `VmKick`/`TlbFlush` (KT-50 — **đã làm**, xem §13), ASID/TLB shootdown
+(KT-51), object layer (KT-52), U-mode/syscall (KT-53), harness TAP đầy đủ/conformance (KT-54/55),
+`FaultKind`/W^X (KT-56), soak 1.000 + K3-DOD (KT-57), port core `no_std` (K3b — D2-72 Q13),
+hotplug/suspend, scheduler/preemption đa hart. Xem bảng §9.
+
+## 13. IPI thật + hộp thư per-hart (KT-50)
+
+Nguồn quyết định: task K3-PLAN §4.1 KT-50; **D2-68** (local flush + ack ngầm, **không**
+self-target; drain hộp thư khi chờ ack), **D2-70** (bài học KT-43 về ngưỡng đo — KT-50 không đổi
+ngưỡng nào), **D2-72 Q4** (`MAX_HARTS = 8`, matrix `1/2/4`), **Q7** (địa chỉ hardcode: ACLINT
+`0x0200_0000`; DTB chỉ kiểm magic), **Q5** (budget 262.144 B), **Q12** (Miri không áp kernel).
+Code: `vifast-plat-common::ipi` (ngữ nghĩa + bộ đếm + `wait_with_drain`, host test được) +
+`vifast-plat-riscv64::ipi` (SBI `ecall`, CSR `sie`/`sip`/`sstatus`) + asm `trap_entry` sẵn có +
+pha test `vifast-kbin-riscv64/src/ktest_ipi.rs` (tách khỏi `ktest_smp.rs` theo R1).
+
+### 13.1 Vì sao IPI và vì sao **không** self-target
+
+Pha SMP KT-49 park hart thứ cấp bằng **spin** vì chưa có IPI; KT-50 thêm đường đánh thức/drain
+thật để KT-51 (`TlbFlush`/shootdown) và K3b (scheduler) có nền. Hai lỗi làm **chết người** (K3-PLAN
+§6.1 R3, D2-68):
+
+1. **Chờ ack mà không drain** hộp thư — hart chờ trong vùng khoá/`SIE = 0` không nhận trap, nên
+   message nằm mãi trong hộp thư ⇒ deadlock thật (đúng lỗi AP→BSP của v1). KT-50 đặt
+   [`wait_with_drain`] làm **primitive duy nhất** để chờ trong vùng khoá: mỗi bước **drain trước**
+   rồi mới kiểm predicate, và **luôn** kết thúc khi `now >= deadline`.
+2. **Self-target lặp** — gửi IPI cho chính hart gọi vừa vô nghĩa vừa **che lỗi thật**: mutation
+   "bỏ flush cục bộ" sẽ sống vì message tự quay về (D2-68 đính chính 2026-11-14). KT-50 giữ
+   **bản không self-target**: `sender == target` ⇒ [`IpiDelivery::Local`] ⇒ **không** gọi SBI IPI,
+   chỉ local flush (khung KT-51) + ack ngầm, cộng bộ đếm `local`; `sent`/`traps` không tăng.
+
+### 13.2 SBI IPI + ngắt mã 1 (tách khỏi timer 5 / external 9)
+
+- **`sbi_send_ipi`** EID `0x735049` ("sPI"), FID 0, `hart_mask` + `hart_mask_base = 0` ⇒ bit thứ
+  `h` của mask **là** hart `h` (khớp `smp::hart_bit`). Gửi bằng `ecall` từ S-mode (firmware
+  OpenSBI v1.8.1 có extension `ipi`); `a0`/`a1` là cặp error/value nên asm khai báo cả hai `inout`.
+- **`scause = (1 << 63) | 1`** = *supervisor software interrupt* ⇒ `decode_scause` trả
+  **`Event::Ipi`** — nhánh **riêng**, không fatal. Ba mã ngắt được tách **tường minh**:
+  `1 → Event::Ipi`, `5 → Event::Timer`, `9 → Event::Interrupt{9}` (PLIC); mã khác vẫn fatal.
+  TAP 24 chứng minh trong **cả** pha IPI: `TRAP_STATS.interrupts` tăng đúng bằng số trap IPI,
+  `TIMER_STATS.ticks` và `PLIC_STATS.uart_irqs` **0**, decode 1/5/9 ra đúng ba nhánh.
+- **Handler**: `trap_dispatch` → `ipi::on_ipi_interrupt()`: đọc `sip.SSIP` **trước** khi xoá (có
+  nguồn thật ⇒ không `spurious`), xoá `sip.SSIP`, `swap(0)` hộp thư của hart, cộng
+  `delivered`/`kinds`; rồi `TRAP_STATS.record_interrupt(code = 1)`; `sret` resume (SIE=0 trong
+  handler nên không trap lồng).
+
+### 13.3 Hộp thư per-hart **coalesce theo kind** + bộ đếm
+
+`Kind` = [`IpiKind`]: `TlbFlush` (khung KT-51 — KT-50 **chưa** làm ASID/`sfence.vma`/ack
+shootdown đầy đủ), `VmKick`, `Wake`. Hộp thư mỗi hart là **một bitmask 3 bit** (`AtomicU64`),
+không phải hàng FIFO: gửi trùng một kind khi kind đó **đang chờ** bị **gộp** — không mất kind,
+không nhân đôi, **không** gửi thêm IPI; kind khác giữ bit riêng nên `drain` một `swap(0)` giao
+**đủ** mọi kind đang chờ. Đây là ngữ nghĩa đúng của §4.17 cho shootdown/wake lặp; khác
+`vifast-sync::Mailbox` (MPSC 7 message có payload, đầy ⇒ `Busy`) — IPI chỉ cần "đánh thức + kind"
+và hàng 3 bit không bao giờ đầy. Bộ đếm `IPI_STATS` (**PerHart**, `const`-init, không `unsafe`):
+`sent` (SBI IPI thật, theo hart gửi), `coalesced`, `local`, `errors`/`last_error`, `traps`,
+`delivered`, `spurious` (trap mà `sip.SSIP` **không** bật), `kinds[3]`. TAP đọc đúng các số này;
+bất biến `posted == delivered + pending` được host test chốt.
+
+### 13.4 Deviation: ACLINT MSWI **không** đọc được từ S-mode ⇒ dùng `sip.SSIP`
+
+K3-PLAN cho phép "ACLINT MSWI nếu cần đọc pending". Đo trên QEMU 11.1.3 + OpenSBI v1.8.1
+(`-smp 2`): đọc `0x0200_0004` (MSIP của hart 1) từ S-mode bị **load access fault**
+(`scause = 5`, `tval = 0x0200_0004`) — PMP của firmware không mở ACLINT cho S-mode (log
+`v2/agent/JOURNAL/kt50-aclint-pmp.log`). Vì vậy arch **không** map/không chạm CLINT; trạng thái
+ngắt phần mềm đọc/xoá bằng **`sip.SSIP`** — cùng một trạng thái theo privileged spec, S-mode được
+phép đọc/ghi, và đó là bit mà trap `scause = (1<<63)|1` phản ánh. Hằng ACLINT (`MSWI_HART_STRIDE`,
+`mswi_offset`, `mswi_address`, `msip_pending`) vẫn ở `plat-common` làm dữ kiện nền tảng + host test;
+`mmu::map_mmio` **không** map CLINT (giữ nguyên như KT-47/48). Đây là deviation **đo được**, không
+phải nới ngưỡng; ghi ở đây + JOURNAL/STATE. **Agent 0 đã chốt D2-76**: `sip.SSIP` là **nguồn sự
+thật** cho IPI S-mode (gửi qua SBI EID `0x735049`, xoá pending bằng `csrc sip, SSIP`), **cấm** map
+CLINT vào MMIO kernel (giữ D2-72 Q7); đây là cách đúng theo privileged spec, không phải workaround.
+
+### 13.5 TAP 20..25 (ảnh test chính) + runner theo `-smp`
+
+| TAP | Điều kiện đo (log `# ipi …`) |
+|---|---|
+| `ok 20 - 100 ipi delivered` / `ok 20 - 100 ipi traps (self)` | `-smp ≥ 2`: BSP gửi **100** IPI tới **một** peer (hart online nhỏ nhất khác BSP), kind luân phiên `TlbFlush/VmKick/Wake` và **đợi từng delivery** trước khi gửi tiếp ⇒ `sent=100`, `delivered=100`, `traps=100`, `coalesced=0`, `spurious=0`, per-kind `34/33/33` (**không mất, không nhân đôi**). `-smp 1`: không có hart đích ⇒ đo 100 IPI **tự gửi** bằng SBI `send_ipi_raw` (vẫn là đường SBI + trap + drain thật) với `traps=100`, log ghi `mode=self-ipi` — **không** giả là 2 hart |
+| `ok 21 - ipi drain khi cho ack` | hai hart **tắt `sstatus.SIE`** (vùng "đang giữ khoá"), mỗi hart `post(TlbFlush)` cho peer rồi chờ bằng `wait_drain` (drain trong vòng chờ) cho tới khi hộp thư **của mình** giao ≥ 1 kind; cả hai `ok`, `traps_delta = 0/0` (**không** nhờ ngắt); thêm một lần chờ predicate không bao giờ đúng với timeout 50 ms phải **hết** rồi đi tiếp (`timeout_ended=1`, số `drain` tăng) — hart chết chỉ làm TAP đỏ, không treo máy |
+| `ok 22 - self-target khong gui` | **mọi** hart online tự gửi `TlbFlush` cho chính mình: `PostOutcome::Local`, `sent`/`traps` **không** tăng, `local` +1, `delivered` +1, `kinds[TlbFlush]` +1 (local flush + ack ngầm — D2-68) |
+| `ok 23 - coalesce khong mat kind` | 5 × `TlbFlush` + 1 × `VmKick` tới peer: `coalesced=4`, chỉ **2** SBI IPI (`sent_delta=2`), hộp thư đích đang chờ **đúng** `{TlbFlush, VmKick}`, một `drain` giao **đủ** 2 kind. `-smp 1`: cùng bất biến kiểm **trên hộp thư tại chỗ** (không có hart đích để gửi IPI), log `mode=mailbox` |
+| `ok 24 - ipi khong nham timer/external` | trong **cả** pha: `TRAP_STATS.interrupts` tăng đúng bằng số trap IPI, `TIMER_STATS.ticks` 0, `PLIC_STATS.uart_irqs` 0, `last_scause = 0x8000_0000_0000_0001`, `last_code = 1`, decode 1/5/9 ra `Ipi`/`Timer`/`Interrupt{9}` |
+| `ok 25 - trap nested panic` | trap lồng vẫn fatal (P2b) — boot kết thúc `PANIC: nested trap …` + halt (dời từ 20 sang 25 vì KT-50 thêm TAP 20..24) |
+
+- `expected.txt` là nguồn duy nhất của kế hoạch/số `ok` (KT-50: **ktest 25/25**, guard 3/3).
+- `ktest.sh` grep thêm bằng chứng IPI **theo `-smp`**: `-smp ≥ 2` đòi `mode=cross` với
+  `delivered=100/traps=100/kinds=34/33/33`, drain `mutual=1`, coalesce `mode=cross sent_delta=2`;
+  `-smp 1` đòi `mode=self-ipi` (`delivered=0`, `traps=100`), drain `mode=self-wait`, coalesce
+  `mode=mailbox` — hai cấu hình khác nhau **cùng** một bộ bất biến nên không có "xanh hình thức".
+- Ở `-smp 4` chỉ **một** peer làm phép đo chéo (đúng phạm vi "100 IPI 2 hart"); các hart còn lại
+  tham gia barrier + self-target và không tham gia phép đo chéo (log ghi `peer=…`).
+- Runner đọc TAP 15..19 như cũ; TAP 20..24 nằm trong `ktest_ipi.rs`, TAP 25 in trước khi kích hoạt
+  nested trap.
+
+### 13.6 Ngân sách và ảnh hưởng kích thước
+
+- Toàn bộ trạng thái IPI là `static` nhỏ trong `.bss` (hộp thư `MAX_HARTS × 6` từ, bộ đếm
+  `MAX_HARTS × 9`…), **không** cấp phát, **không** thêm page table/bảng mới (không map CLINT); vì
+  vậy `.data+.bss` vẫn dưới trần 262.144 B (D2-72 Q5) và **không** đụng `.stack`/`.hart_stacks`.
+- Số đo budget thật của ba ảnh nằm trong `v2/agent/JOURNAL/kt50-budget.log` (QD §9 Q12 — tài liệu
+  không chép số tay).
+
+### 13.7 Giới hạn phép đo (đọc kèm §13.8)
+
+1. **`-smp 1` không có phép đo chéo**: đo 100 IPI tự gửi (SBI + trap thật) và các bất biến
+   self-target/coalesce/timeout; **không** claim "100 IPI 2 hart" cho cấu hình 1 hart. Log ghi rõ
+   `mode=self-ipi`.
+2. **QEMU `-icount` chia lượt vCPU thô**: mỗi delivery chéo là một lượt M-mode + `sret` + trap nên
+   pha 100 delivery có thể chiếm **hàng giây thời gian ảo** (log `kt50-ipi.log` in `wait_ticks`);
+   timeout mỗi delivery là `IPI_DELIVERY_TIMEOUT` (100 ms) và barrier phía AP là
+   `IPI_TRAP_PHASE_TIMEOUT` (10 s). Đây là **biên thời gian của máy ảo**, không phải ngưỡng DoD
+   (DoD KT-50 chỉ đòi 100/100 không mất/nhân đôi).
+3. **Không đo tần suất/latency IPI** so với thời gian thật: `-icount shift=6` (D2-74) là thời gian
+   **ảo**; muốn đo jitter IPI là task riêng (như §10.5).
+4. **Số IPI 100 là "kind được giao"**, không phải "số lần SBI trả về": với coalesce, một IPI có
+   thể giao 1 kind; phép đo tuần tự từng delivery để `delivered = traps = 100` ở `-smp ≥ 2`.
+   Bằng chứng ngược (coalesce thật) ở TAP 23: 2 IPI giao 2 kind từ 6 post.
+5. **Chỉ một peer**: `-smp 4` không đo 3 cặp đồng thời; drain theo cặp là đủ cho contract
+   "MPSC hộp thư per-hart", nhưng **không** chứng minh đa người gửi đồng thời ở mức phần cứng
+   (host test kiểm MPSC/atomic; KT-51/57 sẽ dùng nhiều hart hơn).
+6. **Không timeout bằng ngắt timer trong handler IPI**: `wait_drain` timeout dùng `rdtime` + spin
+   (giống barrier KT-49); timer vẫn tắt trong pha IPI (TAP 24 chứng minh). Timer-based timeout
+   đầy đủ là KT-51 (shootdown) khi có deadline thật.
+7. **`traps_delta = 0` khi `SIE = 0` chỉ chứng minh ngắt *không được nhận*** (không vào `stvec`),
+   **không** chứng minh IPI **không tới**: phần cứng/firmware vẫn có thể đã đặt `sip.SSIP`/pending,
+   và kind vẫn tới **hộp thư** — đúng thứ vòng chờ drain rồi giao. Muốn chứng minh "không có IPI
+   nào tới trong vùng khoá" phải đọc pending (`sip.SSIP`) **trước/sau** và đếm riêng; KT-50 chỉ
+   cần chứng minh tiến trình **không phụ thuộc trap** (TAP 21: cả hai xong, `traps_delta=0`).
+   Phép đo "IPI tới nhưng bị che" đầy đủ thuộc KT-51 (shootdown ack + timeout), không claim ở đây.
+
+### 13.8 Không thuộc KT-50
+
+ASID + `sfence.vma` + shootdown ack đầy đủ (KT-51) — KT-50 chỉ đặt **khung** kind `TlbFlush` +
+drain; object layer (KT-52), U-mode/syscall (KT-53), harness đầy đủ/conformance (KT-54/55),
+`FaultKind`/W^X (KT-56), soak 1.000 + K3-DOD (KT-57), port core `no_std` (K3b), preemption/
+scheduler đa hart, hotplug/suspend. Xem bảng §9.

@@ -176,6 +176,13 @@ pub fn current_hart() -> usize {
     Riscv64Virt.hart_id()
 }
 
+/// Hart **boot** (hart chạy `rust_main`) — [`init`] ghi lại từ `current_hart()`, không hardcode 0
+/// (OpenSBI có thể chọn boot hart khác 0 khi `-smp 4`, đã đo ở KT-49). Hart thứ cấp dùng giá trị
+/// này để biết BSP là ai trong pha IPI (KT-50).
+pub fn boot_hart() -> usize {
+    BOOT_HART.load(Ordering::SeqCst) as usize
+}
+
 /// `rdtime` hiện tại (timebase) — timeout của bring-up/barrier.
 fn now() -> u64 {
     timer::now_ticks()

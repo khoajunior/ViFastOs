@@ -112,7 +112,7 @@ fn alive_phase() -> u64 {
 }
 
 /// BSP chạy một vòng barrier: công bố vòng, tự đến, chờ đủ arrival (timeout), rồi phát release.
-fn bsp_barrier(round: u64, expected: u64, timeout_ticks: u64) -> (u64, bool, u64) {
+pub(crate) fn bsp_barrier(round: u64, expected: u64, timeout_ticks: u64) -> (u64, bool, u64) {
     smp::barrier_begin(round, expected);
     let start = now_ticks_test();
     let _ = smp::barrier_join(round, timeout_ticks);
@@ -122,7 +122,7 @@ fn bsp_barrier(round: u64, expected: u64, timeout_ticks: u64) -> (u64, bool, u64
 }
 
 /// Hart thứ cấp chạy một vòng barrier: chờ vòng được công bố, đến, chờ release.
-fn ap_barrier(round: u64, timeout_ticks: u64) -> bool {
+pub(crate) fn ap_barrier(round: u64, timeout_ticks: u64) -> bool {
     smp::barrier_join(round, timeout_ticks) && smp::barrier_wait_release(round, timeout_ticks)
 }
 
@@ -300,7 +300,8 @@ pub extern "C" fn rust_secondary_main(hart: usize, opaque: usize) -> ! {
     ARRIVE_TIME[hart].store(now_ticks_test(), Ordering::SeqCst);
     let _ = ap_barrier(ROUND_BARRIER, smp::BARRIER_TIMEOUT_TICKS);
     let _ = ap_barrier(ROUND_TIMEOUT, smp::BARRIER_TIMEOUT_TICKS);
-    park_hart()
+    // KT-50: pha IPI (TAP 20..24) — AP tham gia tới `ROUND_COALESCE_RESULT` rồi park.
+    crate::ktest_ipi::secondary_phase(hart)
 }
 
 /// Pha SMP trên **BSP**: bring-up SBI HSM + 5 TAP (15..19). Trả số fail (0 = xanh).

@@ -33,6 +33,13 @@
 //! một hart) và phát hiện trap lồng theo địa chỉ trap stack per-hart; `trap_dispatch` ghi
 //! `hart_id()`/trapframe vào bộ trạng thái SMP để TAP chứng minh `TP`/`sscratch` per-hart.
 //!
+//! KT-50 mở module [`ipi`] (IPI thật): SBI `send_ipi` (EID `0x735049`) + ACLINT MSWI, `post` vào
+//! **hộp thư per-hart** (coalesce theo kind `TlbFlush`/`VmKick`/`Wake`), `post` **self-target**
+//! đi đường local (không IPI — D2-68). `trap_dispatch` có nhánh [`Event::Ipi`] (`scause = (1<<63)
+//! | 1`, **không** fatal, **không** nhầm timer 5/external 9): xoá MSIP rồi drain hộp thư.
+//! [`wait_drain`] = vòng chờ **drain trước mỗi bước** + timeout (`rdtime`) nên chờ ack không
+//! deadlock và hart chết chỉ làm TAP đỏ. `park_forever` drain trong lúc park.
+//!
 //! Địa chỉ UART/PLIC/CLINT là **dữ kiện nền tảng QEMU virt** (D2-72 Q7), không phải hằng số thiết
 //! kế `[TK]`; `spec/kernel.toml` **không** mở ở K3 (D2-72 Q1) nên chúng nằm ở đây và ở
 //! `v2/docs/k3-riscv64.md`.
@@ -51,11 +58,12 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use vifast_plat_common::trap::{
     decode_trap, handle_trap, report_fatal, report_guard_fault, report_interrupt, tf_reg_offset,
     Event, ExceptionKind, TrapAction, TrapFrame, GUARD_STATS, INTERRUPT_SUPERVISOR_EXTERNAL,
-    INTERRUPT_SUPERVISOR_TIMER, TF_SCAUSE_OFFSET, TF_SEPC_OFFSET, TF_SIZE, TF_SSTATUS_OFFSET,
-    TF_STVAL_OFFSET, TRAP_STATS,
+    INTERRUPT_SUPERVISOR_SOFTWARE, INTERRUPT_SUPERVISOR_TIMER, TF_SCAUSE_OFFSET, TF_SEPC_OFFSET,
+    TF_SIZE, TF_SSTATUS_OFFSET, TF_STVAL_OFFSET, TRAP_STATS,
 };
 use vifast_plat_common::{Platform, PlatformWriter};
 
+pub mod ipi;
 pub mod mmu;
 pub mod plic;
 pub mod smp;
@@ -383,6 +391,7 @@ pub extern "C" fn trap_dispatch(tf: &mut TrapFrame) {
                 }
                 TrapAction::Interrupt { .. } => unreachable!("decode_trap đã trả Exception"),
                 TrapAction::Timer => unreachable!("decode_trap đã trả Exception"),
+                TrapAction::Ipi => unreachable!("decode_trap đã trả Exception"),
             }
         }
         // KT-47: ngắt **S-mode timer** thật (scause bit 63 + mã 5). Handler chạy với `SIE = 0`
@@ -404,6 +413,14 @@ pub extern "C" fn trap_dispatch(tf: &mut TrapFrame) {
         Event::Interrupt { code } if code == INTERRUPT_SUPERVISOR_EXTERNAL => {
             let _ = plic::on_external_interrupt();
             TRAP_STATS.record_interrupt(&saved, code);
+        }
+        // KT-50: ngắt **phần mềm S-mode** (mã 1) = IPI thật. Handler xoá MSIP của hart đang chạy
+        // rồi drain hộp thư per-hart; **không** fatal và **không** đi qua nhánh timer (5)/
+        // external (9). Drain ở đây là "drain trong handler" (yêu cầu KT-50); đường chờ khoá dùng
+        // `ipi::wait_drain` để drain cả khi `SIE = 0`.
+        Event::Ipi => {
+            let _ = ipi::on_ipi_interrupt();
+            TRAP_STATS.record_interrupt(&saved, INTERRUPT_SUPERVISOR_SOFTWARE);
         }
         Event::Interrupt { code } => {
             TRAP_STATS.record_interrupt(&saved, code);
@@ -527,10 +544,15 @@ pub fn debug_put_str_atomic(s: &str) {
     debug_lock_do(|| debug_put_str(s));
 }
 
-/// Park vô hạn (hart thứ cấp sau khi xong/không cần chạy) — spin nhẹ, không `wfi` (K3 chưa có IPI
-/// để đánh thức; KT-50).
+/// Park vô hạn (hart thứ cấp sau khi xong/không cần chạy) — spin nhẹ, không `wfi`.
+///
+/// KT-50: trong lúc park vẫn **drain hộp thư của chính hart** mỗi vòng (D2-68 — chờ mà không
+/// drain là deadlock: kind `Wake`/`TlbFlush` gửi tới hart đang park sẽ không bao giờ được xử lý
+/// nếu chỉ dựa vào trap). `wfi` vẫn chưa dùng: QEMU `-icount` chỉ tiến thời gian khi vCPU chạy
+/// (KT-47/KT-49) và K3 chưa có scheduler đa hart.
 pub fn park_forever() -> ! {
     loop {
+        let _ = ipi::drain_current();
         core::hint::spin_loop();
     }
 }

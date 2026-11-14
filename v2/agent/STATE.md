@@ -4,50 +4,88 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `1cc67908` ([KT-49] SMP: SBI HSM + PerHart — commit chỉ `v2/`; parent `808695a0` = [KT-00] Agent 0 mở KT-49, không chạm)
-BUILD_ID      : — (ảnh K3 KT-49: `vifast-kbin-riscv64` 64.400 B, `vifast-kbin-ktest` 98.872 B, `vifast-kbin-ktest-guard` 52.376 B — `JOURNAL/kt49-budget.log`/`kt49-ktest-*.log`)
-Task          : **KT-49 (SMP: SBI HSM + PerHart)** — **DONE (`reviewer-kt49` DRIFT, **không** UNSAFE; 4 mục đã vá)**:
-                SBI HSM EID `0x48534D` — hart **boot** (theo `a0`, không hardcode 0) start hart `1..N-1` bằng
-                `sbi_hart_start(h, _start_secondary, opaque="KT49")`, barrier online, `hart_start` lỗi/hart ngoài DTB
-                (`hart_get_status = -3`) **log + từ chối, KHÔNG panic cả máy**; `MAX_HARTS = 8` `[TK]`.
-                **PerHart**: 8 record NOLOAD `guard 4 KiB | stack 64 KiB | trap stack 16 KiB` (`HART_STRIDE = 0x1_5000`,
-                tổng `0xA_8000`); guard **riêng từng hart** NONE ở identity/nửa cao/physmap; `_start`/`_start_secondary`
-                tính `sp`/`sscratch` theo hart; `trap_entry` dùng trap stack **của hart đang chạy** (nested per-hart);
-                `TP`/`sscratch`/`stvec` per-hart; `TimerStats`/`PlicStats` thành **PerHart** (`get(hart)`), handler chỉ
-                cộng slot của hart mình; PLIC `init_hart` đặt threshold/enable **context `2*h+1`** của hart (M-mode
-                `2*h` **tắt**), enable round-trip; `HartMask` + barrier có timeout (`released` tăng đơn điệu — bug đua
-                đã sửa; hart chậm **5 ms** vẫn qua; vòng kỳ vọng hart **không tồn tại** timeout **200 ms** rồi đi tiếp).
-                Ảnh test **20 TAP** (15..19 SMP, 20 trap lồng; pha SMP tách `ktest_smp.rs` theo R1), `expected.txt` +
-                sidecar; `ktest.sh` **matrix `-smp 1|2|4`**, log riêng từng N, kiểm `Platform HART Count` của OpenSBI;
-                ảnh sản phẩm bring-up SMP (hart lỗi chỉ `# smp: WARN`, **không panic**; `run.sh` đỏ nếu `harts ≠ -smp N`);
-                ảnh guard dùng guard **của hart boot thật** (tái hiện `Domain0 Boot HART: 3` ở `-smp 4` không icount,
-                vẫn 3/3 TAP). Host **55/55**; ktest **20/20 + 3/3**, **50 boot mỗi N = 300/300 sạch**; post-drift
-                **60/60**; product **50/50 smp1 + 50/50 smp4** (không icount); gate **569**; budget **1752/2648/1600 B**
-                trên trần 262.144 (`.stack`/`.trap_stack`/`.hart_stacks` NOLOAD báo riêng).
-Bước          : 8/8 xong (baseline gate 569 + ktest 15/3 → **đỏ trước** runner mới trên ảnh KT-48 `0/2`
-                (`kt49-red-ktest.log`) → `plat-common::smp` + PerHart timer/plic + host test 9 (46→55) → linker per-hart
-                + `_start`/`_start_secondary` + trap entry/sscratch per-hart → `arch::smp` (HSM/barrier/report) + mmu
-                guard per-hart/adopt satp + plic init_hart → ảnh test 20 TAP (`ktest_smp.rs`) + product/guard + runner
-                matrix/expected.txt → 300/300 boot, product 50/50×2, gate 569 → reviewer **DRIFT**: 5 ms thật, guard
-                theo hart boot, docs giới hạn timer PerHart dưới icount, nit comment/boot hart → vá + 60/60 + gate 569
-                → commit `[KT-49]`; `[KT-49b]` cập nhật HEAD + verdict + push)
+HEAD          : `d598bf2d` ([KT-00] Agent 0 ghi D2-76 — IPI S-mode dùng `sip.SSIP`; commit code KT-50 kế tiếp chỉ `v2/`)
+BUILD_ID      : — (ảnh K3 KT-50: `vifast-kbin-riscv64` 65.896 B, `vifast-kbin-ktest` 130.536 B, `vifast-kbin-ktest-guard` 53.832 B — `JOURNAL/kt50-budget.log`)
+Task          : **KT-50 (IPI thật + drain hộp thư per-hart)** — **xong mã, đã review độc lập (`reviewer-kt50` = DRIFT nhẹ, 6/6 mục đã vá; không UNSAFE)**:
+                **SBI IPI** EID `0x735049` (FID 0, `hart_mask_base=0`) ⇒ `scause = (1<<63)|1`;
+                `trap.rs` tách **tường minh** 1/5/9 (`Event::Ipi`/`Timer`/`Interrupt{9}`) nên IPI **không** fatal
+                và **không** nhầm timer (5)/external (9). **Hộp thư per-hart coalesce theo kind** `TlbFlush`/
+                `VmKick`/`Wake` (bitmask 3 bit, không cấp phát): gửi trùng ⇒ gộp (không mất kind, không gửi thêm IPI),
+                `drain` một `swap(0)` giao đủ kind; bộ đếm PerHart `sent/coalesced/local/errors/traps/delivered/
+                spurious/kinds[3]`; **không self-target** (D2-68): `post(self)` ⇒ local flush + ack ngầm, `sent`/`traps`
+                không tăng; **drain cả khi chờ khoá**: `wait_with_drain` drain **trước mỗi bước** + timeout luôn hết
+                (bài học D2-68), `park_forever` cũng drain. **Deviation D2-76**: S-mode không đọc được ACLINT MSWI
+                (PMP chặn — `load access fault` `scause=5 stval=0x0200_0004`, log `kt50-aclint-pmp.log`) ⇒ dùng
+                **`sip.SSIP`** đọc/xoá pending, **không** map CLINT. TAP **20..24** (`100 ipi delivered` 2 hart
+                `delivered=traps=100` kinds `34/33/33`; drain khi chờ ack `traps_delta=0/0` + timeout hết; self-target
+                không gửi; coalesce 6 post ⇒ 2 IPI/2 kind; không nhầm timer/external), dời trap lồng sang **25**
+                (`expected.txt` 25/25 + guard 3/3); `ktest.sh` grep bằng chứng IPI **theo `-smp`** (`≥2` cross,
+                `1` self-ipi — không giả 2 hart). Host test **67/67** (thêm 12 IPI: 10 lõi + 2 theo D2-77/D4).
+Bước          : 8/8 xong (baseline gate **569/73** + baseline ktest 20/20+3/3 → **đỏ trước** (host `unresolved
+                import ipi`; runner 25 TAP trên ảnh KT-49 `0/2`) → `plat-common::ipi` + `Event::Ipi`/decode
+                1/5/9 + host test 10 → `arch::ipi` (SBI IPI, `sip.SSIP`, post/drain/wait_drain) + `trap_dispatch`
+                nhánh IPI + `park_forever` drain + `boot_hart()` → `ktest_ipi.rs` TAP 20..24 + runner/expected
+                → 300 boot **300/300** (sau vá) + product `run.sh 1 2` PASS + budget + gate **569/73** → review
+                độc lập → commit `[KT-50]` + `[KT-50b]` cập nhật HEAD/verdict/push)
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test, 0 failed** (`JOURNAL/kt49-gate-fast.log`); baseline cùng số
-                (`JOURNAL/kt49-baseline-gate-fast.log`). Kernel **không** nằm trong `gate --fast` (`v2/Cargo.toml`
-                `exclude = ["kernel"]`) — kernel kiểm bằng build 3 ảnh + `ktest.sh` (**icount shift=6**, D2-74) +
-                `run.sh` (**không icount**, D2-72 Q2) + host test **55/55**
-                (`JOURNAL/kt49-{host-tests,ktest-smp1,ktest-smp2,ktest-smp4,boot50-matrix,ktest-postdrift-10x3,
-                product-boot50-smp1,product-boot50-smp4,budget,guard-boothart3}.log`).
-Miri          : KT-49 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO (D2-72 Q12); Miri vẫn áp `lib/` + sim. Phần **logic**
-                SMP chạy host: `cargo test -p vifast-plat-common` **55/55** = 14 host KT-45 + 8 MMU + 12 timer + 12 PLIC
-                + **9 SMP KT-49** (`tests/smp.rs`: bố cục record 8 hart không chồng/căn trang, guard owner, `HartMask` +
-                hart ngoài dải, phân loại HSM/`start_decision` (từ chối hart ngoài DTB, không panic), `PerHartTimerStats`/
-                `PerHartPlicStats` không lẫn).
-Việc dở       : **`reviewer-kt49` DRIFT (không UNSAFE)**, 4 mục đã vá trước commit; đã commit `[KT-49]` + push;
-                `[KT-49b]` cập nhật HEAD + verdict + push. Kế tiếp Agent 0 lật KT-49 DONE → mở KT-50 (IPI + drain hộp
-                thư). `viscript/` + `review/` + `out-b.log`… của tab khác **không chạm** (chỉ stage `v2/`); không sửa
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt50-gate-fast.log`);
+                baseline cùng số (`JOURNAL/kt50-baseline-gate-fast.log`). Kernel **không** nằm trong `gate --fast`
+                (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm bằng build 3 ảnh + `ktest.sh` (**icount
+                shift=6**, D2-74) + `run.sh` (**không icount**, D2-72 Q2) + host test **67/67**
+                (`JOURNAL/kt50-{host-tests,ktest-smp1,ktest-smp2,ktest-smp4,boot50-matrix,ipi,
+                product-boot-smp2,budget}.log` + `kt50-review.md`).
+Miri          : KT-50 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO/CSR (D2-72 Q12); Miri vẫn áp `lib/` + sim.
+                Phần **logic** IPI chạy host: `cargo test -p vifast-plat-common` **67/67** = 14 host KT-45 + **12 IPI
+                KT-50** + 8 MMU + 12 timer + 12 PLIC + 9 SMP (`tests/ipi.rs`: coalesce không mất kind + bất biến
+                `posted = delivered + pending`, drain mỗi kind đúng một lần, self-target local, bộ đếm
+                sent/coalesced/traps/delivered/spurious, PerHart không lẫn, `wait_with_drain` drain trước mỗi bước +
+                timeout phải hết, decode 1/5/9 không nhầm).
+Việc dở       : **review độc lập `reviewer-kt50` = DRIFT nhẹ (không UNSAFE)** — 6 mục D1..D6 đã vá **trước commit**
+                (`JOURNAL/kt50-review.md`): D1 comment ngược D2-76, D2 số 20→25 TAP + "khác 1/5/9", D3 **D2-77**
+                (`classify_post`: hart valid nhưng offline ⇒ `Invalid`, không SBI, không giữ kind + test), D4 SBI lỗi ⇒
+                `unpost` gỡ bit + test, D5 TAP 20 đổi tên theo cấu hình (`100 ipi traps (self)` ở `-smp 1`), D6 log 300
+                boot sạch + `kt50-ipi.log`. Host sau vá **67/67**. **300 boot sau vá: `# KTEST: 300/300`, 0 `not ok`**
+                (`JOURNAL/kt50-boot50-matrix.log`, ảnh `sha256 bfdd7785…`/`8b088aa3…`) — log lần trước bị hai lần chạy
+                ghi cùng tệp nên đã chạy lại sạch; bài học: **không** redirect cùng tệp log cho nhiều lần chạy.
+                `viscript/` + `review/` + `out-b.log`… của tab khác **không chạm** (chỉ stage `v2/`); không sửa
                 QUEUE/DECISIONS/AGENTS/spec/sim/.scn; không thêm dependency; `unsafe` chỉ `kernel/vifast-plat-*`.
 ```
+
+## KT-50 — IPI thật + drain hộp thư per-hart (SBI IPI, `Event::Ipi`, coalesce theo kind)
+
+**Vào**: READY; HEAD `6268e4d5` ([KT-00] mở KT-50; parent code KT-49 `1cc67908`); `HEAD..origin/main = 0`; working tree có
+`viscript/` + `review/` của tab khác — **không chạm**; baseline gate **569/73** (`JOURNAL/kt50-baseline-gate-fast.log`),
+baseline ktest KT-49 **20/20 + 3/3** (`JOURNAL/kt50-baseline-ktest.log`).
+
+**Mục tiêu** (K3-PLAN §4.1 KT-50 + **D2-68** + **D2-76**): SBI IPI tới `hartmask`; `scause=(1<<63)|1` ⇒ **nhánh riêng**
+`Event::Ipi` (không fatal, không nhầm timer 5/external 9); hộp thư per-hart `post(hart, Kind)` + `drain()` trong handler,
+`Kind = TlbFlush/VmKick/Wake`; đếm `sent/delivered/coalesced/spurious`; gửi trùng **coalesce** không mất kind;
+**không self-target** (local flush + ack ngầm); **drain cả khi chờ khoá** (D2-68: chờ ack mà không drain ⇒ deadlock).
+
+**Thay đổi**: `plat-common::ipi` (mới — hằng SBI IPI/MSWI, `IpiKind`/`KindSet`, `IpiMailbox` coalesce, `IPI_STATS`
+PerHart, `delivery_for`, `wait_with_drain`) + `trap.rs` (`INTERRUPT_SUPERVISOR_SOFTWARE=1`, `Event::Ipi`,
+`TrapAction::Ipi`, decode 1/5/9) + `tests/ipi.rs` (10 test) + `tests/host.rs` (**1 kỳ vọng cũ đổi**: mã ngắt 1 nay là
+`Event::Ipi`, đúng hợp đồng KT-50 — ghi ở journal §3.1); `plat-riscv64::ipi` (mới — SBI `ecall`, `sip.SSIP` đọc/xoá,
+enable/disable SSIE, `post`/`drain`/`on_ipi_interrupt`/`wait_drain`), `lib.rs` (nhánh `Event::Ipi` trong `trap_dispatch`,
+`park_forever` drain), `smp.rs` (`boot_hart()`), `mmu.rs` (doc: **không** map CLINT — D2-76); `ktest_ipi.rs` (mới — TAP
+20..24, barrier 7..13, `-smp 4` chỉ một peer), `ktest_smp.rs` (hook AP), `ktest.rs` (plan `1..25`, dời nested 20→25);
+`expected.txt` (`ktest 25 25`), `ktest.sh` (grep TAP 20..25 + bằng chứng IPI theo `-smp`); `docs/k3-riscv64.md` §13.
+
+**Bằng chứng**: host **67/67**; `ktest.sh 1 matrix` **6/6** (25/25 + guard 3/3); **300 boot** `50 × 1/2/4` →
+**`# KTEST: 300/300`, 0 `not ok`** (`JOURNAL/kt50-boot50-matrix.log`; lần chạy đầu trước vá có dòng tổng bị lẫn do
+hai tiến trình ghi cùng tệp — đã chạy lại **sạch**, không đổi tiêu chí); `run.sh 1 2` PASS
+(`kt50-product-boot-smp2.log`); budget sản phẩm **2840 B**, ktest **4304 B**, guard **2688 B** trên trần 262.144
+(`kt50-budget.log`); gate **569/73** (`kt50-gate-fast.log`); TAP mẫu `kt50-ktest-smp{1,2,4}.log`.
+
+**Deviation D2-76** (đo được, không nới ngưỡng): S-mode đọc ACLINT MSWI `0x0200_0004` ⇒ `load access fault`
+(`scause=5`, `tval=0x0200_0004`; PMP firmware chặn, `kt50-aclint-pmp.log`) ⇒ **`sip.SSIP`** là nguồn sự thật cho IPI
+S-mode, xoá pending bằng `csrc sip, SSIP`; **cấm** map CLINT/MSWI vào MMIO kernel; ghi §13.4.
+
+**Giới hạn** (ghi §13.7): `-smp 1` không có hart đích ⇒ TAP 20 đo 100 IPI **tự gửi** (`mode=self-ipi`, không giả 2 hart),
+TAP 23 kiểm coalesce trên hộp thư tại chỗ (`mode=mailbox`); `-smp 4` chỉ một peer cho phép đo chéo; pha 100 delivery
+chiếm ~5 s **thời gian ảo** dưới `-icount` (log `# ipi phase1 wait_ticks`); `traps_delta=0` khi `SIE=0` chỉ chứng minh
+ngắt **không được nhận**, **không** chứng minh IPI không tới (kind vẫn vào hộp thư + được drain) — phép đo đầy đủ
+thuộc KT-51.
 
 ## KT-49 — SMP: SBI HSM + PerHart (stack/trap/guard riêng mỗi hart, barrier, PLIC/timer theo hart)
 

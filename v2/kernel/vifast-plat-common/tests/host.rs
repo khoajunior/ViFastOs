@@ -193,8 +193,12 @@ fn decode_scause_du_15_ma_va_interrupt() {
             other => panic!("scause {code} phải là Exception, được {other:?}"),
         }
     }
-    match decode_scause(SCAUSE_INTERRUPT | 1) {
-        Event::Interrupt { code } => assert_eq!(code, 1),
+    // KT-50: ngắt phần mềm S-mode (mã 1) = **IPI** — nhánh riêng `Event::Ipi`, KHÔNG còn là
+    // `Event::Interrupt` (đổi hành vi có chủ đích theo KT-50; xem `tests/ipi.rs`).
+    assert_eq!(decode_scause(SCAUSE_INTERRUPT | 1), Event::Ipi);
+    // Ngắt mã khác 1/5/9 vẫn là Interrupt (fatal ở arch).
+    match decode_scause(SCAUSE_INTERRUPT | 7) {
+        Event::Interrupt { code } => assert_eq!(code, 7),
         other => panic!("scause interrupt phải là Interrupt, được {other:?}"),
     }
     // KT-47: ngắt S-mode timer (mã 5) decode thành Event::Timer — KHÔNG phải Exception/Interrupt.

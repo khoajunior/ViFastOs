@@ -20,7 +20,13 @@
 //!
 //! KT-48: ngắt **external** mã **9** ([`INTERRUPT_SUPERVISOR_EXTERNAL`]) ⇒ `Event::Interrupt
 //! { code: 9 }`; `vifast-plat-riscv64::trap_dispatch` đưa vào PLIC **claim → xử lý → complete**
-//! (không fatal — K3-PLAN §4.1 KT-48). Ngắt mã khác 5/9 (vd IPI 1 — KT-50) vẫn fatal.
+//! (không fatal — K3-PLAN §4.1 KT-48). Ngắt mã khác 5/9 **vẫn fatal**.
+//!
+//! KT-50: ngắt **phần mềm S-mode** mã **1** ([`INTERRUPT_SUPERVISOR_SOFTWARE`]) ⇒
+//! [`Event::Ipi`] — nhánh **riêng**, không fatal: `trap_dispatch` xoá **`sip.SSIP`** của hart
+//! đang chạy (D2-76; **không** đọc ACLINT MSWI vì PMP firmware chặn — xem
+//! `v2/docs/k3-riscv64.md` §13.4) rồi **drain hộp thư per-hart** ([`crate::ipi`]). Ba mã ngắt
+//! được tách **tường minh** (1/5/9) để IPI không bị xử lý như timer hay external.
 //!
 //! ## Bố cục trapframe (288 B, 8-byte aligned)
 //!
@@ -54,6 +60,15 @@ pub const INTERRUPT_SUPERVISOR_EXTERNAL: u64 = 9;
 /// SBI TIME (`sbi_set_timer`) + `sie.STIE` ⇒ ngắt vào `stvec` với `scause = (1<<63) | 5`; decode
 /// thành [`Event::Timer`] (**không** phải exception — [`ExceptionKind`] chỉ dành cho bit 63 = 0).
 pub const INTERRUPT_SUPERVISOR_TIMER: u64 = 5;
+
+/// Mã **ngắt phần mềm** S-mode (interrupt 1, bit 63 = 1) — **SBI IPI** (KT-50).
+///
+/// `sbi_send_ipi` khiến hart đích có **`sip.SSIP`** bật (firmware bật hộ, D2-76) ⇒ hart đó nhận
+/// `scause = (1 << 63) | 1` (`supervisor software interrupt`). Đây là mã **riêng**, không liên
+/// quan timer ([`INTERRUPT_SUPERVISOR_TIMER`] = 5) hay external
+/// ([`INTERRUPT_SUPERVISOR_EXTERNAL`] = 9): `trap_dispatch` đưa vào nhánh `Event::Ipi` để xoá
+/// `sip.SSIP` + drain hộp thư, **không** fatal (KT-50).
+pub const INTERRUPT_SUPERVISOR_SOFTWARE: u64 = 1;
 
 /// `sstatus.SIE` — supervisor interrupt enable.
 pub const SSTATUS_SIE: u64 = 1 << 1;
@@ -334,8 +349,12 @@ pub enum Event {
     /// Ngắt **S-mode timer** (bit 63 = 1, mã 5) — KT-47: SBI TIME + `sie.STIE`; **không** phải
     /// exception (không có `Exception`/`ExceptionKind` nào ở đây).
     Timer,
-    /// Ngắt khác (bit 63 = 1, mã ≠ 5). Mã **9** = external/PLIC (KT-48: claim → xử lý →
-    /// complete); mã khác 5/9 (vd IPI 1 — KT-50) vẫn là bất thường ⇒ fatal.
+    /// Ngắt **phần mềm S-mode** — IPI thật (bit 63 = 1, mã 1), KT-50. Handler xoá `sip.SSIP` của
+    /// hart đang chạy rồi **drain** hộp thư per-hart; **không** fatal. Tách riêng khỏi
+    /// [`Event::Timer`] (5) và [`Event::Interrupt`] (9) để không nhầm loại ngắt.
+    Ipi,
+    /// Ngắt khác (bit 63 = 1, mã ≠ 1/5). Mã **9** = external/PLIC (KT-48: claim → xử lý →
+    /// complete); mã khác 1/5/9 vẫn là bất thường ⇒ fatal.
     Interrupt {
         /// Mã interrupt (đã bỏ bit 63).
         code: u64,
@@ -348,6 +367,9 @@ pub fn decode_scause(scause: u64) -> Event {
         let code = scause & !SCAUSE_INTERRUPT;
         if code == INTERRUPT_SUPERVISOR_TIMER {
             Event::Timer
+        } else if code == INTERRUPT_SUPERVISOR_SOFTWARE {
+            // KT-50: IPI (SBI `send_ipi` ⇒ MSIP) — nhánh riêng, **không** nhầm timer/external.
+            Event::Ipi
         } else {
             Event::Interrupt { code }
         }
@@ -372,6 +394,7 @@ pub fn decode_trap(tf: &TrapFrame) -> Event {
             Event::Exception(exc)
         }
         Event::Timer => Event::Timer,
+        Event::Ipi => Event::Ipi,
         Event::Interrupt { code } => Event::Interrupt { code },
     }
 }
@@ -393,6 +416,8 @@ pub enum TrapAction {
     Fatal(Exception),
     /// Ngắt timer (mã 5, KT-47) — handler arch nạp deadline kế + đếm tick rồi `sret` (resume).
     Timer,
+    /// Ngắt **phần mềm** (mã 1, KT-50) — handler arch xoá `sip.SSIP` + drain hộp thư rồi `sret`.
+    Ipi,
     /// Ngắt bất ngờ khác (PLIC là KT-48) — dump rồi `DebugHalt(1)`.
     Interrupt {
         /// Mã interrupt (đã bỏ bit 63).
@@ -415,6 +440,7 @@ pub fn handle_trap(tf: &mut TrapFrame, insn_len: usize) -> TrapAction {
             }
         }
         Event::Timer => TrapAction::Timer,
+        Event::Ipi => TrapAction::Ipi,
         Event::Interrupt { code } => TrapAction::Interrupt { code },
     }
 }
@@ -733,8 +759,9 @@ pub fn report_guard_fault<P: Platform + ?Sized>(
 /// In dump ngắt bất ngờ (bắt đầu bằng `PANIC`) rồi `DebugHalt(1)`.
 ///
 /// KT-47 xử lý ngắt timer thật ([`Event::Timer`]); KT-48 xử lý ngắt external mã 9 qua PLIC
-/// (`Event::Interrupt { code: 9 }` → claim/complete trong `trap_dispatch`). Đường này chỉ dành
-/// cho ngắt **khác** mã 5/9 (vd IPI 1 — KT-50) — vẫn là bất thường ở KT-48.
+/// (`Event::Interrupt { code: 9 }` → claim/complete trong `trap_dispatch`); KT-50 xử lý ngắt
+/// phần mềm mã 1 ([`Event::Ipi`]). Đường này chỉ dành cho ngắt **khác** mã 1/5/9 — vẫn là bất
+/// thường.
 pub fn report_interrupt<P: Platform + ?Sized>(platform: &P, code: u64, tf: &TrapFrame) -> ! {
     platform.put_str("PANIC: ");
     {
