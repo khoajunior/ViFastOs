@@ -4,55 +4,109 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `74c22d4b` ([KT-50] IPI thật + drain hộp thư per-hart — commit chỉ `v2/`; parent `d598bf2d` = [KT-00] Agent 0 ghi D2-76, không chạm) — **đã push**, `HEAD..origin/main = 0`
-BUILD_ID      : — (ảnh K3 KT-50: `vifast-kbin-riscv64` 65.896 B, `vifast-kbin-ktest` 130.536 B, `vifast-kbin-ktest-guard` 53.832 B — `JOURNAL/kt50-budget.log`)
-Task          : **KT-50 (IPI thật + drain hộp thư per-hart)** — **DONE (commit `74c22d4b` đã push; `reviewer-kt50` DRIFT nhẹ, 6/6 mục đã vá, không UNSAFE)**:
-                **SBI IPI** EID `0x735049` (FID 0, `hart_mask_base=0`) ⇒ `scause = (1<<63)|1`;
-                `trap.rs` tách **tường minh** 1/5/9 (`Event::Ipi`/`Timer`/`Interrupt{9}`) nên IPI **không** fatal
-                và **không** nhầm timer (5)/external (9). **Hộp thư per-hart coalesce theo kind** `TlbFlush`/
-                `VmKick`/`Wake` (bitmask 3 bit, không cấp phát): gửi trùng ⇒ gộp (không mất kind, không gửi thêm IPI),
-                `drain` một `swap(0)` giao đủ kind; bộ đếm PerHart `sent/coalesced/local/errors/traps/delivered/
-                spurious/kinds[3]`; **không self-target** (D2-68): `post(self)` ⇒ local flush + ack ngầm, `sent`/`traps`
-                không tăng; **drain cả khi chờ khoá**: `wait_with_drain` drain **trước mỗi bước** + timeout luôn hết
-                (bài học D2-68), `park_forever` cũng drain. **Deviation D2-76**: S-mode không đọc được ACLINT MSWI
-                (PMP chặn — `load access fault` `scause=5 stval=0x0200_0004`, log `kt50-aclint-pmp.log`) ⇒ dùng
-                **`sip.SSIP`** đọc/xoá pending, **không** map CLINT. TAP **20..24** (`100 ipi delivered` 2 hart
-                `delivered=traps=100` kinds `34/33/33`; drain khi chờ ack `traps_delta=0/0` + timeout hết; self-target
-                không gửi; coalesce 6 post ⇒ 2 IPI/2 kind; không nhầm timer/external), dời trap lồng sang **25**
-                (`expected.txt` 25/25 + guard 3/3); `ktest.sh` grep bằng chứng IPI **theo `-smp`** (`≥2` cross,
-                `1` self-ipi — không giả 2 hart). Host test **67/67** (thêm 12 IPI: 10 lõi + 2 theo D2-77/D4).
-Bước          : 8/8 xong (baseline gate **569/73** + baseline ktest 20/20+3/3 → **đỏ trước** (host `unresolved
-                import ipi`; runner 25 TAP trên ảnh KT-49 `0/2`) → `plat-common::ipi` + `Event::Ipi`/decode
-                1/5/9 + host test 10 → `arch::ipi` (SBI IPI, `sip.SSIP`, post/drain/wait_drain) + `trap_dispatch`
-                nhánh IPI + `park_forever` drain + `boot_hart()` → `ktest_ipi.rs` TAP 20..24 + runner/expected
-                → 300 boot **300/300** (sau vá) + product `run.sh 1 2` PASS + budget + gate **569/73** → review
-                độc lập (DRIFT nhẹ, 6/6 mục vá) → **commit `74c22d4b` + `[KT-50b]` + push**)
+HEAD          : `6e6fa4ee` ([KT-51] ASID thật + `sfence.vma` + shootdown ack — commit chỉ `v2/`; parent `2ace7079` = [KT-00] Agent 0 D2-78; base KT-51 `d06607eb`) — **đã push**, `HEAD..origin/main = 0`
+BUILD_ID      : — (ảnh K3 KT-51: `vifast-kbin-riscv64` 67.792 B, `vifast-kbin-ktest` 158.616 B, `vifast-kbin-ktest-guard` 53.720 B; sha256 `9893cb6624cc43ee339626b64d429fbbc536ad0d575172b4d077bb0797ca5592` ktest / `b6311f71a1851545764621aba60f6b5acae78b64a7d6a27a33867ded87226f6c` guard — `JOURNAL/kt51-{budget,image-sha}.log`)
+Task          : **KT-51 (ASID thật + `sfence.vma` + shootdown ack)** — **DONE (commit `6e6fa4ee` đã push; `reviewer-kt51` DRIFT (không UNSAFE), A/B/C/D/E đã vá trước commit)**:
+                `satp.ASID` **8 bit** + thế hệ: `AsidAllocator` free-list 256, cấp ASID thấp nhất trước,
+                **không tái dùng trong cùng thế hệ** (`free` = về hưu), cạn ⇒ `generation += 1` + nạp lại 256 +
+                **một** `FlushScope::All` (`replace_lease`); đổi ASID **không** `sfence` (chỉ phát lại ở thế hệ mới
+                mới cần xả). **`sfence.vma` ba dạng** đúng `rs1 = VA`, `rs2 = ASID`: `(asid,va)` / `(asid,*)` /
+                `(*,*)`, chỉ TLB hart hiện tại. **Shootdown** `TlbFlush` qua IPI KT-50 + slot yêu cầu/hart
+                `{seq, asid, scope, va}`; ack `fetch_max` theo `seq`, bất biến `Ok ⇒ ack_mask == active_on`; hart gọi
+                **local flush + ack ngầm**, **không self-target** (D2-68); hart **ngoài `active_on`** không bị chờ,
+                không ack; chờ ack **drain mỗi bước** (kể cả `SIE=0`), deadline `rdtime` ⇒ timeout không treo; MỌI
+                đường `drain` (`ipi::drain_hart_current`) xử lý `TlbFlush` (trap handler, vòng chờ khoá,
+                `park_forever`); `IN_FLIGHT` một shootdown/lúc (K3 một VSpace). **D2-78**: `shootdown` **không** nhận
+                mask của người gọi — tự đọc `active_on()`, nên TAP 27 gỡ hart khỏi `ACTIVE_ON` **thật** rồi khôi phục.
+                **Đo thật**: 100 vòng shootdown tới `active_on` (`-smp 2` `sent=100`, `-smp 4` `sent=300`; mọi hart
+                phục vụ đủ 100), peer `received=100 flushes=100 prime/verify_wrong=0`, stale mapping **dương tính**
+                (remap không sfence ⇒ đọc giá trị cũ; sfence đúng dạng ⇒ giá trị mới, đủ 3 dạng), hart ngoài
+                `active_on` (D2-78: gỡ 2 hart phụ khỏi `ACTIVE_ON`, chúng không ack/không bị chờ; khôi phục ⇒ mọi
+                hart ack), rollover (gen 0→1, ASID 0 phát lại, một All flush), timeout (hart offline trong
+                `active_on` ⇒ `Timeout` rồi `recovered=1`). **TAP 25..29** (trap lồng dời 25→**30**;
+                `expected.txt` **30/30** + guard 3/3, `ktest.sh` grep theo `-smp`); **3 mutation bắt buộc** M1 bỏ
+                `sfence`, M2 bỏ chờ ack, M3 self-target đều **đỏ** + restore. Host **78/78**; **300 boot 300/300**;
+                budget `.data+.bss` product **3656 B** / ktest **5608 B** / guard **2680 B** (trần 262.144); gate
+                **PASS 569/73**.
+Bước          : 8/8 xong (baseline gate **569/73** + baseline ktest 25/25+3/3 → **đỏ trước** (worktree HEAD:
+                runner 30 TAP trên ảnh 25 TAP `1/2`; host `unresolved import vifast_plat_common::tlb`) →
+                `plat-common::tlb` (ASID allocator + FlushScope + bất biến ack + bộ đếm) + host test 11 →
+                `arch::tlb` (3 dạng sfence, satp ASID, slot, shootdown ack/timeout, rollover) + hook drain +
+                `activate` AP + probe leaf **chỉ ảnh test** + `set_satp_asid` → `ktest_tlb.rs` TAP 25..29 + dời
+                trap lồng 30 + runner/expected → 1 boot mỗi smp xanh → **3 mutation đỏ + restore** → 300 boot
+                **300/300** trên ảnh cuối (sha ghi đầu/cuối) + product `run.sh 1 2` PASS + budget → docs §14 +
+                JOURNAL + review độc lập (DRIFT (không UNSAFE) — A/B/C/D/E đã vá **trước** commit) → **commit `6e6fa4ee` + `[KT-51b]` + push**)
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt50-gate-fast.log`);
-                baseline cùng số (`JOURNAL/kt50-baseline-gate-fast.log`). Kernel **không** nằm trong `gate --fast`
-                (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm bằng build 3 ảnh + `ktest.sh` (**icount
-                shift=6**, D2-74) + `run.sh` (**không icount**, D2-72 Q2) + host test **67/67**
-                (`JOURNAL/kt50-{host-tests,ktest-smp1,ktest-smp2,ktest-smp4,boot50-matrix,ipi,
-                product-boot-smp2,budget}.log` + `kt50-review.md`).
-Miri          : KT-50 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO/CSR (D2-72 Q12); Miri vẫn áp `lib/` + sim.
-                Phần **logic** IPI chạy host: `cargo test -p vifast-plat-common` **67/67** = 14 host KT-45 + **12 IPI
-                KT-50** + 8 MMU + 12 timer + 12 PLIC + 9 SMP (`tests/ipi.rs`: coalesce không mất kind + bất biến
-                `posted = delivered + pending`, drain mỗi kind đúng một lần, self-target local, bộ đếm
-                sent/coalesced/traps/delivered/spurious, PerHart không lẫn, `wait_with_drain` drain trước mỗi bước +
-                timeout phải hết, decode 1/5/9 không nhầm).
-Việc dở       : **KT-50 xong**: commit `74c22d4b` + push OK (`HEAD..origin/main = 0`); `[KT-50b]` cập nhật HEAD + verdict.
-                `reviewer-kt50` = DRIFT nhẹ (không UNSAFE) — 6 mục D1..D6 đã vá **trước commit**
-                (`JOURNAL/kt50-review.md`): D1 comment ngược D2-76, D2 số 20→25 TAP + "khác 1/5/9", D3 **D2-77**
-                (`classify_post`: hart valid nhưng offline ⇒ `Invalid`, không SBI, không giữ kind + test), D4 SBI lỗi ⇒
-                `unpost` gỡ bit + test, D5 TAP 20 đổi tên theo cấu hình (`100 ipi traps (self)` ở `-smp 1`), D6 log 300
-                boot sạch + `kt50-ipi.log`. Host sau vá **67/67**. **300 boot sau vá: `# KTEST: 300/300`, 0 `not ok`**
-                (`JOURNAL/kt50-boot50-matrix.log`, ảnh `sha256 bfdd7785…`/`8b088aa3…`) — log lần trước bị hai lần chạy
-                ghi cùng tệp nên đã chạy lại sạch; bài học: **không** redirect cùng tệp log cho nhiều lần chạy.
-                Kế tiếp: Agent 0 lật KT-50 DONE → mở **KT-51** (ASID + shootdown + ack, dùng khung `TlbFlush`/
-                `wait_drain` của KT-50).
-                `viscript/` + `review/` + `out-b.log`… của tab khác **không chạm** (chỉ stage `v2/`); không sửa
-                QUEUE/DECISIONS/AGENTS/spec/sim/.scn; không thêm dependency; `unsafe` chỉ `kernel/vifast-plat-*`.
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt51-gate-fast.log`);
+                baseline cùng số (`JOURNAL/kt51-baseline-gate-fast.log`). `./v2/bin/v2 check` PASS. Kernel **không**
+                nằm trong `gate --fast` (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm bằng build 3 ảnh +
+                `ktest.sh` (**icount shift=6**, D2-74) + `run.sh` (**không icount**, D2-72 Q2) + host test **78/78**
+                (`JOURNAL/kt51-{host-tests,ktest-smp1,ktest-smp2,ktest-smp4,boot50-matrix,product-boot-smp2-raw,
+                budget,image-sha}.log` + `kt51-review.md`).
+Miri          : KT-51 — **không chạy Miri** trên ảnh `no_std`/asm/CSR/MMIO (D2-72 Q12); Miri vẫn áp `lib/` + sim
+                (không đổi). Phần **logic** TLB/ASID chạy host: `cargo test -p vifast-plat-common` **78/78** = 14
+                host KT-45 + 12 IPI KT-50 + 8 MMU + 12 timer + 12 PLIC + 9 SMP + **11 TLB KT-51**
+                (`tests/tlb.rs`: 256 ASID không trùng/thế hệ, cạn ⇒ rollover, free về hưu + double-free, satp giữ
+                MODE/PPN, mã hoá 3 dạng flush, `acked_mask`/implicit/ngoài `active_on`, bộ đếm PerHart, tất định).
+Việc dở       : **KT-51 xong**: commit `6e6fa4ee` + push OK; `[KT-51b]` cập nhật HEAD + verdict + STATE.
+                Kế tiếp: Agent 0 lật KT-51 DONE → mở **KT-52** (object layer `no_std` + Retype nội bộ, dùng
+                `AsidAllocator`/probe leaf làm nền). KT-51 **không** đụng `spec/`/sim/.scn/QUEUE/DECISIONS/AGENTS/
+                `viscript/`; không dependency; `unsafe` chỉ `kernel/vifast-plat-*`; không `cfg(target_arch)`.
+                **Giới hạn đã ghi docs §14.7 + journal**: thời gian **ảo** (icount), một VSpace kernel + một
+                shootdown/lúc, `-smp 1` mode=self, không đo latency/TLB hit-miss thật; 300 boot là smoke (soak 1.000
+                thuộc KT-57).
 ```
+
+## KT-51 — ASID thật + `sfence.vma` + shootdown ack (D2-65 Q4/Q5, D2-68)
+
+**Vào**: READY; HEAD `d06607eb` ([KT-00] mở KT-51; code KT-50 `74c22d4b`); `HEAD..origin/main = 0`; working tree có
+`viscript/` + `review/` + `out-b.log` của tab khác — **không chạm**; baseline gate **569/73**
+(`JOURNAL/kt51-baseline-gate-fast.log`), baseline ktest 25/25 + 3/3.
+
+**Task**: 1) ASID 8 bit + generation (`AsidAllocator` free-list 256, không tái dùng trong cùng thế hệ, cạn ⇒
+`generation += 1` + **một** flush toàn bộ); 2) `sfence.vma` 3 dạng đúng `rs1`/`rs2` + test stale mapping **dương
+tính** (đọc giá trị cũ khi **không** sfence, giá trị mới sau sfence); 3) shootdown `TlbFlush{asid, va|all}` qua IPI
+KT-50, hart nhận flush + **ack ngầm**, hart gửi **local flush** rồi chờ ack `active_on`, **không self-target**,
+timeout bằng `rdtime`, bất biến `ack_mask == active_on`; 4) 3 mutation (bỏ sfence / bỏ chờ ack / self-target) đều
+đỏ; 5) TAP `100 vong shootdown Ok`, `stale mapping caught`, `hart ngoai active_on`, `rollover flush`,
+`timeout khong treo`; 6) matrix 1/2/4 + 50 boot mỗi N + gate 569 + budget ≤ 262.144; 7) docs §14 + JOURNAL + STATE.
+
+**Đỏ trước** (worktree tách `d06607eb`, chỉ chép test/runner): runner 30 TAP trên ảnh KT-50 cũ ⇒ `# KTEST: 1/2`
+(thiếu `ok 25..30` + `tlb-*` evidence) — `JOURNAL/kt51-red-ktest.log`; host test mới ⇒ `unresolved import
+vifast_plat_common::tlb` + `no satp_asid in mmu` — `JOURNAL/kt51-red-host.log`.
+
+**Thay đổi**: `plat-common::tlb` (mới; ASID/FlushScope/ack/bộ đếm, **không unsafe**) + `tests/tlb.rs` 11 test;
+`plat-riscv64::tlb` (mới; `sfence.vma` 3 dạng, lease kernel + `active_on`, slot yêu cầu/hart, `handle_kinds` từ mọi
+drain, shootdown drain+timeout, `IN_FLIGHT`, `replace_lease` rollover, `service_until`); `plat-riscv64::mmu`
+(`set_satp_asid`/`current_satp_asid`, 2 leaf probe **chỉ ktest** `PROBE_VA`/`PROBE2_VA` + `remap_probe{,2}` sửa một
+PTE, `probe{,2}_leaf_phys`); `plat-riscv64::{ipi,smp,lib}` (hook drain, `activate` AP khi vào, `pub mod tlb`);
+`kbin::ktest_tlb` (mới, TAP 25..29 + barrier 21..120/129..135/140, AP prime/verify); `kbin::{ktest,ktest_ipi,main}`
+(plan 1..30, `tlb::init()` trước SMP, AP nối pha, trap lồng 25→30, sản phẩm init ASID); `expected.txt` 30/30;
+`ktest.sh` grep TAP 25..30 + evidence TLB **theo `-smp`** (không ghim số hart ở `outside`); docs §14 + bảng hằng số.
+
+**D2-78** (reviewer A): API `shootdown(scope, timeout)` **tự lấy `active_on()`**; TAP 27 gỡ **2 hart phụ**
+(hoặc hart boot) khỏi `ACTIVE_ON` **thật**, shootdown ⇒ chúng **không** ack/không bị chờ,
+`acked == active_on()`, rồi **khôi phục** ⇒ mọi hart ack; TAP 25 dùng `active_on` = toàn bộ hart online
+(`sent = 100×(N−1)`, mọi hart phục vụ); TAP 29 đặt `ACTIVE_ON = {boot, offline}`; ktest.sh/docs grep lại.
+
+**Bằng chứng**: host **78/78** (`kt51-host-tests.log`); ktest smp1/2/4 **30/30 + guard 3/3**
+(`kt51-ktest-smp{1,2,4}.log` — `mode=cross` `sent=100`/`300`, mọi hart `served=N−1`, peer
+`received=100 flushes=100 prime/verify_wrong=0`; `-smp 4` `removed=0xc` không ack/không bị chờ rồi
+`restored_acked=0xf`; rollover `generation=1 exhaustions=1 flush=Ok`; timeout `recovered=1`);
+**300 boot 300/300** (`kt51-boot50-matrix.log`, sha ảnh đầu/cuối khớp `kt51-image-sha.log`); product `run.sh 1 2`
+PASS + raw log `# tlb: asid=0 generation=0 satp_asid=0` (`kt51-product-boot-smp2{,-raw}.log`); budget
+**3656/5592/2680 B** (`kt51-budget.log`); **3 mutation đỏ + diff + restore** (`kt51-mutation-{1-bay-sfence,
+2-bo-cho-ack,3-self-target}{-qemu.log,.diff}`): M1 ⇒ TAP 25/26/27/28 đỏ, M2 ⇒ 25/27/28/29 đỏ, M3 ⇒ 25/27 đỏ
+(`sent=200` vs 100, slot hart gọi ≠ 0); gate **PASS 569/73** (`kt51-gate-fast.log`); `v2 check` PASS.
+
+**Review**: `reviewer-kt51` (read-only, lead spawn) — verdict **DRIFT** (không UNSAFE); **A** (D2-78) + **B**
+(bằng chứng thật) + C/D/E đã vá **trước commit**; reviewer xác nhận 3 dạng sfence đúng `rs1`/`rs2` (disasm),
+D2-68 không self-target, mutation thật; tự chạy host 78/78 + ktest 6/6 + gate PASS. Chi tiết:
+`JOURNAL/kt51-review.md`.
+
+**Giới hạn**: thời gian **ảo** (`-icount shift=6`); một VSpace kernel + một shootdown/lúc (`IN_FLIGHT`); `-smp 1`
+mode=self (không giả 2 hart); không đo latency/TLB hit-miss thật; "hart ngoài `active_on`" dùng hart khác trên
+`-smp 4`, không phải nhiều shooter đồng thời; 300 boot là smoke, soak 1.000 thuộc KT-57.
 
 ## KT-50 — IPI thật + drain hộp thư per-hart (SBI IPI, `Event::Ipi`, coalesce theo kind)
 
