@@ -124,7 +124,9 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 - **D2-77** KT-50 — **`post` tới hart CHƯA ONLINE phải TRẢ `Invalid`** (+ log `ipi: hart N chua online`, **không** gọi SBI, **không** giữ kind trong hộp thư): lý do — hart không chạy thì không có ai drain, kind nằm lại vô chủ và có thể bị giao nhầm sau khi hart start (hộp thư phải reset lúc start). Hành vi phải có **test**: post tới hart hợp lệ nhưng offline ⇒ `Invalid`, `sent` không tăng, hộp thư rỗng. Kèm: **lỗi SBI khi gửi ⇒ gỡ bit vừa post + `errors+=1`** (không để bit mồ côi).
 
-- **D2-78** KT-51 — **`shootdown` KHÔNG nhận mask từ ngoài: tự lấy `active_on()`** (bỏ tham số mask khỏi API công khai) để không thể chờ/không chờ sai tập hart. TAP “hart ngoài `active_on`” phải chứng minh bằng **trạng thái thật**: TAP test-only **gỡ 2 hart phụ khỏi `ACTIVE_ON`** (ghi lại mask cũ), chạy shootdown ⇒ hart bị gỡ **không** ack, **không** bị chờ, ; sau đó **khôi phục** `ACTIVE_ON`. Cấm dùng mask hẹp truyền vào để giả lập “ngoài active_on”. Đồng thời: mọi log/sha/journal được trích phải **tồn tại thật** trong `JOURNAL/`; nếu 300-boot chưa xong thì **không** được viết “300/300” (bài học KT-50).| Số | Giá trị | Nguồn |
+- **D2-78** KT-51 — **`shootdown` KHÔNG nhận mask từ ngoài: tự lấy `active_on()`** (bỏ tham số mask khỏi API công khai) để không thể chờ/không chờ sai tập hart. TAP “hart ngoài `active_on`” phải chứng minh bằng **trạng thái thật**: TAP test-only **gỡ 2 hart phụ khỏi `ACTIVE_ON`** (ghi lại mask cũ), chạy shootdown ⇒ hart bị gỡ **không** ack, **không** bị chờ, và bất biến `ack_mask == active_on()` phải giữ; sau đó **khôi phục** `ACTIVE_ON`. Cấm dùng mask hẹp truyền vào để giả lập “ngoài active_on”. Đồng thời: mọi log/sha/journal được trích phải **tồn tại thật** trong `JOURNAL/`; nếu 300-boot chưa xong thì **không** được viết “300/300” (bài học KT-50).
+
+| Số | Giá trị | Nguồn |
 |---|---|---|
 | slot cap | **48 B** `[TK]` (sửa 32 B) | QD §3.9 |
 | `MAX_HARTS` | mặc định **8**, trần cấu hình **64** `[TK]` (sửa 256) | QD §3.15 |
