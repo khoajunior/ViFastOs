@@ -4,9 +4,9 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `d598bf2d` ([KT-00] Agent 0 ghi D2-76 — IPI S-mode dùng `sip.SSIP`; commit code KT-50 kế tiếp chỉ `v2/`)
+HEAD          : `74c22d4b` ([KT-50] IPI thật + drain hộp thư per-hart — commit chỉ `v2/`; parent `d598bf2d` = [KT-00] Agent 0 ghi D2-76, không chạm) — **đã push**, `HEAD..origin/main = 0`
 BUILD_ID      : — (ảnh K3 KT-50: `vifast-kbin-riscv64` 65.896 B, `vifast-kbin-ktest` 130.536 B, `vifast-kbin-ktest-guard` 53.832 B — `JOURNAL/kt50-budget.log`)
-Task          : **KT-50 (IPI thật + drain hộp thư per-hart)** — **xong mã, đã review độc lập (`reviewer-kt50` = DRIFT nhẹ, 6/6 mục đã vá; không UNSAFE)**:
+Task          : **KT-50 (IPI thật + drain hộp thư per-hart)** — **DONE (commit `74c22d4b` đã push; `reviewer-kt50` DRIFT nhẹ, 6/6 mục đã vá, không UNSAFE)**:
                 **SBI IPI** EID `0x735049` (FID 0, `hart_mask_base=0`) ⇒ `scause = (1<<63)|1`;
                 `trap.rs` tách **tường minh** 1/5/9 (`Event::Ipi`/`Timer`/`Interrupt{9}`) nên IPI **không** fatal
                 và **không** nhầm timer (5)/external (9). **Hộp thư per-hart coalesce theo kind** `TlbFlush`/
@@ -26,7 +26,7 @@ Bước          : 8/8 xong (baseline gate **569/73** + baseline ktest 20/20+3/3
                 1/5/9 + host test 10 → `arch::ipi` (SBI IPI, `sip.SSIP`, post/drain/wait_drain) + `trap_dispatch`
                 nhánh IPI + `park_forever` drain + `boot_hart()` → `ktest_ipi.rs` TAP 20..24 + runner/expected
                 → 300 boot **300/300** (sau vá) + product `run.sh 1 2` PASS + budget + gate **569/73** → review
-                độc lập → commit `[KT-50]` + `[KT-50b]` cập nhật HEAD/verdict/push)
+                độc lập (DRIFT nhẹ, 6/6 mục vá) → **commit `74c22d4b` + `[KT-50b]` + push**)
 Nhánh         : main
 Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt50-gate-fast.log`);
                 baseline cùng số (`JOURNAL/kt50-baseline-gate-fast.log`). Kernel **không** nằm trong `gate --fast`
@@ -40,13 +40,16 @@ Miri          : KT-50 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO/C
                 `posted = delivered + pending`, drain mỗi kind đúng một lần, self-target local, bộ đếm
                 sent/coalesced/traps/delivered/spurious, PerHart không lẫn, `wait_with_drain` drain trước mỗi bước +
                 timeout phải hết, decode 1/5/9 không nhầm).
-Việc dở       : **review độc lập `reviewer-kt50` = DRIFT nhẹ (không UNSAFE)** — 6 mục D1..D6 đã vá **trước commit**
+Việc dở       : **KT-50 xong**: commit `74c22d4b` + push OK (`HEAD..origin/main = 0`); `[KT-50b]` cập nhật HEAD + verdict.
+                `reviewer-kt50` = DRIFT nhẹ (không UNSAFE) — 6 mục D1..D6 đã vá **trước commit**
                 (`JOURNAL/kt50-review.md`): D1 comment ngược D2-76, D2 số 20→25 TAP + "khác 1/5/9", D3 **D2-77**
                 (`classify_post`: hart valid nhưng offline ⇒ `Invalid`, không SBI, không giữ kind + test), D4 SBI lỗi ⇒
                 `unpost` gỡ bit + test, D5 TAP 20 đổi tên theo cấu hình (`100 ipi traps (self)` ở `-smp 1`), D6 log 300
                 boot sạch + `kt50-ipi.log`. Host sau vá **67/67**. **300 boot sau vá: `# KTEST: 300/300`, 0 `not ok`**
                 (`JOURNAL/kt50-boot50-matrix.log`, ảnh `sha256 bfdd7785…`/`8b088aa3…`) — log lần trước bị hai lần chạy
                 ghi cùng tệp nên đã chạy lại sạch; bài học: **không** redirect cùng tệp log cho nhiều lần chạy.
+                Kế tiếp: Agent 0 lật KT-50 DONE → mở **KT-51** (ASID + shootdown + ack, dùng khung `TlbFlush`/
+                `wait_drain` của KT-50).
                 `viscript/` + `review/` + `out-b.log`… của tab khác **không chạm** (chỉ stage `v2/`); không sửa
                 QUEUE/DECISIONS/AGENTS/spec/sim/.scn; không thêm dependency; `unsafe` chỉ `kernel/vifast-plat-*`.
 ```
@@ -2354,6 +2357,7 @@ ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |
 |---|---|---|---|---|---|---|
+| 2026-11-15 | **KT-50** | 8/8 | `74c22d4b` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed) + **300/300 boot** (matrix 1/2/4 × 50, 0 `not ok`) | **commit `74c22d4b` đã push**; SBI IPI EID `0x735049` + `Event::Ipi` (tách 1/5/9), hộp thư per-hart coalesce 3 kind, `sent/delivered/coalesced/spurious`, **không self-target** (D2-68), **drain trước mỗi bước** + timeout luôn hết; **D2-76** `sip.SSIP` thay ACLINT MSWI (PMP chặn, log `-d int`); **D2-77** post hart offline ⇒ `Invalid` + gỡ bit khi SBI lỗi; TAP 20..24 (`100 ipi delivered` / `100 ipi traps (self)`), nested dời 25 (25/25 + guard 3/3); host **67/67**; **reviewer-kt50 DRIFT nhẹ, 6/6 mục vá**; budget 2840/4304/2688 B ≤ 262.144; product `run.sh 1 2` PASS |
 | 2026-11-14 | **KT-44** | 8/8 | `efe128fb` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed; baseline cùng số) | **xong mã — chờ Agent 0 lật sổ**; `vifast-plat-common` no_std/`forbid(unsafe)` + trait `Platform`/`PanicHandler`; 2 ảnh bằng feature `ktest` (sản phẩm 0 chuỗi `ktest`, ảnh test 8); budget `data+bss 0 B`/262.144, `.stack` 65.536 + guard 4.096 báo riêng; TAP 1 boot ×2 ảnh; host test 3/3 |
 | 2026-11-13 | **KT-30** | 8/8 | `29718a6` | — | `gate --fast` PASS (**461 test/62 suite**, L1 1000 seed/999 trace, 750 ms; wall 199,3 s — **T-INFRA** tải máy) | **xong mã — chờ Agent 0 lật sổ**; `vifast-sync` `no_std` **1.346 dòng** (src 845, test 501), **0 dependency**, 8 khối `unsafe` có `SAFETY`; MCS lock FIFO qua **pool node cố định 16 slot** (không con trỏ thô, `Guard` giữ chỉ số slot), **không reentrant**; `Mailbox<N>` MPSC **7 loại** (`Wake/TlbFlush/Reschedule/Migrate/Stop/VmKick/PowerReq`), đầy ⇒ `Busy` (không mất message đầu), **ack thế hệ** `AtomicU32`; stress 4×500 (≈2,6 ms) + **200 lần / 0 fail**; Miri **16/16**; **reviewer-kt30 DRIFT đã sửa 2/2 chặn** (assertion stress; hook test `pub`→`pub(crate)`+`cfg(test)`); **không** loom/explorer (D2-53 Q9(a)) |
 | 2026-11-13 | **KT-28** | 10/10 | `ff94538` | — | `gate --fast` PASS (**427 test/56 suite**, L1 1000 seed/999 trace, 704 ms) | **commit `ff94538` đã push**; WaitOnAddress bảng băm `(frame, offset)` 64 bucket hằng model `[TK]` (không tạo `spec/kernel.toml`), `wait_addr` đọc giá trị + xếp hàng một lần (expected lệch ⇒ `InvalidArgument` không xếp hàng), **không timeout** (D2-53 Q4), `wake_addr(n)` FIFO tối đa n, `check_waitaddr` sau mỗi op, API K1b giữ nguyên; 12 test + fuzz **1.000 seed × 64 op**, Miri **12/12** + lib **2/2**; đột biến "xếp hàng trước rồi so" bị bắt; **reviewer-kt28 APPROVE**; chờ Agent 0 lật sổ |
