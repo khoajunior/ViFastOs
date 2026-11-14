@@ -432,7 +432,8 @@ pub fn secondary_phase(hart: usize) -> ! {
     if !crate::ktest_smp::ap_barrier(ROUND_COALESCE_RESULT, smp::BARRIER_TIMEOUT_TICKS) {
         park();
     }
-    park()
+    // KT-51: pha TLB/ASID/shootdown (TAP 25..29) — AP tham gia barrier + là hart đích thật.
+    crate::ktest_tlb::secondary_phase(hart)
 }
 
 fn park() -> ! {

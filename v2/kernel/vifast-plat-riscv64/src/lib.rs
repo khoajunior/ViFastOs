@@ -68,6 +68,7 @@ pub mod mmu;
 pub mod plic;
 pub mod smp;
 pub mod timer;
+pub mod tlb;
 
 /// UART0 của QEMU `virt` (16550A) — dữ kiện nền tảng, D2-72 Q7.
 pub const UART0_BASE: usize = 0x1000_0000;

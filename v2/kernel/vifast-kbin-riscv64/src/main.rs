@@ -50,8 +50,17 @@ pub extern "C" fn rust_main() -> ! {
     // KT-46: dựng bảng Sv39 từ arena RAM **xong** mới bật `satp` + `sfence.vma`, rồi in địa chỉ
     // thật (root/arena/guard) do lần boot này sinh ra.
     let mmu = mmu::init();
+    // KT-51: ASID thật cho kernel VSpace (lease đầu = ASID 0) — cấp **trước** `smp::init` để hart
+    // thứ cấp `adopt_satp` nhận đúng `satp.ASID`; ảnh sản phẩm không có shootdown/TAP nhưng dùng
+    // đúng đường ASID của kernel.
+    let tlb = vifast_plat_riscv64::tlb::init();
     {
         let mut w = PlatformWriter(&PLATFORM);
+        let _ = writeln!(
+            w,
+            "# tlb: asid={} generation={} satp_asid={} active_on=0x{:x}",
+            tlb.asid, tlb.generation, tlb.satp_asid, tlb.active_on
+        );
         let _ = writeln!(
             w,
             "# mmu: satp=0x{:x} mode={} root=0x{:x} tables={} used={} arena=0x{:x}-0x{:x} kernel_end=0x{:x}",

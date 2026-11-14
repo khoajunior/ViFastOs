@@ -4,7 +4,7 @@
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng.
 # KT-49/50: **hai** ảnh test (mỗi boot chỉ kết thúc được một lần bằng PANIC có chủ đích):
-#   - `vifast-kbin-ktest`       : 25 TAP — KT-45 (image + 3 trap) + KT-46 (mmu on, map layout,
+#   - `vifast-kbin-ktest`       : 30 TAP — KT-45 (image + 3 trap) + KT-46 (mmu on, map layout,
 #                                 walk khop) + KT-48 (3 TAP PLIC + UART IRQ thật) + KT-47 (4 TAP
 #                                 timer SBI: 100 tick đơn điệu, 1.000 tick không mất, irq thật,
 #                                 drift Δ ∈ [9,11] ms) + **KT-49 SMP** (5 TAP: N harts alive qua
@@ -12,7 +12,9 @@
 #                                 `2*h+1` per hart, barrier + timeout không treo) + **KT-50 IPI**
 #                                 (5 TAP: 100 IPI thật qua SBI/MSIP, drain khi chờ ack, không
 #                                 self-target, coalesce không mất kind, không nhầm timer/external)
-#                                 + trap lồng fatal (TAP 25).
+#                                 + **KT-51 TLB/ASID** (5 TAP: 100 vòng shootdown Ok, stale mapping
+#                                 dương tính, hart ngoài `active_on` không bị chờ, rollover flush,
+#                                 timeout không treo) + trap lồng fatal (TAP 30).
 #   - `vifast-kbin-ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume)
 #                                 rồi store `scause=15` fatal `PANIC: guard page fault`.
 # Số TAP kỳ vọng đọc từ `expected.txt` (không hardcode hai nơi).
@@ -200,7 +202,7 @@ for SMP in $SMP_LIST; do
     i=1
     while [ "$i" -le "$N_BOOT" ]; do
         total_boots=$((total_boots + 1))
-        # ------------------------------------------- ảnh chính: 25 TAP (KT-49 SMP + KT-50 IPI)
+        # ------------------------------------------- ảnh chính: 30 TAP (KT-49 SMP + KT-50 IPI + KT-51 TLB)
         if out="$(boot_once main "$IMG_MAIN" "$SMP" "$i")"; then :; else
             echo "not ok - ktest smp=$SMP boot $i: quá $((TIMEOUT_DS / 10)) s (treo), log $out"
             fails=$((fails + 1))
@@ -209,8 +211,8 @@ for SMP in $SMP_LIST; do
             continue
         fi
         missing="$(common_tap_ok "$out" "$PLAN_MAIN" "$OK_MAIN" '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$')"
-        # 1..25: KT-45 (1..4), KT-46 (5..7), KT-48 (8..10), KT-47 (11..14), KT-49 (15..19),
-        # KT-50 IPI (20..24), trap lồng (25).
+        # 1..30: KT-45 (1..4), KT-46 (5..7), KT-48 (8..10), KT-47 (11..14), KT-49 (15..19),
+        # KT-50 IPI (20..24), KT-51 TLB/ASID (25..29), trap lồng (30).
         grep -q '^ok 1 - ktest image$' "$out" || missing="$missing ok1-image"
         grep -q '^ok 2 - trap breakpoint$' "$out" || missing="$missing ok2-breakpoint"
         grep -q '^ok 3 - trap ecall sbi$' "$out" || missing="$missing ok3-ecall-sbi"
@@ -235,7 +237,12 @@ for SMP in $SMP_LIST; do
         grep -q '^ok 22 - self-target khong gui$' "$out" || missing="$missing ok22-self-target"
         grep -q '^ok 23 - coalesce khong mat kind$' "$out" || missing="$missing ok23-coalesce"
         grep -q '^ok 24 - ipi khong nham timer/external$' "$out" || missing="$missing ok24-ipi-distinct"
-        grep -q '^ok 25 - trap nested panic$' "$out" || missing="$missing ok25-nested"
+        grep -q '^ok 25 - 100 vong shootdown Ok$' "$out" || missing="$missing ok25-shootdown"
+        grep -q '^ok 26 - stale mapping caught$' "$out" || missing="$missing ok26-stale"
+        grep -q '^ok 27 - hart ngoai active_on$' "$out" || missing="$missing ok27-outside"
+        grep -q '^ok 28 - rollover flush$' "$out" || missing="$missing ok28-rollover"
+        grep -q '^ok 29 - timeout khong treo$' "$out" || missing="$missing ok29-timeout"
+        grep -q '^ok 30 - trap nested panic$' "$out" || missing="$missing ok30-nested"
         # --- bằng chứng KT-45..KT-49 (số đo do chính boot in ra, không viết tay)
         grep -q '^# mmu: .*mode=8' "$out" || missing="$missing mmu-evidence"
         grep -q '^# mmu on: .*alias=1 .*kernel_low=1 kernel_high=1' "$out" ||
@@ -306,6 +313,48 @@ for SMP in $SMP_LIST; do
             missing="$missing ipi-coalesce-evidence"
         grep -Eq '^# ipi distinct: ipi_traps=100 interrupts_delta=100 timer_delta=0 plic_delta=0 last_scause=0x8000000000000001 last_code=1 decode_ok=1 ok=1$' "$out" ||
             missing="$missing ipi-distinct-evidence"
+        # --- KT-51: ASID thật + sfence.vma + shootdown ack (D2-65 Q4/Q5, D2-68).
+        if [ "$SMP" -ge 2 ]; then
+            TLB_MODE=cross
+            # D2-78: `active_on` = **toàn bộ hart online** ở pha 100 vòng ⇒ mỗi vòng gửi
+            # `SMP-1` IPI: smp2 = 100, smp4 = 300.
+            TLB_SENT=$((100 * (SMP - 1)))
+            TLB_PEER="received=100 flushes=100 page=100 asid=0 all=0 implicit=0 prime_wrong=0 verify_wrong=0 service_timeout=0"
+            TLB_REMOVED=2
+            if [ "$SMP" -eq 2 ]; then TLB_REMOVED=1; fi
+        else
+            TLB_MODE=self
+            TLB_SENT=0
+            TLB_PEER="received=0 flushes=0 page=0 asid=0 all=0 implicit=0 prime_wrong=0 verify_wrong=0 service_timeout=0"
+            TLB_REMOVED=1
+        fi
+        grep -Eq '^# tlb init: asid=0 generation=0 rollover=0 satp=0x[0-9a-f]+ satp_asid=0 active_on=0x(1|2|4|8) free=255 issued=1$' "$out" ||
+            missing="$missing tlb-init-evidence"
+        grep -Eq "^# tlb: harts=$SMP boot=[0-9]+ peer=-?[0-9]+ mode=$TLB_MODE rounds=100 asid_bits=8 asid_count=256$" "$out" ||
+            missing="$missing tlb-phase-evidence"
+        grep -q '^# tlb probe: va=0x80800000 pa_a=0x80800000 pa_b=0x80a00000 probe2_va=0x80a00000 pa_c=0x80c00000 pa_d=0x80e00000 leaf_a=1 leaf_b=1 nx=1$' "$out" ||
+            missing="$missing tlb-probe-evidence"
+        grep -Eq "^# shootdown rounds: mode=$TLB_MODE rounds=100 ok=100 acked_ok=100 sent=$TLB_SENT sent_expected=$TLB_SENT self_slot_wrong=0 local_verify_wrong=0 barrier_bad=0 targets=0x[0-9a-f]+ active_on=0x[0-9a-f]+ wait_ticks=[0-9]+$" "$out" ||
+            missing="$missing shootdown-rounds-evidence"
+        grep -Eq "^# shootdown all: bad=0 served=$((SMP - 1)) expected_served=$((SMP - 1)) online=0x$MASK$" "$out" ||
+            missing="$missing shootdown-all-evidence"
+        grep -Fq "# shootdown peer: mode=$TLB_MODE $TLB_PEER" "$out" ||
+            missing="$missing shootdown-peer-evidence"
+        grep -q '^# stale: asid=0 va=0x80800000 forms=3 stale_seen=3 fresh_ok=3 wrong=0 note=stale-read-without-sfence-is-positive$' "$out" ||
+            missing="$missing stale-evidence"
+        for FORM in Page Asid All; do
+            grep -q "^# stale form: name=$FORM fresh_a=1 stale_seen=1 fresh_b=1 wrong=0$" "$out" ||
+                missing="$missing stale-form-$FORM"
+        done
+        # D2-78: hart bị **gỡ khỏi ACTIVE_ON thật** rồi khôi phục — không truyền mask hẹp.
+        grep -Eq "^# outside: mode=$TLB_MODE removed=0x[0-9a-f]+ removed_count=$TLB_REMOVED narrowed=0x[0-9a-f]+ targets=0x[0-9a-f]+ acked=0x[0-9a-f]+ caller_in=[01] removed_acked_before=0x[0-9a-f]+ removed_acked_after=0x[0-9a-f]+ restored=1 restored_acked=0x[0-9a-f]+ outside_wrong=0 ok=1$" "$out" ||
+            missing="$missing outside-evidence"
+        grep -Eq "^# rollover: generation=1 exhaustions=1 rollover=1 flush=Ok asid=0 satp_asid=0 stale_seen=1 fresh_ok=1 free=255 issued=1 asid_ok=0x$MASK online=0x$MASK primed=0x4b51c000000000c2 wrong=0$" "$out" ||
+            missing="$missing rollover-evidence"
+        grep -Eq '^# timeout: outcome=Timeout narrowed=0x[0-9a-f]+ targets=0x[0-9a-f]+ acked=0x[0-9a-f]+ missing=0x[0-9a-f]+ waited=[0-9]+ probe=1000000 timeouts=[1-9][0-9]* mailbox_empty=1 recovered=1 wrong=0$' "$out" ||
+            missing="$missing timeout-evidence"
+        grep -Eq "^# tlb asid: ok=0x$MASK online=0x$MASK phase=0x[0-9a-f]+ arrived=0x$MASK timeout=0 satp_asid_boot=0 lease_asid=0 generation=1$" "$out" ||
+            missing="$missing tlb-asid-evidence"
         # Mỗi hart in đúng MỘT dòng alive (id + ticket + tp) và một dòng stack per-hart.
         hart=0
         while [ "$hart" -lt "$SMP" ]; do
@@ -322,7 +371,7 @@ for SMP in $SMP_LIST; do
         # Bằng chứng độc lập từ OpenSBI: máy ảo thật sự có N hart (không chỉ kernel tự khai).
         grep -q "^Platform HART Count *: *$SMP" "$out" || missing="$missing opensbi-hart-count"
         if [ -z "$missing" ]; then
-            echo "ok - ktest smp=$SMP boot $i (25 TAP: trap+mmu+plic+timer+smp+ipi)"
+            echo "ok - ktest smp=$SMP boot $i (30 TAP: trap+mmu+plic+timer+smp+ipi+tlb)"
             clean_boots=$((clean_boots + 1))
         else
             echo "not ok - ktest smp=$SMP boot $i: thiếu$missing, log $out"

@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 # K3 — kernel riscv64 thật trên QEMU `virt` (mốc mở bằng KT-44)
 
-Trạng thái: **KT-49** — **SMP thật**: SBI HSM `hart_start` cho hart `1..N-1`, `N = 1/2/4`,
-**PerHart** (stack + `.trap_stack` + guard riêng mỗi hart, `TP`/`sscratch`/`stvec` per-hart, bộ đếm
-timer/PLIC theo hart, PLIC context `2*h+1`), `HartMask` + barrier có timeout (hart lỗi/chậm **không
-treo máy**), trên nền trap KT-45 + MMU Sv39 KT-46 + timer SBI KT-47 + PLIC/UART IRQ KT-48; tài liệu
-hằng số nền tảng + quy trình build/boot/trap/MMU/timer/PLIC/SMP của K3.
+Trạng thái: **KT-51** — **ASID thật + `sfence.vma` + shootdown ack**: `satp.ASID` 8 bit + thế hệ
+(cạn ⇒ `generation += 1` + một flush toàn bộ), `sfence.vma` ba dạng `(asid,va)`/`(asid,*)`/`(*,*)`,
+`TlbFlush` thật qua IPI KT-50 với slot yêu cầu/hart, ack `fetch_max` và bất biến
+`Ok ⇒ ack_mask == active_on`, **hart gọi local flush + ack ngầm, không self-target** (D2-68), hart
+ngoài `active_on` không bị chờ, timeout bằng `rdtime`; trên nền trap KT-45 + MMU Sv39 KT-46 +
+timer SBI KT-47 + PLIC/UART IRQ KT-48 + SMP KT-49 + IPI KT-50. Tài liệu hằng số nền tảng + quy
+trình build/boot/trap/MMU/timer/PLIC/SMP/IPI/TLB của K3.
 Nguồn quyết định: **D2-72** (`v2/agent/DECISIONS.md`) chốt Q1..Q13 của
 [`review/agent0/K3-PLAN.md`](../../review/agent0/K3-PLAN.md) §3; chi tiết task ở §4/§4.1 cùng tệp.
 Nhãn số liệu theo QD §2.2: `[TK]` thiết kế mới, `[GT]` giả thuyết nền tảng, `[ĐO]` chỉ trong log
@@ -53,6 +55,9 @@ do lệnh sinh ra. **Tài liệu này không chứa số đo viết tay** (QD §
 | Arena page table | **64 KiB** RAM sau `__kernel_end`, bump allocator trong builder; root + bảng trung gian **không** `static`, không cộng trần `.data+.bss` | `[TK]` | KT-46, D2-72 Q5 |
 | IRQ | `Platform::enable_irq`/`disable_irq` = **PLIC thật** (KT-48): set/clear bit enable của context `2*hart+1` + đọc lại; cổng CPU `sie.SEIE` + `sstatus.SIE` do `plic::enable_external` (đối xứng `timer::enable_timer`); KT-49: mỗi hart tự đặt threshold/enable trên **context của mình** (`plic::init_hart`) | `[TK]` | D2-72 Q7/Q8, KT-48 §11, KT-49 §12 |
 | UART IRQ | UART0 **IRQ 10**; `IER.TX-empty` (mức cao khi THR rỗng); handler `claim → đọc IIR → complete → re-arm`; tự tắt `IER` + enable sau **N = 8** ngắt (`UART_IRQ_LIMIT`) | `[TK]` | KT-48 §11 |
+| ASID | **8 bit** (`vifast_pte::ASID_BITS`) ⇒ **256** ASID/thế hệ, cấp từ free-list **không tái dùng trong cùng thế hệ**, `free` = về hưu; cạn ⇒ `generation += 1` + **một** `FlushScope::All`; `satp.ASID` bit 59..44 (kernel dùng 8 bit); đổi ASID **không** `sfence` | `[TK]` | D2-65 Q4, KT-51 §14.1 |
+| `sfence.vma` | ba dạng: `va, asid` (một trang) / `zero, asid` (một ASID) / `zero, zero` (toàn bộ); `rs1` = VA, `rs2` = ASID; chỉ TLB hart hiện tại | `[TK]` | privileged spec, KT-51 §14.2 |
+| Shootdown | slot yêu cầu/hart `{seq, asid, scope, va}` (4 `AtomicU64`) + kind `TlbFlush` (IPI KT-50); ack `fetch_max` theo `seq`; hart gọi **local flush + ack ngầm**, **không** self-target (D2-68); chờ `ack_mask == active_on`, drain mỗi bước, deadline `rdtime`; **một** shootdown tại một thời điểm (`IN_FLIGHT`) | `[TK]` | D2-65 Q5, D2-68, KT-51 §14.3 |
 
 Ghi chú kiểm chứng: `run.sh`/`ktest.sh` in `# qemu <version>` và `# opensbi <version>` **từ log
 boot thật**; QEMU dưới sàn **9.2** (so cả major.minor) ⇒ **FAIL**, không tự hạ (D2-72 Q2). OpenSBI banner
@@ -125,7 +130,8 @@ stack hart này đè guard hart khác).
   **luôn fatal** (`report_guard_fault` + halt).
 - `PanicHandler` + trait `Platform` + logic trap/MMU thuần nằm ở `vifast-plat-common` nên **các ảnh
   dùng chung một handler**, không chép đôi code.
-- KT-49/50: ảnh test chính **25 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24) — `expected.txt`
+- KT-49/50/51: ảnh test chính **30 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24; KT-51 thêm 5 TAP
+  TLB/ASID 25..29, trap lồng dời sang 30) — `expected.txt`
   đọc kế hoạch/số `ok`; `ktest.sh` chạy
   **matrix `-smp 1|2|4`** (`bash ktest.sh 50 matrix`, log riêng từng N); harness TAP đầy đủ cho
   **toàn bộ** `.scn`/conformance vẫn là **KT-54/55**.
@@ -145,7 +151,7 @@ stack hart này đè guard hart khác).
 ```bash
 bash v2/test/boot/run.sh 1        # ảnh sản phẩm, 1 boot, 1 hart (D2-72 Q2, KHÔNG icount)
 bash v2/test/boot/run.sh 50       # 50 boot 0 lỗi (DoD KT-46/47)
-bash v2/test/boot/ktest.sh 1 1    # 2 ảnh test: 25 TAP chính + 3 TAP guard (`-icount shift=6`)
+bash v2/test/boot/ktest.sh 1 1    # 2 ảnh test: 30 TAP chính + 3 TAP guard (`-icount shift=6`)
 bash v2/test/boot/ktest.sh 1 matrix  # matrix smp 1/2/4 (KT-49), log riêng từng N
 bash v2/test/boot/ktest.sh 50 matrix # 50 boot **mỗi** N (DoD KT-49)
 bash v2/test/boot/run.sh 50 1     # ảnh sản phẩm 1 hart (không icount)
@@ -505,7 +511,7 @@ chạy host (D2-72 Q12).
   liên tiếp, có icount), `kt47-boot50.log` (product, không icount),
   `kt47-qemu-no-icount-vs-icount.log` (A/B cùng ảnh) — tài liệu **không** chép số tay (QD §9 Q12).
 
-### 10.6 TAP timer + bằng chứng (ảnh test chính, `1..25` — timer `11..14`)
+### 10.6 TAP timer + bằng chứng (ảnh test chính, `1..30` — timer `11..14`)
 
 | TAP | Điều kiện đo |
 |---|---|
@@ -606,7 +612,7 @@ PLIC nên trả priority 0 là an toàn và `init` đặt lại `priority[10] = 
 | `ok 9 - uart irq` | `IER.TX-empty` + `sie.SEIE` bật; `uart_irqs = UART_IRQ_LIMIT (= 8 `[TK]`) ≥ 1`; `claims == completes`; `last_irq = 10`; `last_iir = 0x2` (TX-empty); handler đã tắt `IER` + enable; `traps_delta == claims`; 0 exception |
 | `ok 10 - plic no fake irq` | **0 IRQ giả**: `spurious = unexpected = 0`; claim sau khi tắt = 0; `external_traps == claims + spurious`; `interrupts_delta == external_traps`; cổng external tắt **im lặng** ~1 ms; 0 exception |
 | `ok 11..14 - timer …` | 4 TAP timer KT-47 chạy **sau** PLIC trong **cùng boot** ⇒ hồi quy timer sau khi bật PLIC (100 tick đơn điệu, 1.000 tick không mất, `scause=0x8…005`, drift [9,11] ms) |
-| `ok 20..24 - ipi …` / `ok 25 - trap nested panic` | KT-50: 5 TAP IPI (20..24, §13.5) rồi trap lồng fatal (KT-45, boot kết thúc `PANIC` có chủ đích); TAP 15..19 là SMP KT-49 (§12) |
+| `ok 20..24 - ipi …` / `ok 25..29 - tlb …` / `ok 30 - trap nested panic` | KT-50: 5 TAP IPI (20..24, §13.5); KT-51: 5 TAP TLB/ASID/shootdown (25..29, §14.5) rồi trap lồng fatal (KT-45, boot kết thúc `PANIC` có chủ đích); TAP 15..19 là SMP KT-49 (§12) |
 
 Bằng chứng in ra (runner `grep` đúng các dòng, `ktest.sh` — số đo thật nằm trong log, không chép
 tay): `# plic: … ndev=… ctx=… plat_off=1 plat_on=1 threshold=0 priority_uart=1 enable_ctx=1
@@ -773,7 +779,7 @@ barrier_wait_release(round)      hart: chờ released ≥ round
 | `ok 17 - per-hart timer` | mỗi hart tự arm SBI TIME, nhận **100 tick** trong slot PerHart của mình, `first = rdtime` lúc arm, `non_monotonic = 0`; số dòng `# timer hart=h … ok=1` = N |
 | `ok 18 - plic ctx per hart` | mỗi hart context `2*h+1`, context M-mode `2*h` **không** bật, threshold 0, priority UART 1, enable IRQ UART round-trip (bật → đọc lại 1, tắt → đọc lại 0) trên **context của hart**; các context khác nhau; `PLIC_STATS` PerHart không lẫn; số dòng `# plic hart=h … ok=1` = N |
 | `ok 19 - barrier` | vòng 5: đủ arrival, `timeout=0`, hart chậm trễ thật (`slow_delayed=1`); vòng 6: `timeout=1`, `missing` đúng hart không online, `wait_ticks < 1 s`, máy tiếp tục |
-| `ok 25 - trap nested panic` | trap lồng vẫn fatal (KT-45 P2b) — boot kết thúc `PANIC: nested trap …` |
+| `ok 30 - trap nested panic` | trap lồng vẫn fatal (KT-45 P2b) — boot kết thúc `PANIC: nested trap …` (KT-51 dời 25→30 vì thêm TAP 25..29) |
 
 - `expected.txt` (`v2/test/boot/expected.txt` + sidecar `.license` theo R3) là nguồn duy nhất của
   kế hoạch/số `ok` (KT-49: ktest 20/20; **KT-50: 25/25**, ktest-guard 3/3); `ktest.sh` kiểm
@@ -907,9 +913,9 @@ CLINT vào MMIO kernel (giữ D2-72 Q7); đây là cách đúng theo privileged 
 | `ok 22 - self-target khong gui` | **mọi** hart online tự gửi `TlbFlush` cho chính mình: `PostOutcome::Local`, `sent`/`traps` **không** tăng, `local` +1, `delivered` +1, `kinds[TlbFlush]` +1 (local flush + ack ngầm — D2-68) |
 | `ok 23 - coalesce khong mat kind` | 5 × `TlbFlush` + 1 × `VmKick` tới peer: `coalesced=4`, chỉ **2** SBI IPI (`sent_delta=2`), hộp thư đích đang chờ **đúng** `{TlbFlush, VmKick}`, một `drain` giao **đủ** 2 kind. `-smp 1`: cùng bất biến kiểm **trên hộp thư tại chỗ** (không có hart đích để gửi IPI), log `mode=mailbox` |
 | `ok 24 - ipi khong nham timer/external` | trong **cả** pha: `TRAP_STATS.interrupts` tăng đúng bằng số trap IPI, `TIMER_STATS.ticks` 0, `PLIC_STATS.uart_irqs` 0, `last_scause = 0x8000_0000_0000_0001`, `last_code = 1`, decode 1/5/9 ra `Ipi`/`Timer`/`Interrupt{9}` |
-| `ok 25 - trap nested panic` | trap lồng vẫn fatal (P2b) — boot kết thúc `PANIC: nested trap …` + halt (dời từ 20 sang 25 vì KT-50 thêm TAP 20..24) |
+| `ok 30 - trap nested panic` | trap lồng vẫn fatal (P2b) — boot kết thúc `PANIC: nested trap …` + halt (dời 20→25 ở KT-50 vì thêm TAP 20..24; 25→30 ở KT-51 vì thêm TAP 25..29) |
 
-- `expected.txt` là nguồn duy nhất của kế hoạch/số `ok` (KT-50: **ktest 25/25**, guard 3/3).
+- `expected.txt` là nguồn duy nhất của kế hoạch/số `ok` (KT-51: **ktest 30/30**, guard 3/3).
 - `ktest.sh` grep thêm bằng chứng IPI **theo `-smp`**: `-smp ≥ 2` đòi `mode=cross` với
   `delivered=100/traps=100/kinds=34/33/33`, drain `mutual=1`, coalesce `mode=cross sent_delta=2`;
   `-smp 1` đòi `mode=self-ipi` (`delivered=0`, `traps=100`), drain `mode=self-wait`, coalesce
@@ -961,3 +967,152 @@ ASID + `sfence.vma` + shootdown ack đầy đủ (KT-51) — KT-50 chỉ đặt 
 drain; object layer (KT-52), U-mode/syscall (KT-53), harness đầy đủ/conformance (KT-54/55),
 `FaultKind`/W^X (KT-56), soak 1.000 + K3-DOD (KT-57), port core `no_std` (K3b), preemption/
 scheduler đa hart, hotplug/suspend. Xem bảng §9.
+
+## 14. ASID thật + `sfence.vma` + shootdown ack (KT-51)
+
+Nguồn quyết định: task K3-PLAN §4.1 KT-51; **D2-65 Q4/Q5** (ASID 8 bit + thế hệ; invalidate
+`(asid,va)`/`asid`/`gen`; ack `fetch_max`, `Ok` chỉ khi đủ ack, chờ ack phải drain), **D2-68**
+(hart gọi **local flush + ack ngầm**, **không** self-target; drain hộp thư trong vòng chờ), **D2-72**
+Q4 (`MAX_HARTS = 8`, matrix `1/2/4`), Q5 (budget 262.144 B), Q6 (`rdtime`/SBI TIME), **D2-74**
+(`-icount shift=6` chỉ trong `ktest.sh`), **D2-76** (trạng thái ngắt mềm = `sip.SSIP`), **D2-77**
+(hart offline ⇒ không giữ kind), **D2-78** (`shootdown` **không** nhận mask từ ngoài — tự lấy
+`active_on()`; TAP "ngoài `active_on`" phải gỡ hart khỏi `ACTIVE_ON` **thật** rồi khôi phục). Code:
+`vifast-plat-common::tlb` (ASID allocator/thế hệ, `FlushScope`, bất biến ack, bộ đếm — host test
+được) + `vifast-plat-riscv64::tlb` (ba dạng `sfence.vma`, `satp.ASID`, slot yêu cầu, shootdown) +
+`vifast-riscv64::mmu` (leaf thử nghiệm **chỉ ảnh test**) + pha test
+`vifast-kbin-riscv64/src/ktest_tlb.rs` (tách khỏi `ktest_ipi.rs` theo R1).
+
+### 14.1 ASID thật: 8 bit, lease + thế hệ, không tái dùng trong cùng thế hệ
+
+- **`satp.ASID`** (RV64: bit 59..44, privileged spec) dùng **8 bit** (`vifast_pte::ASID_BITS`,
+  D2-65 Q4) ⇒ **256** ASID mỗi thế hệ. `mmu::satp_sv39_asid(root, asid)` chỉ thay **trường ASID**,
+  giữ nguyên `MODE`/`PPN` (host test chốt `satp & !ASID_FIELD` không đổi).
+- **`AsidAllocator`** (`plat-common`): free-list 256 bit (4 × `AtomicU64`), cấp ASID **thấp nhất**
+  trước (tất định, dễ đọc log), cạn ⇒ `generation += 1`, nạp lại **đủ** 256, `exhaustions += 1`,
+  lease kế tiếp mang `rollover = true` để người gọi phát **một** `FlushScope::All` (Q4: "cạn ⇒
+  flush toàn bộ một lần theo `gen`", **không** flush từng ASID).
+- **Không tái dùng trong cùng thế hệ**: `free(lease)` chỉ **về hưu** ASID đó (không trả free-list;
+  K2-PLAN Q4) và **từ chối** lease sai thế hệ/double-free. Lý do: hart đã rời VSpace có thể còn
+  entry TLB mang `(gen, asid)` cũ; phát lại ASID trong cùng thế hệ sẽ khớp nhầm VSpace mới.
+- **Đổi ASID không `sfence`**: ghi `satp` với thẻ mới không làm sai translation (entry cũ mang thẻ
+  cũ không khớp thẻ mới); chỉ khi ASID **phát lại** ở thế hệ mới mới cần xả — đúng lúc
+  `replace_lease` phát `FlushScope::All`. Đây là lý do kỹ thuật, không phải bỏ sót; ghi ở
+  `vifast-plat-riscv64/src/tlb.rs` + `mmu::set_satp_asid`.
+- **`active_on`** = `HartMask` hart đang nạp ASID kernel: BSP vào [`tlb::init`] (sau `mmu::init`,
+  **trước** `smp::init`), hart thứ cấp vào `tlb::activate` **sau** `adopt_satp` (SBI HSM đánh thức
+  với `satp = 0`). Hart online nhưng **ngoài** `active_on` không nhận `TlbFlush` và không bị chờ.
+
+### 14.2 `sfence.vma` — ba dạng đúng `rs1`/`rs2`
+
+| Dạng | Lệnh | Dùng cho |
+|---|---|---|
+| `(asid, va)` | `sfence.vma va, asid` (rs1 = VA, rs2 = ASID) | unmap/protect **một** trang (phủ cả leaf lớn chứa VA) |
+| `(asid, *)` | `sfence.vma zero, asid` | teardown một ASID |
+| `(*, *)` | `sfence.vma` (rs1 = rs2 = `x0`) | cạn ASID/thế hệ (`generation += 1`) |
+
+`rs1` là **địa chỉ**, `rs2` là **ASID** — đảo thứ tự là lỗi im lặng; ba helper nằm ở
+`vifast-plat-riscv64::tlb` (`sfence_page`, `sfence_asid`, `sfence_all`) và **chỉ** hart hiện
+tại bị xả (TLB là per-hart). Không dùng `sfence.vma` cho hart khác: đường remote **bắt buộc** qua
+`TlbFlush` (14.3) — không có cách nào xả TLB hart khác từ xa ngoài việc hart đó tự chạy `sfence`.
+
+### 14.3 Shootdown: slot yêu cầu + kind `TlbFlush` + ack `fetch_max`
+
+Hộp thư IPI KT-50 chỉ mang **kind** (bitmask 3 bit). KT-51 thêm **một slot yêu cầu/hart**
+(`{seq, asid, scope, va}` — 4 `AtomicU64`, `const`-init, không cấp phát):
+
+1. Người gửi ghi `asid/scope/va` (**Relaxed**) → ghi `seq` (**Release**) → `post(TlbFlush)`
+   (**AcqRel** + SBI IPI). Gửi trùng bị **coalesce** như KT-50 nhưng slot giữ **seq mới nhất**;
+   ack `fetch_max` nên `ack ≥ seq` là đủ — **không mất yêu cầu**, không nhân đôi flush.
+2. Hart nhận (trap handler `/` `park_forever` `/` vòng chờ drain — **mọi** đường `drain`) thấy kind
+   `TlbFlush` ⇒ đọc `seq` (**Acquire**) rồi đọc tham số, **adopt** `satp.ASID` của yêu cầu nếu
+   khác (giữ mọi hart cùng thế hệ ASID — thiếu bước này, hart còn thẻ cũ sẽ **không** bị
+   `sfence (asid mới, va)` xả ⇒ stale TLB thật), chạy đúng dạng `sfence.vma`, rồi
+   `ACKED[hart].fetch_max(seq)`.
+3. Người gửi **luôn** flush cục bộ trước (page table của chính nó vừa đổi), rồi — nếu thuộc
+   `active_on` — ghi **ack ngầm** `ACKED[sender] = seq` (**D2-68: không self-target, không gửi
+   message cho chính mình**; `targets()` của `plat-common` loại hart gửi khỏi danh sách IPI). Đây
+   là bản **chặt hơn**: self-target sẽ làm mutation "bỏ flush cục bộ" sống.
+4. Vòng chờ: mỗi bước **drain hộp thư của chính hart** (kể cả `SIE = 0` — luật chống deadlock
+   D2-68/§4.10.3) rồi kiểm `ack_mask == active_on`; deadline bằng `rdtime` (timebase 10 MHz).
+   Hết deadline ⇒ `TimedOut` + `timeouts += 1`, **không treo**; `Completed` **chỉ** khi
+   `acked == active_on` (bất biến Q5). Hart online **ngoài** `active_on` không nằm trong mask nên
+   không bị chờ, không làm hỏng kết quả.
+5. **API không nhận mask** (D2-78): `shootdown(scope, timeout)` tự đọc `active_on()` **bên trong**
+   tại thời điểm phát, nên người gọi không thể chờ/bỏ chờ sai tập hart. TAP 27 chứng minh bằng
+   **trạng thái thật**: API test-only gỡ hart khỏi `ACTIVE_ON` (lưu mask cũ) → shootdown chỉ tới
+   phần còn lại, hart bị gỡ **không** ack/không bị chờ → **khôi phục** `ACTIVE_ON` rồi shootdown
+   lại ⇒ mọi hart online ack.
+6. Một shootdown tại một thời điểm (`IN_FLIGHT` CAS): K3 có **một** VSpace; shootdown chồng nhau
+   trả `Busy` + `errors` thay vì ghi đè slot đang dùng.
+
+### 14.4 Rollover (cạn ASID) — `generation += 1` + **một** flush toàn bộ
+
+`tlb::replace_lease(lease)` áp ASID mới lên `satp` hart gọi; nếu lease `rollover` thì phát **một**
+`FlushScope::All` tới `active_on` và chờ đủ ack. Ở TAP 28, ASID **0** được phát lại (đúng nguy cơ
+tái dùng trong cùng thế hệ) nên nếu **thiếu** flush toàn bộ, entry TLB cũ (thẻ ASID 0) vẫn khớp và
+hart đọc ra mapping **cũ** — phép đo dựa trên đúng nguy cơ đó, không dựa vào thẻ ASID đổi số.
+
+### 14.5 TAP 25..29 + bằng chứng (ảnh `vifast-kbin-ktest`, trap lồng dời sang TAP 30)
+
+| TAP | Đo |
+|---|---|
+| `ok 25 - 100 vong shootdown Ok` | 100 vòng: remap leaf `PROBE_VA → PA(r)` + marker mới, shootdown `Page{va}` tới **`active_on()`** (D2-78 — `-smp 2`: 2 hart, `sent=100`; `-smp 4`: 4 hart, `sent=300`), đợi `ack_mask == active_on`; **không self-target** (`sent = 100×(N−1)`, slot hart gọi = 0); hart đích (peer) **prime trước** rồi **đọc lại sau flush** phải thấy marker mới; **mọi** hart online khác BSP phải phục vụ đủ 100 yêu cầu (`served = N−1`). `-smp 1`: 100 vòng self (`mode=self`, `sent=0`), vẫn kiểm ack ngầm + flush cục bộ |
+| `ok 26 - stale mapping caught` | **dương tính thật**: map→PA_A, đọc (nạp TLB), remap→PA_B **không** `sfence` ⇒ đọc **phải** ra marker A; sau `sfence.vma` **từng dạng** (`(asid,va)`, `(asid,*)`, `(*,*)`) ⇒ ra marker B. Lặp đủ **3** dạng |
+| `ok 27 - hart ngoai active_on` | **D2-78, trạng thái thật**: test-only gỡ khỏi `ACTIVE_ON` 2 hart phụ (`-smp 4`) hoặc hart boot (`-smp 1/2`), lưu mask cũ → shootdown (không truyền mask) ⇒ hart bị gỡ **không** ack, **không** bị chờ, `acked == active_on()` mới; **khôi phục** `ACTIVE_ON` rồi shootdown lại ⇒ **mọi** hart online ack (`restored_acked == online`). Không dùng mask hẹp để giả lập |
+| `ok 28 - rollover flush` | cấp cạn 256 ASID ⇒ `generation 0→1`, `exhaustions 1`, **một** `FlushScope::All`; ASID 0 phát lại; đọc lại VA (probe #2) ra marker mới trên **mọi** hart online; `satp_asid` mọi hart = ASID mới |
+| `ok 29 - timeout khong treo` | đặt `ACTIVE_ON = {boot, offline}` (hart **offline** thật của máy) ⇒ `Timeout` sau **≥** `probe` (100 ms ảo; có thể vượt do vòng drain — giá trị thật in trong log), `ack_mask ≠ active_on`, **không treo**; yêu cầu/hộp thư của hart offline **rỗng** (D2-77); đặt `ACTIVE_ON = {boot}` rồi shootdown bình thường vẫn `Ok` (máy còn dùng được), cuối cùng khôi phục `ACTIVE_ON` |
+
+Số đo do chính boot in ra: `# tlb init:`, `# tlb:`, `# tlb probe:`, `# shootdown rounds:`,
+`# shootdown peer:`, `# stale:` + `# stale form:` ×3, `# outside:`, `# rollover:`, `# timeout:`,
+`# tlb asid:` (log `v2/agent/JOURNAL/kt51-{ktest-smp1,ktest-smp2,ktest-smp4,boot50-matrix}.log`).
+`ktest.sh` grep **theo `-smp`**: `≥ 2` đòi `mode=cross`, `sent=100`, peer `received/flushes=100`,
+`extras=0xc` ở `-smp 4`; `1` đòi `mode=self` (`sent=0`, peer 0) — hai cấu hình khác nhau nhưng
+**cùng** bất biến, không có "xanh hình thức".
+
+### 14.6 Leaf thử nghiệm: chỉ ảnh test, không thêm bảng/arena
+
+Phép đo dùng **hai** leaf 2 MiB RW NX, chỉ map trong ảnh `ktest` (`#[cfg(feature = "ktest")]`):
+
+| VA | PA A / PA B (probe #1, TAP 25/26) | PA C / PA D (probe #2, TAP 27/28) |
+|---|---|---|
+| `0x0000_0000_8080_0000` | `0x8080_0000` / `0x80a0_0000` | — |
+| `0x0000_0000_80a0_0000` | — | `0x80c0_0000` / `0x80e0_0000` |
+
+Cả hai leaf nằm trong **bảng cấp 1 đã có** (cùng chỉ số root với leaf image) nên **không** cấp
+thêm bảng, **không** tăng arena/budget; ảnh sản phẩm **không** có mapping/không có tham số test.
+Probe #2 tách riêng để TAP 27/28 không bị nhiễu bởi entry TLB mà TAP 25/26 đã nạp. `remap_probe*`
+chỉ sửa **một** PTE leaf cấp 1 (không cấp bảng, không đụng `satp`), nên nó đúng là thao tác "sửa
+page table rồi phải `sfence.vma`".
+
+### 14.7 Giới hạn phép đo (không giấu)
+
+1. **Thời gian là thời gian ảo** (`-icount shift=6`, D2-74): `wait_ticks`/`waited` đo bằng
+   `rdtime` dưới icount, **không** phải wall-time; muốn đo latency shootdown thật là task riêng.
+2. **Một VSpace** (kernel): mọi hart adopt cùng ASID; nhiều VSpace thật (K3b) cần allocator theo
+   VSpace + chọn ASID theo hart đang chạy — KT-51 chỉ chứng minh **cơ chế** ASID/thế hệ/shootdown.
+3. **Một shootdown tại một thời điểm** (`IN_FLIGHT`): không đo nhiều shooter đồng thời. TAP 25
+   dùng **mọi** hart trong `active_on` (smp2: 2, smp4: 4); TAP 27 **gỡ thật** 2 hart phụ khỏi
+   `ACTIVE_ON` ở `-smp 4` (không phải mask hẹp truyền vào), nên "hart ngoài `active_on`" là trạng
+   thái thật của kernel VSpace.
+4. **`-smp 1` không có phép đo chéo**: đo 100 vòng self + ack ngầm; log ghi `mode=self`, **không**
+   claim "2 hart".
+5. **`sfence.vma (asid, va)` flush theo VA của mapping** (leaf 2 MiB); không đo trường hợp VA nằm
+   **giữa** leaf lớn — QEMU flush trang chứa VA; phần "phủ cả entry lớn" của Q4 là hành vi hardware
+   được privileged spec bảo đảm, không phải giả định của kernel.
+6. **Không đo TLB hit/miss** phần cứng (không có PMU trong QEMU `-cpu rv64`); phép đo "stale
+   mapping" là bằng chứng **hành vi** (đọc ra dữ liệu cũ/mới), không phải đếm entry.
+
+### 14.8 Mutation bắt buộc (KT-51) — log trong `v2/agent/JOURNAL/`
+
+| Mutation | Sửa | Kết quả đỏ (log) |
+|---|---|---|
+| **M1 — bỏ `sfence.vma`** | ba helper thành no-op | TAP 25/26/27/28 **đỏ**: lần đọc đầu **sau** remap đã ra mapping cũ (`fresh_a` sai) và peer `verify_wrong` tăng — log `kt51-mutation-1-bay-sfence{.log,-qemu.log,.diff}` |
+| **M2 — bỏ chờ ack** | không drain/không chờ, trả ngay | TAP 25/27/28/29 **đỏ**: `Ok`/`acked` không đủ, `FlushScope::All` trả `Fail`, timeout "chớp" (< probe) — `kt51-mutation-2-bo-cho-ack*` |
+| **M3 — self-target** | hart gọi cũng bị gửi IPI + bỏ ack ngầm | TAP 25/27 **đỏ**: `sent` gấp đôi `sent_expected`, slot yêu cầu của hart gọi khác 0 — `kt51-mutation-3-self-target*` |
+
+### 14.9 Không thuộc KT-51
+
+Object layer/Retype (KT-52), U-mode/3 syscall (KT-53), harness TAP đầy đủ + `expected.txt` cho mọi
+ảnh (KT-54), conformance 5 `.scn` (KT-55), `FaultKind`/W^X + `spec/abi.toml` (KT-56), soak 1.000 +
+K3-DOD (KT-57), port core `no_std` (K3b), pager/COW, hotplug/suspend, preemption/scheduler đa hart,
+nhiều VSpace thật, đo latency shootdown thật (không icount).

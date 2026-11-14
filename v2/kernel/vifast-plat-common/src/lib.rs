@@ -47,8 +47,16 @@
 //! [`trap`] thêm ngắt **mã 1** (`scause = (1<<63)|1`, S-software) ⇒ [`trap::Event::Ipi`] — nhánh
 //! **riêng**, không fatal, không nhầm timer (5) hay external (9).
 //!
-//! **Không** thuộc KT-49/50: ASID/shootdown (KT-51), object layer (KT-52), U-mode (KT-53),
-//! preemption/hotplug — xem `v2/docs/k3-riscv64.md` §12/§13.
+//! KT-51 mở module [`tlb`]: **ASID 8 bit + thế hệ** ([`tlb::AsidAllocator`] — cấp phát free-list,
+//! **không tái dùng trong cùng thế hệ**, cạn ⇒ `generation += 1` + báo `rollover` để phát **một**
+//! flush toàn bộ), **`FlushScope`** ba dạng `(asid, va)`/`(asid, *)`/`(*, *)` và
+//! **`TlbFlushRequest`** cùng slot yêu cầu/hart (hộp thư IPI KT-50 chỉ mang kind). Ack dùng
+//! `fetch_max` theo `seq` với bất biến `Ok ⇒ ack_mask == active_on`, **không self-target** (hart
+//! gọi ack ngầm — D2-68), hart **ngoài `active_on` không bị chờ**, bộ đếm
+//! `sent/received/flushes/acks/timeouts/errors` PerHart.
+//!
+//! **Không** thuộc KT-49/50/51: object layer (KT-52), U-mode (KT-53), preemption/hotplug — xem
+//! `v2/docs/k3-riscv64.md` §12/§13/§14.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -57,6 +65,7 @@ pub mod mmu;
 pub mod plic;
 pub mod smp;
 pub mod timer;
+pub mod tlb;
 pub mod trap;
 
 use core::fmt::{self, Write};

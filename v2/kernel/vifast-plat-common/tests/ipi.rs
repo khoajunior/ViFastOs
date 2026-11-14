@@ -11,8 +11,8 @@
 use vifast_plat_common::ipi::{
     classify_post, deadline_after, delivery_for, msip_pending, mswi_address, mswi_offset,
     wait_with_drain, IpiCounters, IpiDelivery, IpiKind, IpiMailbox, IpiSnapshot, KindSet,
-    PostDecision, WaitOutcome, IPI_ERR_HART_OFFLINE, IPI_KIND_COUNT,
-    IPI_KIND_MASK, IPI_MAILBOXES, IPI_STATS, MSWI_HART_STRIDE, MSWI_WINDOW_BYTES, SBI_EXT_IPI,
+    PostDecision, WaitOutcome, IPI_ERR_HART_OFFLINE, IPI_KIND_COUNT, IPI_KIND_MASK, IPI_MAILBOXES,
+    IPI_STATS, MSWI_HART_STRIDE, MSWI_WINDOW_BYTES, SBI_EXT_IPI,
 };
 use vifast_plat_common::smp::MAX_HARTS;
 use vifast_plat_common::trap::{

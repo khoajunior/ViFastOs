@@ -49,8 +49,8 @@ use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use vifast_plat_common::mmu::{
-    align_up, satp_sv39, walk_with, MapError, PageTableBuilder, PteFlags, PteMemory, Walk,
-    PAGE_BYTES,
+    align_up, satp_asid, satp_sv39, satp_sv39_asid, walk_with, MapError, PageTableBuilder,
+    PteFlags, PteMemory, Walk, PAGE_BYTES,
 };
 use vifast_plat_common::plic::PLIC_LOW_WINDOW_BYTES;
 use vifast_plat_common::smp::{
@@ -81,6 +81,26 @@ pub const RAM_PHYS_BASE: u64 = 0x8000_0000;
 pub const RAM_BYTES: u64 = 128 << 20;
 /// Cỡ arena page table sau `__kernel_end` (đủ ~10 bảng 4 KiB + dư).
 pub const ARENA_BYTES: usize = 64 * 1024;
+/// KT-51: hình Sv39 của `PROBE_VA` mà [`remap_probe`] dùng (tính tay, không thêm dependency).
+#[cfg(feature = "ktest")]
+const _: () = {
+    assert!(((PROBE_VA >> 30) & 0x1ff) == 2);
+    assert!(((PROBE_VA >> 21) & 0x1ff) == 4);
+    assert!(((PROBE_VA >> 12) & 0x1ff) == 0);
+    assert!(PROBE_VA & (LARGE_2M - 1) == 0);
+    assert!(PROBE_PA_A & (LARGE_2M - 1) == 0);
+    assert!(PROBE_PA_B & (LARGE_2M - 1) == 0);
+    assert!(PROBE_PA_A >= RAM_PHYS_BASE + (2 << 20)); // ngoài image + arena
+    assert!(PROBE_PA_B + (2 << 20) <= RAM_PHYS_BASE + RAM_BYTES);
+    assert!(((PROBE2_VA >> 30) & 0x1ff) == 2);
+    assert!(((PROBE2_VA >> 21) & 0x1ff) == 5);
+    assert!(((PROBE2_VA >> 12) & 0x1ff) == 0);
+    assert!(PROBE2_VA & (LARGE_2M - 1) == 0);
+    assert!(PROBE2_PA_C & (LARGE_2M - 1) == 0);
+    assert!(PROBE2_PA_D & (LARGE_2M - 1) == 0);
+    assert!(PROBE2_PA_D + (2 << 20) <= RAM_PHYS_BASE + RAM_BYTES);
+    assert!(PROBE2_PA_C != PROBE_PA_A && PROBE2_PA_C != PROBE_PA_B);
+};
 /// Cỡ một leaf lớn 2 MiB (physmap).
 const LARGE_2M: u64 = 1 << 21;
 /// Cửa sổ PLIC thứ nhất (KT-48): priority (`0x0`) + pending (`0x1000`) + enable
@@ -92,6 +112,28 @@ pub const PLIC_WINDOW_HIGH_BASE: u64 = PLIC_BASE as u64 + PLIC_LOW_WINDOW_BYTES;
 pub const PLIC_WINDOW_BYTES: u64 = PLIC_LOW_WINDOW_BYTES;
 /// Số VA lấy mẫu PTE trước/sau khi bật `satp`.
 pub const WALK_SAMPLES: usize = 8;
+/// **KT-51 (ảnh test)**: VA 2 MiB dành riêng cho phép đo "stale mapping thật". Nằm ngoài mọi
+/// mapping khác của kernel (identity chỉ tới `arena_end ≈ 0x804b_8000`), trong cùng bảng cấp 1 với
+/// leaf 2 MiB của image (chỉ số 4) nên **không** cần bảng mới, không đổi budget/arena.
+#[cfg(feature = "ktest")]
+pub const PROBE_VA: u64 = 0x0000_0000_8080_0000;
+/// PA của leaf thử nghiệm (2 MiB, vùng RAM trống `0x8080_0000..0x80a0_0000`).
+#[cfg(feature = "ktest")]
+pub const PROBE_PA_A: u64 = 0x8080_0000;
+/// PA thứ hai để remap cùng VA (vùng RAM trống kế tiếp).
+#[cfg(feature = "ktest")]
+pub const PROBE_PA_B: u64 = 0x80a0_0000;
+/// **Probe #2** (KT-51): VA riêng cho TAP 27/28 — hart khác **chưa** từng chạm VA này nên TLB của
+/// nó sẽ nạp từ mapping hiện tại ngay trước khi remap (phép đo stale không bị nhiễu bởi entry cũ
+/// của TAP 25/26).
+#[cfg(feature = "ktest")]
+pub const PROBE2_VA: u64 = 0x0000_0000_80a0_0000;
+/// PA thứ nhất của probe #2.
+#[cfg(feature = "ktest")]
+pub const PROBE2_PA_C: u64 = 0x80c0_0000;
+/// PA thứ hai của probe #2.
+#[cfg(feature = "ktest")]
+pub const PROBE2_PA_D: u64 = 0x80e0_0000;
 
 // Linker symbols (`linker.ld`). Chỉ lấy **địa chỉ**, không đọc nội dung.
 extern "C" {
@@ -376,6 +418,14 @@ fn map_kernel(builder: &mut PageTableBuilder<'_>, layout: &Layout) -> Result<(),
         1,
         PteFlags::kernel_rwx(),
     )?;
+    // KT-51: **chỉ ảnh test** — leaf 2 MiB RW NX cho phép đo "stale mapping" (map VA→PA_A, remap
+    // VA→PA_B, đọc không sfence phải ra giá trị cũ). Leaf nằm trong bảng cấp 1 đã có (cùng chỉ số
+    // root với leaf image) nên không cấp thêm bảng/arena; ảnh sản phẩm **không** có mapping này.
+    #[cfg(feature = "ktest")]
+    builder.map(PROBE_VA, PROBE_PA_A, 1, PteFlags::kernel_rw_nx())?;
+    // Probe #2 (TAP 27/28): leaf thứ hai trong **cùng** bảng cấp 1 — không thêm bảng/arena.
+    #[cfg(feature = "ktest")]
+    builder.map(PROBE2_VA, PROBE2_PA_C, 1, PteFlags::kernel_rw_nx())?;
     builder.map(
         KERNEL_HIGH_BASE,
         KERNEL_PHYS_BASE,
@@ -447,6 +497,36 @@ fn map_physmap(builder: &mut PageTableBuilder<'_>, layout: &Layout) -> Result<()
         pa += LARGE_2M;
     }
     Ok(())
+}
+
+/// Ghi lại `satp` với **ASID** `asid` (giữ MODE/PPN), cập nhật [`SATP_VALUE`], đọc lại xác nhận.
+///
+/// **Không** `sfence.vma` ở đây (KT-51): đổi **thẻ** ASID không làm sai translation — entry cũ
+/// mang thẻ cũ không khớp thẻ mới. Chỉ khi ASID được **phát lại** ở thế hệ mới mới cần xả TLB, và
+/// lúc đó `tlb::replace_lease` phát `FlushScope::All` (Q4). Cập nhật `SATP_VALUE` để hart thứ cấp
+/// `adopt_satp` nhận luôn ASID đúng.
+pub fn set_satp_asid(asid: u16) -> bool {
+    let root = ROOT_PHYS.load(Ordering::SeqCst);
+    if root == 0 {
+        return false;
+    }
+    let satp = satp_sv39_asid(root, asid);
+    // SAFETY: `satp` mode 8 + PPN bảng gốc đã dựng + ASID 8 bit; mọi VA kernel đang chạy đã được
+    // identity-map từ trước. Chỉ ghi CSR của hart hiện tại.
+    unsafe {
+        asm!(
+            "csrw satp, {satp}",
+            satp = in(reg) satp,
+            options(nostack, preserves_flags),
+        );
+    }
+    SATP_VALUE.store(satp, Ordering::SeqCst);
+    read_satp() == satp
+}
+
+/// ASID đang nạp trên hart hiện tại (đọc `satp` CSR) — bằng chứng TAP "mọi hart cùng ASID".
+pub fn current_satp_asid() -> u16 {
+    satp_asid(read_satp())
 }
 
 /// Đọc lại `satp` (CSR) — TAP dùng để chứng minh mode 8/PPN root.
@@ -645,6 +725,103 @@ pub fn read_u64(va: u64) -> u64 {
 pub fn write_u64(va: u64, value: u64) {
     // SAFETY: caller (TAP) chỉ truyền VA vừa kiểm bằng `walk_sw` là leaf RW.
     unsafe { core::ptr::write_volatile(va as *mut u64, value) };
+}
+
+/// PTE của leaf thử nghiệm KT-51 (đọc qua [`walk_sw`]) — `None` nếu chưa map/không phải leaf.
+#[cfg(feature = "ktest")]
+pub fn probe_leaf_phys() -> Option<u64> {
+    leaf_phys_of(PROBE_VA)
+}
+
+/// PTE của leaf **probe #2** (TAP 27/28).
+#[cfg(feature = "ktest")]
+pub fn probe2_leaf_phys() -> Option<u64> {
+    leaf_phys_of(PROBE2_VA)
+}
+
+/// PA của leaf tại `va` nếu đang là leaf hợp lệ.
+#[cfg(feature = "ktest")]
+fn leaf_phys_of(va: u64) -> Option<u64> {
+    let walk = walk_sw(va);
+    if walk.valid && walk.leaf {
+        Some(walk.phys)
+    } else {
+        None
+    }
+}
+
+/// Đọc PTE ở `table_phys[index]` (bảng trong arena identity-mapped).
+#[cfg(feature = "ktest")]
+fn read_pte_at(table_phys: u64, index: usize) -> Option<u64> {
+    if table_phys & (PAGE_BYTES - 1) != 0 || index >= 512 {
+        return None;
+    }
+    // SAFETY: bảng 4 KiB do `PageTableBuilder` cấp trong arena identity-mapped; chỉ đọc 8 B.
+    Some(unsafe { core::ptr::read_volatile((table_phys as *const u64).add(index)) })
+}
+
+/// Ghi PTE ở `table_phys[index]`.
+#[cfg(feature = "ktest")]
+fn write_pte_at(table_phys: u64, index: usize, value: u64) -> bool {
+    if table_phys & (PAGE_BYTES - 1) != 0 || index >= 512 {
+        return false;
+    }
+    // SAFETY: như `read_pte_at`; ghi đúng một entry 8 B trong bảng đã cấp (không cấp bảng mới).
+    unsafe {
+        core::ptr::write_volatile((table_phys as *mut u64).add(index), value);
+    }
+    true
+}
+
+/// **Remap** leaf 2 MiB của [`PROBE_VA`] sang `pa` (giữ nguyên cờ PTE) — KT-51.
+///
+/// Chỉ đổi **một** PTE leaf cấp 1 đã có (không cấp bảng, không đụng `satp`), nên đây đúng là thao
+/// tác "sửa page table rồi phải `sfence.vma`" mà phép đo stale mapping cần. Trả `false` nếu bảng
+/// chưa có/không phải leaf hoặc `pa` không căn 2 MiB.
+#[cfg(feature = "ktest")]
+pub fn remap_probe(pa: u64) -> bool {
+    remap_leaf(PROBE_VA, pa)
+}
+
+/// **Remap** leaf 2 MiB của [`PROBE2_VA`] sang `pa` (TAP 27/28) — cùng cơ chế [`remap_probe`].
+#[cfg(feature = "ktest")]
+pub fn remap_probe2(pa: u64) -> bool {
+    remap_leaf(PROBE2_VA, pa)
+}
+
+/// Remap leaf 2 MiB tại `va` sang `pa` (chỉ sửa một PTE leaf cấp 1 đã có).
+#[cfg(feature = "ktest")]
+fn remap_leaf(va: u64, pa: u64) -> bool {
+    if pa & (LARGE_2M - 1) != 0 {
+        return false;
+    }
+    let root = ROOT_PHYS.load(Ordering::SeqCst);
+    if root == 0 {
+        return false;
+    }
+    // Hình Sv39 (tính tay, không kéo thêm dependency): root index = bit 38..30, level-1 = 29..21.
+    let root_index = ((va >> 30) & 0x1ff) as usize;
+    let level1_index = ((va >> 21) & 0x1ff) as usize;
+    let Some(root_entry) = read_pte_at(root, root_index) else {
+        return false;
+    };
+    let leaf_mask = vifast_plat_common::mmu::PTE_READ
+        | vifast_plat_common::mmu::PTE_WRITE
+        | vifast_plat_common::mmu::PTE_EXEC;
+    if root_entry & vifast_plat_common::mmu::PTE_VALID == 0 || root_entry & leaf_mask != 0 {
+        return false;
+    }
+    let table = (root_entry >> vifast_plat_common::mmu::PTE_PPN_SHIFT) << 12;
+    let index = level1_index;
+    let Some(old) = read_pte_at(table, index) else {
+        return false;
+    };
+    if old & vifast_plat_common::mmu::PTE_VALID == 0 || old & leaf_mask == 0 {
+        return false;
+    }
+    let flags = old & 0x3ff; // 10 bit thấp: V/R/W/X/U/G/A/D + RSW
+    let pte = ((pa >> 12) << vifast_plat_common::mmu::PTE_PPN_SHIFT) | flags;
+    write_pte_at(table, index, pte)
 }
 
 /// Guard page fault **thật** (`scause` 12/13/15, `stval` trong guard page **của hart nào đó**)

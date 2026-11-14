@@ -184,11 +184,11 @@ pub fn set_global_irq(on: bool) {
 // Post / drain / handler
 // ---------------------------------------------------------------------------------------------
 
-/// Local flush cho self-target — **khung của KT-51**.
+/// Ghi nhận kind đã xử lý **local** cho đường self-target (bộ đếm `local` + `kinds`).
 ///
-/// KT-50 **chưa** làm ASID/`sfence.vma`/ack shootdown; ở đây chỉ ghi nhận kind đã xử lý **local**
-/// (bộ đếm `local` + `kinds`) để chứng minh đường self-target **không** gửi IPI. KT-51 thay thân
-/// hàm này bằng `sfence.vma` thật + ack ngầm.
+/// Đây **không** phải đường shootdown: KT-51 (D2-68) làm local flush + ack ngầm trong
+/// `crate::tlb::shootdown` (không self-target), còn hàm này chỉ giữ ngữ nghĩa "post kind cho chính
+/// mình không sinh IPI" mà TAP 22 kiểm; nó **không** thay `sfence.vma`/ack của shootdown.
 fn local_flush(kind: IpiKind) {
     IPI_STATS.get(current_hart()).record_local(kind);
 }
@@ -262,6 +262,11 @@ fn drain_hart_current() -> KindSet {
     clear_ipi_current();
     let kinds = IPI_MAILBOXES.get(hart).drain();
     IPI_STATS.get(hart).record_drain(kinds);
+    // KT-51: mọi đường drain (trap handler, vòng chờ khoá, `park_forever`) đều **xử lý yêu cầu
+    // `TlbFlush`** nếu có — kind `TlbFlush` chỉ là "đánh thức", phạm vi flush nằm ở slot yêu cầu
+    // của hart (`crate::tlb`). Nếu không xử lý ở đây, hart park hoặc đang chờ khoá sẽ bỏ yêu cầu và
+    // shooter sẽ timeout oan.
+    let _ = crate::tlb::handle_kinds(kinds);
     kinds
 }
 

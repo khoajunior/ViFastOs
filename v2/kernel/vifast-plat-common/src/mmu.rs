@@ -74,6 +74,20 @@ pub const fn satp_sv39(root_phys: u64) -> u64 {
     (SATP_MODE_SV39 << SATP_MODE_SHIFT) | ((root_phys >> 12) & ((1u64 << SATP_PPN_BITS) - 1))
 }
 
+/// `satp` cho Sv39 với `root_phys` **và ASID 8 bit** của kernel (`crate::tlb`) — KT-51.
+///
+/// Trường `ASID` của `satp` rộng 16 bit (bit 59..44, privileged spec); kernel K3 chỉ dùng **8
+/// bit** (D2-65 Q4) nên 8 bit cao của trường luôn 0. Hàm **thuần** nên host test chốt được
+/// `MODE`/`PPN` không bị thay khi đổi ASID.
+pub const fn satp_sv39_asid(root_phys: u64, asid: u16) -> u64 {
+    satp_sv39(root_phys) | (((asid as u64) & crate::tlb::ASID_MASK) << crate::tlb::SATP_ASID_SHIFT)
+}
+
+/// Trường `ASID` (8 bit kernel dùng) của một giá trị `satp`.
+pub const fn satp_asid(satp: u64) -> u16 {
+    ((satp >> crate::tlb::SATP_ASID_SHIFT) & crate::tlb::ASID_MASK) as u16
+}
+
 /// Trường `MODE` của một giá trị `satp`.
 pub const fn satp_mode(satp: u64) -> u64 {
     satp >> SATP_MODE_SHIFT

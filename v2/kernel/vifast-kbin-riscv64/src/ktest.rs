@@ -2,8 +2,9 @@
 //! Ảnh **test** riscv64 cho K3 — bin riêng, feature `ktest`, nạp qua OpenSBI. D2-08: ảnh test
 //! **không** nằm trong ảnh sản phẩm.
 //!
-//! KT-49 mở rộng ảnh này lên **20 TAP**; KT-50 thêm **5 TAP IPI** (20..24) và dời trap lồng sang
-//! **25** — tổng **25 TAP** (ảnh guard vẫn 3 TAP):
+//! KT-49 mở rộng ảnh này lên **20 TAP**; KT-50 thêm **5 TAP IPI** (20..24); KT-51 thêm **5 TAP
+//! TLB/ASID/shootdown** (25..29) và dời trap lồng sang **30** — tổng **30 TAP** (ảnh guard vẫn 3
+//! TAP):
 //!
 //! 1. `ok 1 - ktest image` — marker tách ảnh của KT-44.
 //! 2. `ok 2 - trap breakpoint` — **trap phần cứng thật** (`ebreak` → `scause=3`, resume đúng
@@ -42,7 +43,14 @@
 //!    đủ `{TlbFlush, VmKick}`.
 //! 24. `ok 24 - ipi khong nham timer/external` — mọi ngắt trong pha là mã 1; timer/external = 0;
 //!    decode 1/5/9 tách đúng nhánh.
-//! 25. `ok 25 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//! 25. `ok 25 - 100 vong shootdown Ok` — KT-51: 100 shootdown thật, ack đủ `active_on`, không
+//!    self-target, hart đích đọc lại mapping mới.
+//! 26. `ok 26 - stale mapping caught` — remap **không** sfence ⇒ đọc ra giá trị cũ (TLB sống);
+//!    `sfence.vma` ba dạng ⇒ ra giá trị mới.
+//! 27. `ok 27 - hart ngoai active_on` — hart gọi/online **ngoài** `active_on` không bị chờ.
+//! 28. `ok 28 - rollover flush` — cạn 256 ASID ⇒ `generation+1` + một flush toàn bộ.
+//! 29. `ok 29 - timeout khong treo` — hart offline trong `active_on` ⇒ `Timeout`, máy vẫn dùng được.
+//! 30. `ok 30 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -52,6 +60,7 @@
 
 mod ktest_ipi;
 mod ktest_smp;
+mod ktest_tlb;
 
 use core::fmt::Write;
 use core::sync::atomic::AtomicU64;
@@ -106,7 +115,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..25\n");
+    PLATFORM.put_str("TAP version 13\n1..30\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -224,6 +233,24 @@ pub extern "C" fn rust_main() -> ! {
 
     // ------------------------------------------------- 5) MMU Sv39 thật (KT-46)
     let mmu = mmu::init();
+    // KT-51: ASID thật cho kernel VSpace — cấp lease đầu **trước** pha SMP để hart thứ cấp
+    // `adopt_satp` nhận `satp.ASID` đúng (lease đầu là ASID 0 nên `satp` không đổi giá trị).
+    let tlb_init = vifast_plat_riscv64::tlb::init();
+    {
+        let mut w = PlatformWriter(&PLATFORM);
+        let _ = writeln!(
+            w,
+            "# tlb init: asid={} generation={} rollover={} satp=0x{:x} satp_asid={} active_on=0x{:x} free={} issued={}",
+            tlb_init.asid,
+            tlb_init.generation,
+            tlb_init.rollover as u8,
+            tlb_init.satp,
+            tlb_init.satp_asid,
+            tlb_init.active_on,
+            tlb_init.state.free,
+            tlb_init.state.issued
+        );
+    }
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
@@ -855,6 +882,8 @@ pub extern "C" fn rust_main() -> ! {
     fails += ktest_smp::smp_phase();
     // -------------------------------------------------- 20..24) IPI thật + drain (KT-50)
     fails += ktest_ipi::ipi_phase();
+    // -------------------------------------------------- 25..29) ASID/sfence/shootdown (KT-51)
+    fails += ktest_tlb::tlb_phase();
 
     {
         let mut w = PlatformWriter(&PLATFORM);
@@ -873,10 +902,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 25) trap LỒNG (fatal, có chủ đích)
-    // In `ok 25` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 30) trap LỒNG (fatal, có chủ đích)
+    // In `ok 30` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 25 - trap nested panic\n");
+    PLATFORM.put_str("ok 30 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

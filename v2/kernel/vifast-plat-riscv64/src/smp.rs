@@ -356,7 +356,10 @@ pub fn secondary_setup(opaque: usize) -> bool {
     let token_ok = opaque == SECONDARY_TOKEN;
     let satp_ok = mmu::adopt_satp();
     crate::install_trap_vector();
-    if token_ok && satp_ok {
+    // KT-51: hart vào `active_on` của shootdown **sau** khi đã nạp đúng `satp.ASID` của lease
+    // kernel (nếu ghi hụt, `activate` trả false ⇒ hart không online ⇒ TAP đỏ, không che lỗi).
+    let tlb_ok = crate::tlb::activate(hart);
+    if token_ok && satp_ok && tlb_ok {
         ONLINE.insert(hart);
         true
     } else {
