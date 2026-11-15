@@ -5,9 +5,9 @@
   trên Untyped boot; **không** ABI, **không** `spec/`.
 - **HEAD vào:** `072a73ea` (KT-51 DONE, mở KT-52) — nhánh `main`, working tree có sửa đổi
   `viscript/` **từ trước** (không chạm; chỉ stage `v2/`).
-- **Trạng thái:** code + TAP + docs xong; `reviewer-kt52` verdict **DRIFT** (không UNSAFE) — đã vá
-  C1/C2/L1/L2 + ghi nợ L3..L9, đang chạy lại **50 boot × matrix** + `gate --fast` trên cây cuối
-  trước commit.
+- **Trạng thái:** **DONE** — commit **`320daa59`** ([KT-52], đã push) + `[KT-52b]` (STATE/log).
+  `reviewer-kt52` verdict **DRIFT** (không UNSAFE) — đã vá C1/C2/L1/L2 + L8, L7 chặn map 1 GiB, ghi nợ
+  L3..L9; **300/300 boot** + gate **569/73** trên cây cuối trước commit.
 
 ## 1. Baseline + đỏ trước
 
@@ -152,7 +152,18 @@ ASID, L5 panic không khôi phục `satp` (fatal halt), L6 `copy_kernel_root` te
 tracked + `map` không giới hạn dải VA (K3b), L9 nhánh "đệm thành hole" chưa có test (mọi cấp phát
 KT-52 đều 4 KiB).
 
-## 8. Bước tiếp
+## 8. Kết quả cuối (sau vá review, trước commit)
+
+- Host `kt52-host.log`: **13/13** PASS.
+- ktest 1 boot × `smp 1/2/4` (`kt52-ktest.log`): **37/37 TAP + guard 3/3**, 6/6 boot sạch.
+- **300/300 boot** (`kt52-boot50*.log`): mỗi `smp` 100/100 boot sạch, 0 `not ok`.
+- Product `run.sh 2 2` (`kt52-product.log`): 2/2 sạch, `ktest-strings=0`, `# obj: healthy=1`.
+- Budget (`kt52-budget.log`): product/ktest/guard đều ≤ 262.144 B.
+- Gate `kt52-gate.log`: **PASS 569 test/73 suite**, L1 1.000 seed.
+- Dòng `# leak` cuối: `cap=… used=0 free=… holes=0 frames=0 pts=0 vspaces=0 maps=0 orphans=0 check=1`
+  (không cờ tự khai; `check=1` ⇔ `check_objmem() == Ok`).
+
+## 9. Bước tiếp
 
 - Chờ verdict reviewer độc lập (lead spawn), vá nếu DRIFT (chặn commit), rồi commit
   `[KT-52]` + `[KT-52b]` (chỉ `v2/`), push, báo hash + TAP + bất biến byte.

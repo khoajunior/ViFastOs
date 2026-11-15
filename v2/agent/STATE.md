@@ -4,58 +4,112 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `6e6fa4ee` ([KT-51] ASID thật + `sfence.vma` + shootdown ack — commit chỉ `v2/`; parent `2ace7079` = [KT-00] Agent 0 D2-78; base KT-51 `d06607eb`) — **đã push**, `HEAD..origin/main = 0`
-BUILD_ID      : — (ảnh K3 KT-51: `vifast-kbin-riscv64` 67.792 B, `vifast-kbin-ktest` 158.616 B, `vifast-kbin-ktest-guard` 53.720 B; sha256 `9893cb6624cc43ee339626b64d429fbbc536ad0d575172b4d077bb0797ca5592` ktest / `b6311f71a1851545764621aba60f6b5acae78b64a7d6a27a33867ded87226f6c` guard — `JOURNAL/kt51-{budget,image-sha}.log`)
-Task          : **KT-51 (ASID thật + `sfence.vma` + shootdown ack)** — **DONE (commit `6e6fa4ee` đã push; `reviewer-kt51` DRIFT (không UNSAFE), A/B/C/D/E đã vá trước commit)**:
-                `satp.ASID` **8 bit** + thế hệ: `AsidAllocator` free-list 256, cấp ASID thấp nhất trước,
-                **không tái dùng trong cùng thế hệ** (`free` = về hưu), cạn ⇒ `generation += 1` + nạp lại 256 +
-                **một** `FlushScope::All` (`replace_lease`); đổi ASID **không** `sfence` (chỉ phát lại ở thế hệ mới
-                mới cần xả). **`sfence.vma` ba dạng** đúng `rs1 = VA`, `rs2 = ASID`: `(asid,va)` / `(asid,*)` /
-                `(*,*)`, chỉ TLB hart hiện tại. **Shootdown** `TlbFlush` qua IPI KT-50 + slot yêu cầu/hart
-                `{seq, asid, scope, va}`; ack `fetch_max` theo `seq`, bất biến `Ok ⇒ ack_mask == active_on`; hart gọi
-                **local flush + ack ngầm**, **không self-target** (D2-68); hart **ngoài `active_on`** không bị chờ,
-                không ack; chờ ack **drain mỗi bước** (kể cả `SIE=0`), deadline `rdtime` ⇒ timeout không treo; MỌI
-                đường `drain` (`ipi::drain_hart_current`) xử lý `TlbFlush` (trap handler, vòng chờ khoá,
-                `park_forever`); `IN_FLIGHT` một shootdown/lúc (K3 một VSpace). **D2-78**: `shootdown` **không** nhận
-                mask của người gọi — tự đọc `active_on()`, nên TAP 27 gỡ hart khỏi `ACTIVE_ON` **thật** rồi khôi phục.
-                **Đo thật**: 100 vòng shootdown tới `active_on` (`-smp 2` `sent=100`, `-smp 4` `sent=300`; mọi hart
-                phục vụ đủ 100), peer `received=100 flushes=100 prime/verify_wrong=0`, stale mapping **dương tính**
-                (remap không sfence ⇒ đọc giá trị cũ; sfence đúng dạng ⇒ giá trị mới, đủ 3 dạng), hart ngoài
-                `active_on` (D2-78: gỡ 2 hart phụ khỏi `ACTIVE_ON`, chúng không ack/không bị chờ; khôi phục ⇒ mọi
-                hart ack), rollover (gen 0→1, ASID 0 phát lại, một All flush), timeout (hart offline trong
-                `active_on` ⇒ `Timeout` rồi `recovered=1`). **TAP 25..29** (trap lồng dời 25→**30**;
-                `expected.txt` **30/30** + guard 3/3, `ktest.sh` grep theo `-smp`); **3 mutation bắt buộc** M1 bỏ
-                `sfence`, M2 bỏ chờ ack, M3 self-target đều **đỏ** + restore. Host **78/78**; **300 boot 300/300**;
-                budget `.data+.bss` product **3656 B** / ktest **5608 B** / guard **2680 B** (trần 262.144); gate
-                **PASS 569/73**.
-Bước          : 8/8 xong (baseline gate **569/73** + baseline ktest 25/25+3/3 → **đỏ trước** (worktree HEAD:
-                runner 30 TAP trên ảnh 25 TAP `1/2`; host `unresolved import vifast_plat_common::tlb`) →
-                `plat-common::tlb` (ASID allocator + FlushScope + bất biến ack + bộ đếm) + host test 11 →
-                `arch::tlb` (3 dạng sfence, satp ASID, slot, shootdown ack/timeout, rollover) + hook drain +
-                `activate` AP + probe leaf **chỉ ảnh test** + `set_satp_asid` → `ktest_tlb.rs` TAP 25..29 + dời
-                trap lồng 30 + runner/expected → 1 boot mỗi smp xanh → **3 mutation đỏ + restore** → 300 boot
-                **300/300** trên ảnh cuối (sha ghi đầu/cuối) + product `run.sh 1 2` PASS + budget → docs §14 +
-                JOURNAL + review độc lập (DRIFT (không UNSAFE) — A/B/C/D/E đã vá **trước** commit) → **commit `6e6fa4ee` + `[KT-51b]` + push**)
+HEAD          : `320daa59` ([KT-52] object layer `no_std` + Retype nội bộ — commit chỉ `v2/`; parent `583cf6ff` = [ST-00] tab ViScript; base KT-52 `072a73ea` = [KT-00] Agent 0 mở KT-52) — **đã push**, `HEAD..origin/main = 0`
+BUILD_ID      : — (ảnh K3 KT-52, cây cuối sau vá review: `vifast-kbin-riscv64` 89.640 B / data+bss 11.248 B, `vifast-kbin-ktest` 230.808 B / 13.200 B, `vifast-kbin-ktest-guard` 53.728 B / 2.680 B; sha256 `8342560b4e222ccd52245f2579299d64ed0b40c1604896b97892461287768428` product / `b8d4a30cbde2924bfba966f78dcadbfd14a0f07a77e63c316a59b9b1d8a6411b` ktest / `3b6ca6218e652d095c5ebee8aaca9876688dcc565dec03993d74baf7f70170ad` guard — `JOURNAL/kt52-{budget,image-sha}.log`)
+Task          : **KT-52 (Object layer `no_std` + Retype nội bộ)** — **DONE (commit `320daa59` đã push; `reviewer-kt52` DRIFT (không UNSAFE), C1/C2/L1/L2 vá + L3..L9 ghi nợ trước commit)**:
+                object layer **nội bộ** (không ABI, không `spec/`): `Untyped`/`Frame`/`PageTable`/`VSpace`,
+                cap/key tối thiểu, `Retype`/`Revoke` atomic; Untyped boot = arena RAM **64 KiB** sau
+                `__kernel_end` (không section ELF) + cửa sổ PA **1 GiB** `[TK]` (D2-66), 2 Untyped (`U0` cửa
+                sổ căn 2 MiB, `U1` căn 1 GiB cho Frame 1 GiB); **Frame** 4 KiB/2 MiB/1 GiB (`size_bits` từ
+                `vifast-pte`), 4 KiB/2 MiB **ghi/đọc thật** tại `pa` qua physmap, 1 GiB là **nhãn** (chưa map
+                ⇒ `NotSupported`, L7); **PageTable** 4 KiB = 512 PTE Sv39 (hình `walk_shape` từ `vifast-pte`);
+                **VSpace** map/unmap/protect qua PTE + `sfence.vma` KT-51, W^X **toàn cục** theo Frame
+                (`maps/w/x`, D2-67): `W` sau `X`/`X` sau `W` ⇒ `WxViolation`, `Device+EXEC` ⇒ `WxViolation`,
+                **atomic**; **bất biến byte** đi lại bảng thật (`Σ live + Σ hole == watermark ≤ capacity`,
+                đệm căn lề là hole — **không** `gap`/cờ tự khai), `check_objmem` tương đương `check_vm` K2
+                (byte/PA/không mồ côi/walk khớp/W^X recount/cap). **TAP 30..36** (trap lồng dời 30→**37**;
+                `expected.txt` **37/37** + guard 3/3); `check_objmem` chạy cả ảnh sản phẩm (`# obj:`).
+                **Đo thật**: 1 boot × `smp 1/2/4` 6/6 sạch (`kt52-ktest.log`); **300/300 boot** trên cây cuối
+                (`kt52-boot50*.log`, 0 `not ok`); host **13/13** (`kt52-host.log`); product `run.sh 2 2` PASS
+                (`kt52-product.log`); budget `.data+.bss` product **11.248 B** / ktest **13.200 B** / guard
+                **2.680 B** (trần 262.144); gate **PASS 569/73** (`kt52-gate.log`).
+Bước          : 8/8 xong (baseline gate **569/73** + **đỏ trước** (runner đòi plan 37 trên ảnh 30 TAP,
+                `kt52-red.log`) → `plat-common::obj` (types/arena/vspace/check, no_std, no unsafe) + host
+                test 10 → `arch::obj` (PhysmapMem, init 2 Untyped, copy root kernel, switch/restore
+                `satp`, đọc/ghi VA user qua `SUM`) → `ktest_obj.rs` TAP 30..36 + dời trap lồng 37 →
+                runner/expected → 1 boot matrix xanh → **review `reviewer-kt52` DRIFT** → vá **C1** (gate
+                log thật trên cây cuối), **C2** (bỏ `gap=0` + 3 cờ tự khai, in `check=1` từ
+                `check_objmem`), **L1** (revoke Untyped từ chối Frame còn map chéo Untyped, atomic), **L2**
+                (`push_flush -> bool` + `ensure_flush_slots` trước mutation), **L8** (bỏ hardcode pa1);
+                thêm test host L1/L2/L7 (10→**13**) → **300/300 boot** trên cây cuối + gate **569/73** →
+                **commit `320daa59` + push**)
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt51-gate-fast.log`);
-                baseline cùng số (`JOURNAL/kt51-baseline-gate-fast.log`). `./v2/bin/v2 check` PASS. Kernel **không**
-                nằm trong `gate --fast` (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm bằng build 3 ảnh +
-                `ktest.sh` (**icount shift=6**, D2-74) + `run.sh` (**không icount**, D2-72 Q2) + host test **78/78**
-                (`JOURNAL/kt51-{host-tests,ktest-smp1,ktest-smp2,ktest-smp4,boot50-matrix,product-boot-smp2-raw,
-                budget,image-sha}.log` + `kt51-review.md`).
-Miri          : KT-51 — **không chạy Miri** trên ảnh `no_std`/asm/CSR/MMIO (D2-72 Q12); Miri vẫn áp `lib/` + sim
-                (không đổi). Phần **logic** TLB/ASID chạy host: `cargo test -p vifast-plat-common` **78/78** = 14
-                host KT-45 + 12 IPI KT-50 + 8 MMU + 12 timer + 12 PLIC + 9 SMP + **11 TLB KT-51**
-                (`tests/tlb.rs`: 256 ASID không trùng/thế hệ, cạn ⇒ rollover, free về hưu + double-free, satp giữ
-                MODE/PPN, mã hoá 3 dạng flush, `acked_mask`/implicit/ngoài `active_on`, bộ đếm PerHart, tất định).
-Việc dở       : **KT-51 xong**: commit `6e6fa4ee` + push OK; `[KT-51b]` cập nhật HEAD + verdict + STATE.
-                Kế tiếp: Agent 0 lật KT-51 DONE → mở **KT-52** (object layer `no_std` + Retype nội bộ, dùng
-                `AsidAllocator`/probe leaf làm nền). KT-51 **không** đụng `spec/`/sim/.scn/QUEUE/DECISIONS/AGENTS/
-                `viscript/`; không dependency; `unsafe` chỉ `kernel/vifast-plat-*`; không `cfg(target_arch)`.
-                **Giới hạn đã ghi docs §14.7 + journal**: thời gian **ảo** (icount), một VSpace kernel + một
-                shootdown/lúc, `-smp 1` mode=self, không đo latency/TLB hit-miss thật; 300 boot là smoke (soak 1.000
-                thuộc KT-57).
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt52-gate.log`);
+                baseline cùng số (`JOURNAL/kt52-gate-baseline.log`). `v2 check`/fmt PASS (strict). Kernel
+                **không** nằm trong `gate --fast` (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm
+                bằng build 3 ảnh + `ktest.sh` (icount shift=6, D2-74) + `run.sh` (không icount) + host test
+                13/13 + 300 boot (`JOURNAL/kt52-{ktest,host,product,boot50*}.log`).
+Miri          : KT-52 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO (D2-72 Q12); phần **logic** object
+                layer tách khỏi asm nên chạy host: `cargo test -p vifast-plat-common --test obj` **13/13**
+                (Retype/Revoke/byte/PA/Frame 3 cỡ/map-unmap-protect/W^X 2 ca/check_objmem/OOM atomic/L1/L2/L7).
+Việc dở       : **KT-52 xong**: commit `320daa59` pushed; `[KT-52b]` cập nhật HEAD + STATE. Kế tiếp:
+                Agent 0 lật KT-52 DONE → mở **KT-53** (U-mode + 3 syscall + nạp `init` ELF; dùng
+                `obj::machine()`/`Retype(VSpace)`/`map`). KT-52 **không** đụng `spec/`/sim/.scn/QUEUE/
+                DECISIONS/AGENTS/`viscript/`; không dependency ngoài `vifast-pte` (đã có từ KT-46); `unsafe`
+                chỉ `kernel/vifast-plat-*`; không `cfg(target_arch)`. **Nợ đã ghi docs §15.10**: L3
+                `mapped_device` toàn cục (KT-56 làm rõ D2), L4 hai nguồn ASID, L5 panic không khôi phục
+                `satp` (fatal halt), L6 `copy_kernel_root` test-only chép PTE không tracked, L9 nhánh đệm
+                thành hole chưa có test; metadata object trong `.bss` (K3b KT-58), Frame 1 GiB nhãn (L7).
 ```
+
+```
+
+## KT-52 — Object layer `no_std` + Retype nội bộ (VSpace/PageTable/Frame từ Untyped)
+
+**Vào**: READY; HEAD `072a73ea` ([KT-00] mở KT-52; code KT-51 `6e6fa4ee`); `HEAD..origin/main = 0`; working
+tree có `viscript/` + `review/` của tab khác — **không chạm**; baseline gate **569/73**
+(`JOURNAL/kt52-gate-baseline.log`); baseline ktest 30/30 + guard 3/3.
+
+**Mục tiêu** (K3-PLAN §4.1 KT-52 + D2-66/D2-67, `k3-riscv64.md` §15): object layer tối thiểu `no_std` trên
+Untyped boot; object `Untyped`/`PageTable`/`Frame`/`VSpace`; cap/key tối thiểu; `Retype` **nội bộ** (không
+ABI, không `spec/`); Frame 4 KiB/2 MiB/1 GiB trên vùng RAM vật lý; PageTable 3 cấp Sv39 (`vifast-pte`);
+VSpace map/unmap/protect qua PTE + `sfence.vma` (KT-51) + W^X **toàn cục** (D2-67); bất biến byte Untyped;
+`check_vm` tương đương `no_std`.
+
+**Đã làm**: `vifast-plat-common::obj` (`mod` types + `arena` bump/hole + `vspace` map/unmap/protect/walk +
+`check` `check_objmem`; `no_std`, `forbid(unsafe_code)`, host-testable) + `vifast-plat-riscv64::obj`
+(`PhysmapMem` qua physmap, `init` 2 Untyped boot (arena 64 KiB sau `__kernel_end` + cửa sổ PA 1 GiB; `U0`
+căn 2 MiB, `U1` căn 1 GiB), `copy_kernel_root` (test-only) + `switch_root`/`restore_kernel_root`
+(`satp` + `sfence`), đọc/ghi VA user qua `sstatus.SUM`) + `kbin::ktest_obj` (TAP 30..36 + dòng bằng chứng)
++ `ktest.rs` plan 1..37 (trap lồng 30→37) + `main.rs` object init/`# obj:` (cả ảnh sản phẩm) +
+`expected.txt` 37/37 + `ktest.sh` grep TAP/bằng chứng + docs §15 + bảng §2/§4.
+
+**W^X (D2-67)**: `Frame.maps/mapped_w/mapped_x` toàn cục; `map`/`protect` `W` khi `x>0` hoặc `X` khi `w>0`
+⇒ `WxViolation` atomic; `Device+EXEC` ⇒ `WxViolation`; `check_objmem` recount từ mapping sống, không tin bộ
+đếm. Map 4 KiB `U|R|W` + `protect` `R|NX` + `unmap` có `sfence` (arch chạy; TAP 35 đếm 3 flush trang).
+
+**Bất biến byte (C2 review)**: đệm căn lề ghi thành **hole**; invariant `Σ live + Σ hole == watermark ≤
+capacity` (không `gap`/cờ tự khai); TAP 31 in `used0/after_retype/after_revoke/free0/free1` + `oom=1`
+(OutOfMemory atomic); TAP 36 in `# leak: … holes=0 … check=1` — `check=1` chỉ khi `check_objmem()` trả
+`Ok`.
+
+**Phần cứng thật (TAP 35)**: chép 512 root entry kernel vào root VSpace (test-only), `csrw satp` ASID nhãn
++ `sfence.vma`, ghi/đọc VA user `0x4000_0000` từ S-mode với `sstatus.SUM=1`, `protect` R|NX (PTE mất W),
+`unmap`+`sfence` (walk invalid), rồi **khôi phục `satp` kernel vô điều kiện** (kể cả nhánh lỗi, không
+in/log trong cửa sổ đã đổi `satp`), `kernel=1`.
+
+**Review**: `reviewer-kt52` (read-only, lead spawn) — verdict **DRIFT** (không UNSAFE); **C1** (gate log
+trích phải tồn tại **trên cây cuối**) + **C2** (`# leak` không còn hằng `gap=0`/3 cờ tự khai) + **L1**
+(`revoke(Untyped)` từ chối Frame còn map chéo Untyped — `HasChildren`, atomic) + **L2** (`sfence` không rơi
+im lặng: `push_flush -> bool` + `ensure_flush_slots` trước mutation) đã vá **trước commit**; **L8** bỏ
+hardcode pa1; **L7** `map` Frame 1 GiB ⇒ `NotSupported` tới K4/K5; test host 10→**13**. **L3/L4/L5/L6/L9**
+ghi nợ §15.10.
+
+**Bằng chứng** (log thật `JOURNAL/`): host **13/13** (`kt52-host.log`); ktest 1 boot × `smp 1/2/4`
+**37/37 + guard 3/3**, 6/6 sạch (`kt52-ktest.log`); **300/300 boot** (50 × `smp 1/2/4`, 0 `not ok`:
+`kt52-boot50.log` + `kt52-boot50-smp{1,2,4}.log`); product `run.sh 2 2` PASS (`kt52-product.log`); budget
+`kt52-budget.log`; sha ảnh `kt52-image-sha.log`; gate **PASS 569/73** (`kt52-gate.log`); đỏ trước
+`kt52-red.log`.
+
+**Giới hạn**: Frame 1 GiB chỉ nhãn trên `-m 128M` (chưa map — L7); metadata object/cap trong `.bss` (K3b
+KT-58); chưa child Untyped/CNode/MDB/IPC/sched (K3b); object op single-hart (BSP); không thu hồi bảng trung
+gian rỗng sau `unmap`; `Device` là cờ chính sách (Sv39 không có bit); root VSpace chép kernel root là
+**test-only** (L6); panic trong cửa sổ `satp` là fatal halt (L5); hai nguồn ASID (L4); `mapped_device` chưa
+đếm toàn cục (L3); nhánh đệm-căn-lề-thành-hole chưa test (L9). Chi tiết `JOURNAL/kt52-journal.md` + docs §15.
+
+**Không thuộc KT-52**: CNode/TCB/IPC/scheduler (K3b KT-58..61), U-mode + 3 syscall (KT-53), harness TAP
+đầy đủ (KT-54), conformance 5 `.scn` (KT-55), `FaultKind`/W^X fault + `spec/abi.toml` (KT-56), soak
+K3-DOD (KT-57), pager/COW.
 
 ## KT-51 — ASID thật + `sfence.vma` + shootdown ack (D2-65 Q4/Q5, D2-68)
 
