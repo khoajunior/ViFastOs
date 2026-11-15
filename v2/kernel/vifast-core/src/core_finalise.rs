@@ -5,9 +5,13 @@
 //! (`cancel_reply`/`clear_dead_reply_in_waiters`/`purge_dead_refs`), tách khỏi `core_ipc.rs`
 //! để giữ R1 ≤ 1.500 dòng.
 //!
-//! **Khác biệt có chủ đích so với sim:** sim để Recv/Notification waiter treo trên object đã
-//! finalise (không có ca); core đánh thức họ (`Cancelled + Ready`) — chống treo vĩnh viễn.
-//! Parity loại trừ đúng đường này; ca core-only pin ở `kt63_core_cap_ipc.rs`.
+//! **KT-64a (D2-89 + D2-90)** — **một nguồn sự thật**: sim đã sửa theo cùng chuẩn (KT-64a) nên
+//! **không còn** khác biệt có chủ đích ở đường này. Finalise Endpoint đánh thức **cả** Recv
+//! waiter **và** mọi sender `BlockedOnSend` đang xếp hàng trên Endpoint đó (`Cancelled +
+//! Ready`); finalise Notification đánh thức waiter. Message bị huỷ đếm vào `ipc_dropped`
+//! (D2-90: drop **có đếm**). Parity `kt60_core_parity.rs` phủ trọn ba loại chờ
+//! (`kt63_parity_revoke_finalise_caller_va_sender`, `kt64a_parity_finalise_recv_waiter`,
+//! `kt64a_parity_finalise_notification_waiter`).
 
 use crate::error::{KError, ObjId};
 use crate::machine::Machine;
@@ -57,30 +61,50 @@ impl Machine {
         }
     }
 
-    /// **KT-63** — finalise **body Endpoint** trước khi trả free-list: đánh thức Recv waiter
-    /// (`Cancelled + Ready` — chống treo khi Endpoint chết) và đếm message người dùng bị huỷ
-    /// vào `ipc_dropped` (bất biến bảo toàn message).
+    /// **KT-63 / KT-64a** — finalise **body Endpoint** trước khi trả free-list: đánh thức Recv
+    /// waiter **và mọi sender `BlockedOnSend` đang xếp hàng** (`Cancelled + Ready` — anti-hang,
+    /// D2-89/D2-90) và đếm message người dùng bị huỷ vào `ipc_dropped` (bất biến bảo toàn
+    /// message, D2-90: drop **có đếm**).
     ///
-    /// **Khác biệt có chủ đích so với sim** (ghi `docs/k3b-core.md` §12): sim để waiter treo
-    /// trên Endpoint đã finalise (không có ca); core chọn anti-hang. Parity loại trừ đúng
-    /// đường này và có ca core-only pin (`kt63_core_recv_waiter_thuc_khi_endpoint_bi_finalise`).
+    /// **KT-64a**: trước đây core giữ hành vi cũ của sim (sender **treo** — nợ D2-90 tường
+    /// minh); nay sim đã theo chuẩn nên core đóng nốt nợ: cả ba loại chờ trên object bị finalise
+    /// đều `Cancelled + Ready`. Không phải "nới" ngữ nghĩa — đây **là** chuẩn D2-89/D2-90.
     pub(crate) fn finalise_endpoint_body(&mut self, ep: ObjId) {
-        let (recv, dropped) = match self.endpoint_data(ep) {
+        let (recv, senders, n_senders, dropped) = match self.endpoint_data(ep) {
             Ok(e) => {
                 let dropped = e
                     .send
                     .iter()
                     .filter(|mi| self.ipc_msgs[*mi as usize].msg.is_some())
                     .count();
-                (e.recv, dropped)
+                // Chỉ **sender đang chờ giao** (`blocking`) mới cần đánh thức; `NBSend` xếp hàng
+                // nhưng vẫn `Ready` ⇒ không phải waiter.
+                let mut senders = [0u32; crate::objstate::ENDPOINT_QUEUE_CAP];
+                let mut n = 0usize;
+                for mi in e.send.iter() {
+                    let q = &self.ipc_msgs[mi as usize];
+                    if q.blocking && !senders[..n].contains(&q.sender) {
+                        senders[n] = q.sender;
+                        n += 1;
+                    }
+                }
+                (e.recv, senders, n, dropped)
             }
             Err(_) => return,
         };
         self.ipc_dropped += dropped as u64;
-        let Some((w, _)) = recv else { return };
-        if matches!(self.tcb_state(w), Ok(TcbState::BlockedOnRecv { ep: e2, .. }) if e2 == ep) {
-            let _ = self.set_last_ipc_error(w, KError::Cancelled);
-            let _ = self.transition_tcb(w, TcbState::Ready);
+        if let Some((w, _)) = recv {
+            if matches!(self.tcb_state(w), Ok(TcbState::BlockedOnRecv { ep: e2, .. }) if e2 == ep) {
+                let _ = self.set_last_ipc_error(w, KError::Cancelled);
+                let _ = self.transition_tcb(w, TcbState::Ready);
+            }
+        }
+        // **D2-90** — sender bị finalise: `Cancelled + Ready`, không treo trên Endpoint đã chết.
+        for &s in &senders[..n_senders] {
+            if matches!(self.tcb_state(s), Ok(TcbState::BlockedOnSend { ep: e2, .. }) if e2 == ep) {
+                let _ = self.set_last_ipc_error(s, KError::Cancelled);
+                let _ = self.transition_tcb(s, TcbState::Ready);
+            }
         }
     }
 

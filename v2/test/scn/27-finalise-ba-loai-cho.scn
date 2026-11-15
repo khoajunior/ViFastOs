@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-64a (D2-89 + D2-90) — finalise IPC là **anti-hang**: `Revoke` Untyped chứa Endpoint/Notification
+# đang có TCB chờ **phải** đánh thức cả **ba** loại chờ — `BlockedOnRecv`, `BlockedOnNotification`,
+# `BlockedOnSend` — bằng `Cancelled` + `Ready`, huỷ hàng gửi và đếm message bị huỷ (`ipc_dropped`).
+# Trước KT-64a sim K1–K2 để cả ba **treo** trên object đã chết ⇒ tệp này là ca **đỏ** của mô hình
+# cũ (chạy `tests/kt64a_scn.rs` trên sim cũ: `BlockedOnRecv{ep chết}`/`BlockedOnSend{ep chết}`),
+# xanh sau khi sửa sim. Không phải ABI mới: `CNode.Revoke` + 3 syscall đã có trong `spec/abi.toml`.
+version = 1
+name = "27-finalise-ba-loai-cho"
+tags = ["cap-revoke", "notification"]
+expect_states = ["Ready", "Ready", "Ready"]
+caps = { u0 = "Untyped", c0 = "CNode", u1 = "Untyped", c1 = "CNode", ep0 = "Endpoint", ep1 = "Endpoint", ntf0 = "Notification", tcb0 = "Tcb", tcb1 = "Tcb", tcb2 = "Tcb", rep0 = "Reply", sc0 = "SchedContext" }
+thread = [
+  { name = "waiter-recv", steps = [
+    "recv cap=ep0 => ok",
+  ] },
+  { name = "waiter-notification", steps = [
+    "recv cap=ntf0 => ok",
+  ] },
+  { name = "sender", steps = [
+    "send cap=ep1 => ok",
+  ] },
+  { name = "revoker", steps = [
+    "invoke CNode.Revoke cnode=c1 slot=u1 => ok",
+  ] },
+]

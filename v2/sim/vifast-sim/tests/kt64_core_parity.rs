@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! KT-64 — **parity sim↔core** cho hai mảng có mô hình ở sim: `SchedContext.Bind`/`Signal` và
-//! `tcb_resume_with_regs`.
+//! KT-64 — **parity sim↔core** cho ba mảng có mô hình ở sim: `SchedContext.Bind`/`Signal`,
+//! `tcb_resume_with_regs`, và **`TlbFlush`** (KT-64a, D2-92c: `seq/targets/pending/acked/Busy`).
 //!
 //! Cùng một rig slot (cùng thứ tự tạo object ⇒ cùng `ObjId`), cùng một dãy op; sau **từng bước**
 //! so (a) **mã lỗi ABI** (`KError::id()`) và (b) **digest** trạng thái quan sát được. Mảng
-//! `TlbFlush` và `SlotPool`→arena **không** có parity ở đây vì sim không mô hình hoá flush phần
-//! cứng (TLB của sim là mô hình của tầng VSpace K2) và sim giữ slot CNode bằng heap riêng —
-//! lý do ghi trong `docs/k3b-core.md` §13; hai mảng đó pin bằng `kt64_core_tlb_bind_resume.rs`
-//! và TAP QEMU.
+//! `SlotPool`→arena **không** có parity ở đây (sim giữ slot CNode bằng heap riêng, core dùng
+//! byte arena của Untyped) — lý do ghi trong `docs/k3b-core.md` §13; mảng đó pin bằng
+//! `kt64_core_tlb_bind_resume.rs` và TAP QEMU.
+//!
+//! **KT-64a** — `TlbFlush` **đã** có parity (kịch bản C): sim có giao thức shootdown
+//! (`tlb_shootdown_begin/wait/poll`, `tlb_pending`, mask ack — KT-40) nên `seq/targets/pending/
+//! acked/Busy` so được với core (D2-92c). Hai bên dùng **cùng một định nghĩa** cho ảnh chụp
+//! (xem `targets_of`/`sim_nut_ack`): `targets` = tập hart **phải** ack (trừ hart gọi, D2-78
+//! `tlb::targets`), `pending[hart]` = `Some(seq)` ⇔ hart còn **nợ** ack của `seq` — core giữ
+//! một ô `tlb_pending`/hart, sim tách hai vai (caller-side `tlb_pending` + `tlb_pending_ack`).
 //!
 //! `Unbind` cũng **không** có ở sim K1–K2 (chỉ `Bind`); core cài theo `spec/abi.toml` và pin
 //! core-only — ghi rõ trong §13.
@@ -589,4 +595,304 @@ fn kt64_parity_resume_with_regs() {
         CoreErr::IllegalOperation.id(),
         "core phải IllegalOperation"
     );
+}
+
+// ===========================================================================================
+// Kịch bản C — **parity `TlbFlush`** (KT-64a / D2-92c): `seq`, `targets`, `pending`, `acked`,
+// `Busy`. Hai hart, cùng một `active_on`, cùng một `asid`/`va`.
+// ===========================================================================================
+
+const C_VA: u64 = 0x4000;
+
+/// Hook [`kc::TlbEnv`] giả cho core: `active_on`/`generation` điều khiển được, đếm flush **theo
+/// hart** (cùng nghĩa `env.flushes` của `kt64_core_tlb_bind_resume.rs`).
+#[derive(Default)]
+struct TestTlb {
+    active: u64,
+    generation: u64,
+    flushes: std::vec::Vec<(u16, kc::TlbScope, u16, u64)>,
+}
+
+impl kc::TlbEnv for TestTlb {
+    fn active_on(&self) -> u64 {
+        self.active
+    }
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+    fn flush_local(&mut self, hart: u16, scope: kc::TlbScope, asid: u16, va: u64) {
+        self.flushes.push((hart, scope, asid, va));
+    }
+}
+
+/// Bit hart **phải** ack — **đúng** công thức `D2-78` (`vifast_plat_common::tlb::targets`), dùng
+/// chung cho hai phía để `targets` của sim (`= active_on`, quy ước `TlbShootdownInfo` của KT-40 và
+/// `tlb::last_shootdown` của kernel) so được với `targets` của core (`TlbFlushReport`).
+fn targets_of(active_on: u64, caller: usize) -> u64 {
+    active_on & !(1u64 << caller)
+}
+
+fn sim_nut_ack(m: &SimMachine, seq: u64) -> [Option<u64>; 2] {
+    // Vai **hart gọi**: `tlb_pending` của sim (một shootdown/hart). Vai **hart đích**: phần
+    // `tlb_pending_ack` (KT-64a — chi tiết trước đây sim thiếu, nay có để so `pending`).
+    [
+        m.tlb_pending(0)
+            .expect("pending hart 0")
+            .map(|p| p.seq)
+            .filter(|s| *s == seq)
+            .or_else(|| m.tlb_pending_ack(0).expect("ack hart 0")),
+        m.tlb_pending(1)
+            .expect("pending hart 1")
+            .map(|p| p.seq)
+            .filter(|s| *s == seq)
+            .or_else(|| m.tlb_pending_ack(1).expect("ack hart 1")),
+    ]
+}
+
+struct SimTlbRig {
+    m: SimMachine,
+    vs: SimObj,
+}
+
+fn sim_tlb_rig(harts: u16, active: u64) -> SimTlbRig {
+    let mut m = SimMachine::with_harts(harts);
+    let c = m.add_cnode(1024);
+    let uva = m.add_untyped(0, 2 * 1024 * 1024);
+    let ufr = m.add_untyped(1 << 32, 4096);
+    for (slot, u) in [(0usize, uva), (1, ufr)] {
+        let cap = m.root_cap(u);
+        m.put_cap(c, slot, cap).expect("cap Untyped");
+    }
+    let cap = m.vspace_create(sslot(c, 0)).expect("vspace_create");
+    let vs = m.cap_info(cap).expect("cap vspace").obj;
+    m.put_cap(c, 2, cap).expect("cap vspace");
+    for h in 0..harts {
+        if active & (1u64 << h) != 0 {
+            m.vspace_activate(vs, h).expect("vspace_activate");
+        }
+    }
+    assert_eq!(
+        m.vspace_active_on(vs).expect("active_on").bits(),
+        active,
+        "sim: active_on phải đúng mask của rig"
+    );
+    SimTlbRig { m, vs }
+}
+
+/// `(số flush theo hart của sim, số flush theo hart của core)` — hai bên phải bằng nhau.
+fn so_flush(s: &SimTlbRig, c: &CoreTlb, harts: u16) {
+    for h in 0..harts {
+        let a = s.m.tlb_info(h).expect("tlb_info").flushes;
+        let b = c.env.flushes.iter().filter(|f| f.0 == h).count() as u64;
+        assert_eq!(a, b, "hart {h}: số flush thật lệch ({a} vs {b})");
+    }
+}
+
+struct CoreTlb {
+    m: CoreMachine,
+    env: TestTlb,
+}
+
+fn core_tlb(active: u64, generation: u64) -> CoreTlb {
+    let m = CoreMachine::with_harts(2);
+    CoreTlb {
+        m,
+        env: TestTlb {
+            active,
+            generation,
+            flushes: std::vec::Vec::new(),
+        },
+    }
+}
+
+/// **C1 — 1 hart** (`active_on = {0}`): `seq`, `targets`, `acked` đọc **literal** từ
+/// `TlbShootdownInfo` của sim và `TlbFlushReport` của core (cùng phép chiếu `targets_of`).
+#[test]
+fn kt64a_parity_tlb_flush_mot_hart() {
+    let mut s = sim_tlb_rig(1, 0b1);
+    let asid = s.m.vspace_get_asid(s.vs).expect("asid");
+    let generation = s.m.vspace_info(s.vs).expect("vspace_info").generation;
+    let mut c = core_tlb(0b1, generation);
+    c.m.set_current_hart(0).expect("hart 0");
+
+    // Sim: `begin` + `wait` (hai cửa của mô hình KT-40). Core: `tlb_flush` **một cửa**
+    // (= `tlb_shootdown_begin` + `tlb_shootdown_wait`, trả `TlbFlushReport`) — cùng một shootdown
+    // mỗi bên nên số flush thật so được **trực tiếp** sau bước này.
+    let seq_s = s.m.tlb_shootdown_begin(0, s.vs, C_VA).expect("sim begin");
+    s.m.tlb_shootdown_wait(0).expect("sim wait");
+    let r =
+        c.m.tlb_flush(&mut c.env, kc::TlbScope::Page { va: C_VA }, asid, C_VA)
+            .expect("core tlb_flush 1 hart");
+    assert_eq!(seq_s, r.seq, "`seq` phải giống nhau (1-based)");
+    let inf = s.m.last_tlb_shootdown().expect("shootdown vừa xong");
+    assert_eq!(
+        r.active_on,
+        inf.targets.bits(),
+        "`active_on` của core = `targets` của sim (= active_on)"
+    );
+    assert_eq!(
+        r.targets,
+        targets_of(inf.targets.bits(), 0),
+        "`targets` của core = `tlb::targets(active_on, caller)` (D2-78)"
+    );
+    assert_eq!(
+        r.acked,
+        targets_of(inf.acked.bits(), 0),
+        "`acked` của core = ack **trừ** hart gọi (ack ngầm, D2-68)"
+    );
+    assert!(r.local, "core: `local` = true (luôn flush cục bộ)");
+    assert!(inf.completed, "sim: `completed` = true");
+    assert_eq!(inf.acked, inf.targets, "sim: `Ok ⇒ acked == targets`");
+    assert_eq!(inf.messages, 0, "sim: không có message remote");
+    assert_eq!(
+        c.m.tlb_remote_posts(),
+        0,
+        "core: không post cho hart ngoài `active_on`"
+    );
+    assert!(
+        s.m.tlb_pending(0).expect("pending").is_none(),
+        "sim: hết chờ"
+    );
+    assert!(
+        c.m.tlb_pending(0).expect("pending core").is_none(),
+        "core: hết chờ"
+    );
+    so_flush(&s, &c, 1);
+}
+
+/// **C2 — 2 hart** (`active_on = {0,1}`): begin ⇒ Busy khi còn pending ⇒ hart đích tự phục vụ ⇒
+/// wait. So `seq`, `pending` **cả hai vai** (hart gọi + hart nợ ack), `acked`, `Busy`, số
+/// `TlbFlush` giao và số flush **theo hart**.
+#[test]
+fn kt64a_parity_tlb_flush_hai_hart_busy_va_pending() {
+    let mut s = sim_tlb_rig(2, 0b11);
+    let asid = s.m.vspace_get_asid(s.vs).expect("asid");
+    let generation = s.m.vspace_info(s.vs).expect("vspace_info").generation;
+    let mut c = core_tlb(0b11, generation);
+    c.m.set_current_hart(0).expect("hart 0");
+
+    // --- bước 1: begin từ hart 0 ---
+    let seq_s = s.m.tlb_shootdown_begin(0, s.vs, C_VA).expect("sim begin");
+    let seq_c =
+        c.m.tlb_shootdown_begin(&mut c.env, kc::TlbScope::Page { va: C_VA }, asid, C_VA)
+            .expect("core begin");
+    assert_eq!(seq_s, seq_c, "`seq`");
+    let inf = s.m.tlb_pending(0).expect("pending sim").expect("đang chờ");
+    assert_eq!(inf.asid, asid, "sim: `asid` mang theo lệnh flush");
+    assert_eq!(inf.generation, generation, "sim: `generation`");
+    assert_eq!(inf.targets.bits(), 0b11, "sim: `targets` = active_on");
+    assert_eq!(
+        targets_of(inf.targets.bits(), 0),
+        0b10,
+        "`targets` sau phép chiếu D2-78 = hart 1"
+    );
+    assert_eq!(inf.acked.bits(), 0b1, "sim: ack ngầm của hart gọi");
+    assert_eq!(
+        targets_of(inf.acked.bits(), 0),
+        0,
+        "core: chưa hart đích nào ack"
+    );
+    // `targets` **≠ 0**: so **gián tiếp** qua tập hart **bị post** — hộp thư từng hart (dưới) và
+    // số message; `TlbFlushReport.targets` của core chỉ đọc được ở ca `targets == 0` (C1).
+    assert!(inf.messages == 1, "sim: đúng 1 `TlbFlush` remote");
+    assert_eq!(c.m.tlb_remote_posts(), 1, "core: đúng 1 `TlbFlush` remote");
+    // `pending` — sim: hart 0 (vai gọi) + hart 1 (nợ ack); core: một ô/hart, cùng seq.
+    assert_eq!(
+        sim_nut_ack(&s.m, seq_s)[0],
+        c.m.tlb_pending(0).expect("core p0")
+    );
+    assert_eq!(
+        sim_nut_ack(&s.m, seq_s)[1],
+        c.m.tlb_pending(1).expect("core p1")
+    );
+    assert_eq!(
+        s.m.tlb_pending_ack(1).expect("ack 1"),
+        Some(seq_s),
+        "sim: hart 1 **nợ** ack (chi tiết KT-64a thêm vào sim)"
+    );
+    assert_eq!(
+        s.m.tlb_pending_ack(0).expect("ack 0"),
+        None,
+        "hart gọi ack ngầm"
+    );
+    // Hộp thư: chỉ hart 1 nhận `TlbFlush` — giống nhau.
+    for h in 0..2 {
+        assert_eq!(
+            s.m.mail_len(h).expect("mail sim"),
+            c.m.mail_len(h).expect("mail core"),
+            "hộp thư hart {h}"
+        );
+    }
+    assert_eq!(c.m.mail_len(1).expect("mail core"), 1, "hart 1 nhận 1 lệnh");
+
+    // --- bước 2: `Busy` khi còn shootdown chưa ack (cả hai) ---
+    let rs = s.m.tlb_shootdown_begin(0, s.vs, C_VA).err();
+    let rc =
+        c.m.tlb_shootdown_begin(&mut c.env, kc::TlbScope::Page { va: C_VA }, asid, C_VA)
+            .err();
+    assert_eq!(
+        rs.map(|e| e.id()),
+        rc.map(|e| e.id()),
+        "`Busy` phải giống nhau (cùng mã ABI)"
+    );
+    assert_eq!(rs, Some(SimErr::Busy), "sim: Busy");
+    assert_eq!(rs.map(|e| e.id() == CoreErr::Busy.id()), Some(true));
+    assert_eq!(
+        s.m.tlb_shootdown_count(),
+        c.m.tlb_seq(),
+        "seq không tăng khi Busy"
+    );
+
+    // --- bước 3: hart đích tự phục vụ (không ai ack hộ) ---
+    let n_s = s.m.process_mail(1).expect("sim: hart 1 xử lý hộp thư");
+    let n_c =
+        c.m.tlb_service(&mut c.env, 1)
+            .expect("core: hart 1 phục vụ");
+    assert_eq!(n_s, n_c, "cùng một lệnh `TlbFlush` được phục vụ");
+    assert_eq!(n_c, 1);
+    assert_eq!(
+        s.m.tlb_ack_count(),
+        c.m.tlb_serviced(),
+        "bộ đếm ack thật (sim `ack_total` vs core `serviced`)"
+    );
+    assert_eq!(sim_nut_ack(&s.m, seq_s)[1], None, "sim: hart 1 hết nợ ack");
+    assert_eq!(
+        c.m.tlb_pending(1).expect("core p1"),
+        None,
+        "core: hart 1 hết nợ ack"
+    );
+    so_flush(&s, &c, 2);
+
+    // --- bước 4: wait đủ ack ---
+    s.m.tlb_shootdown_wait(0).expect("sim wait");
+    c.m.tlb_shootdown_wait(&mut c.env, 0).expect("core wait");
+    let inf = s.m.last_tlb_shootdown().expect("shootdown vừa xong");
+    assert!(inf.completed, "sim: completed");
+    assert_eq!(inf.acked, inf.targets, "sim: `Ok ⇒ acked == targets` (Q5)");
+    assert_eq!(
+        targets_of(inf.acked.bits(), 0),
+        targets_of(inf.targets.bits(), 0),
+        "core: `acked` (trừ ack ngầm) == `targets`"
+    );
+    assert!(
+        sim_nut_ack(&s.m, seq_s).iter().all(|p| p.is_none()),
+        "sim: hết pending"
+    );
+    for h in 0..2 {
+        assert!(
+            c.m.tlb_pending(h).expect("core pending").is_none(),
+            "core: hart {h} hết pending"
+        );
+        assert_eq!(
+            s.m.mail_len(h).expect("mail sim"),
+            0,
+            "sim: hộp thư {h} rỗng"
+        );
+        assert_eq!(
+            c.m.mail_len(h).expect("mail core"),
+            0,
+            "core: hộp thư {h} rỗng"
+        );
+    }
+    so_flush(&s, &c, 2);
 }

@@ -555,6 +555,9 @@ trait View {
     fn window(&self, tcb: u32) -> Result<WinFp, E>;
     /// KT-63 — `(cài được, unwrap, thất bại mềm)`.
     fn cap_stats(&self) -> (u64, u64, u64);
+    /// **KT-64a** — `Tcb.last_ipc_error` (mã ABI) của TCB: `Cancelled` sau khi object bị finalise
+    /// (D2-89/D2-90) là **quan sát được** nên phải nằm trong digest parity.
+    fn last_ipc_error(&self, tcb: u32) -> Result<Option<u16>, E>;
 }
 
 trait Mut: View {
@@ -1013,6 +1016,11 @@ impl View for ks::Machine {
     fn cap_stats(&self) -> (u64, u64, u64) {
         self.cap_transfer_stats()
     }
+    fn last_ipc_error(&self, tcb: u32) -> Result<Option<u16>, E> {
+        self.tcb_last_ipc_error(tcb)
+            .map(|o| o.map(|e| e.id()))
+            .map_err(se)
+    }
 }
 
 impl Mut for ks::Machine {
@@ -1451,6 +1459,11 @@ impl View for kc::Machine {
     }
     fn cap_stats(&self) -> (u64, u64, u64) {
         self.cap_transfer_stats()
+    }
+    fn last_ipc_error(&self, tcb: u32) -> Result<Option<u16>, E> {
+        self.tcb_last_ipc_error(tcb)
+            .map(|o| o.map(|e| e.id()))
+            .map_err(ce)
     }
 }
 
@@ -3150,6 +3163,8 @@ fn kt60_core_donation_tao_va_tra_kt21() {
 enum S63 {
     Ep(usize),
     Ntfn,
+    /// **KT-64a** — Notification **trong** cây Untyped 2 (`ntnA`) để Revoke finalise đúng nó.
+    NtnA,
     Reps,
     U2,
     EpA,
@@ -3189,6 +3204,7 @@ impl Rig63 {
         match s {
             S63::Ep(i) => self.eps[i],
             S63::Ntfn => self.ntfns,
+            S63::NtnA => self.ntn_a,
             S63::Reps => self.reps,
             S63::U2 => self.u2,
             S63::EpA => self.ep_a,
@@ -3641,6 +3657,8 @@ impl StKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Digest63 {
     states: Vec<Result<CS, E>>,
+    /// **KT-64a** — `Tcb.last_ipc_error` của 3 TCB (D2-89/D2-90: phải là `Cancelled` sau finalise).
+    last_errs: Vec<Result<Option<u16>, E>>,
     windows: Vec<Result<WinFp, E>>,
     ipcs: Vec<Result<IpcFp, E>>,
     eps: Vec<Result<EpFp, E>>,
@@ -3655,6 +3673,7 @@ struct Digest63 {
 fn digest63(v: &dyn View, r: &Rig63) -> Digest63 {
     Digest63 {
         states: (0..3).map(|i| v.tcb_state(r.t[i])).collect(),
+        last_errs: (0..3).map(|i| v.last_ipc_error(r.t[i])).collect(),
         windows: (0..3).map(|i| v.window(r.t[i])).collect(),
         ipcs: (0..3).map(|i| v.ipc_area(r.t[i])).collect(),
         eps: (0..2).map(|i| v.endpoint(r.ep[i])).collect(),
@@ -3668,6 +3687,18 @@ fn digest63(v: &dyn View, r: &Rig63) -> Digest63 {
 }
 
 fn run63(name: &str, ops: &[(&'static str, Op63)], expect_states: &[(usize, StKind)]) {
+    run63_full(name, ops, expect_states, &[]);
+}
+
+/// Như [`run63`] + pin `Tcb.last_ipc_error` kỳ vọng của từng TCB (**KT-64a**: D2-89/D2-90 —
+/// `Cancelled` cho waiter/caller/sender sau khi object bị finalise). Không truyền ⇒ chỉ so
+/// parity (digest đã chứa `last_errs`).
+fn run63_full(
+    name: &str,
+    ops: &[(&'static str, Op63)],
+    expect_states: &[(usize, StKind)],
+    expect_errs: &[(usize, u16)],
+) {
     let mut sm = ks::Machine::new();
     let mut cm = kc::Machine::new();
     let rig_s = build63(&mut sm);
@@ -3708,6 +3739,18 @@ fn run63(name: &str, ops: &[(&'static str, Op63)], expect_states: &[(usize, StKi
             kind.sim(b),
             "{name}: core t{i} state {b:?} khong dung loai {kind:?}"
         );
+    }
+    for (i, id) in expect_errs {
+        let a = sm
+            .tcb_last_ipc_error(rig_s.t[*i])
+            .expect("sim last_ipc_error")
+            .map(|e| e.id());
+        let b = cm
+            .tcb_last_ipc_error(rig_c.t[*i])
+            .expect("core last_ipc_error")
+            .map(|e| e.id());
+        assert_eq!(a, Some(*id), "{name}: sim t{i} last_ipc_error {a:?}");
+        assert_eq!(b, Some(*id), "{name}: core t{i} last_ipc_error {b:?}");
     }
 }
 
@@ -3914,8 +3957,12 @@ fn kt63_parity_chuyen_cap_qua_ipc() {
     assert_eq!(cm.cap_transfer_stats(), (9, 2, 8));
 }
 
+/// **KT-63 → KT-64a** — `Revoke` Untyped khi **có caller** (`BlockedOnReply`) **và sender**
+/// (`BlockedOnSend` trên Endpoint trong cây). D2-89/D2-90: **cả hai** phải được đánh thức
+/// `Cancelled + Ready` (trước KT-64a sim để sender **treo** trên Endpoint đã chết — khi đó
+/// kịch bản này là **loại trừ** parity; nay phủ trọn, không còn `skip`).
 #[test]
-fn kt63_parity_revoke_finalise_caller_hang() {
+fn kt63_parity_revoke_finalise_caller_va_sender() {
     let s = |label: &'static str, op: Op63| (label, op);
     let ops = vec![
         s("bind window t1", Op63::BindWindow { tcb: 1, win: 0 }),
@@ -3962,14 +4009,81 @@ fn kt63_parity_revoke_finalise_caller_hang() {
         ),
         s("revoke cay Untyped 2", Op63::RevokeSlot { slot: S63::U2 }),
     ];
-    run63(
+    // Pha **trước** finalise (5 bước đầu): sender còn `BlockedOnSend` — chốt rằng ca
+    // `StKind::BlockedOnSend` ở đây là trạng thái **thật** trước `Revoke`, không phải kịch bản né.
+    run63_full(
+        "kt63-revoke (truoc finalise)",
+        &ops[..5],
+        &[
+            // t0 đang `BlockedOnReply` (không có biến thể `StKind`), t1 chờ Notification **sống**.
+            (1, StKind::BlockedOnNotification),
+            (2, StKind::BlockedOnSend),
+        ],
+        &[],
+    );
+    run63_full(
         "kt63-revoke",
         &ops,
         &[
             (0, StKind::Ready),
             (1, StKind::BlockedOnNotification),
-            (2, StKind::BlockedOnSend),
+            // D2-90: sender trên Endpoint bị finalise được đánh thức (không treo).
+            (2, StKind::Ready),
         ],
+        &[
+            (0, ks::KError::Cancelled.id()),
+            (2, ks::KError::Cancelled.id()),
+        ],
+    );
+}
+
+/// **KT-64a (D2-89)** — finalise Endpoint **đang có Recv waiter**: waiter phải `Cancelled +
+/// Ready` thay vì treo trên Endpoint đã chết. Đây là đường mà parity KT-63 **loại trừ**; nay
+/// phủ trực tiếp (`epA` nằm trong cây Untyped 2, `recv` trước khi Revoke).
+#[test]
+fn kt64a_parity_finalise_recv_waiter() {
+    let s = |label: &'static str, op: Op63| (label, op);
+    let ops = vec![
+        // t1 chờ **chính** Endpoint sẽ bị finalise (không có message ⇒ BlockedOnRecv).
+        s(
+            "recv t1 epA",
+            Op63::Recv {
+                tcb: 1,
+                slot: S63::EpA,
+                reply: Some(S63::RepA),
+            },
+        ),
+        s("revoke cay Untyped 2", Op63::RevokeSlot { slot: S63::U2 }),
+    ];
+    run63_full(
+        "kt64a-finalise-recv-waiter",
+        &ops,
+        &[(0, StKind::Ready), (1, StKind::Ready), (2, StKind::Ready)],
+        &[(1, ks::KError::Cancelled.id())],
+    );
+}
+
+/// **KT-64a (D2-89)** — finalise Notification **đang có waiter**: waiter `Cancelled + Ready`
+/// (sim cũ để `BlockedOnNotification{ntfn chết}` — lỗi mô hình).
+#[test]
+fn kt64a_parity_finalise_notification_waiter() {
+    let s = |label: &'static str, op: Op63| (label, op);
+    let ops = vec![
+        s(
+            "wait t1 ntnA",
+            Op63::Recv {
+                tcb: 1,
+                slot: S63::NtnA,
+                reply: None,
+            },
+        ),
+        s("revoke cay Untyped 2", Op63::RevokeSlot { slot: S63::U2 }),
+    ];
+    run63_full(
+        "kt64a-finalise-notification-waiter",
+        &ops,
+        &[(0, StKind::Ready), (1, StKind::Ready), (2, StKind::Ready)],
+        &[(1, ks::KError::Cancelled.id())],
     );
 }
 

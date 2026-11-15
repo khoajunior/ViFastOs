@@ -3032,6 +3032,27 @@ impl Machine {
         self.last_tlb_shootdown
     }
 
+    /// **KT-64a (D2-92c)** — `Some(seq)` ⇔ `hart` còn **nợ ack** của shootdown `seq`: nó là hart
+    /// **đích** của một `TlbFlush` (`acks` của shootdown còn `acked < ack`). Vai thứ hai của cùng
+    /// khái niệm `pending` mà core giữ **một** ô/hart ([`Machine::tlb_pending`] của core = hart gọi
+    /// hoặc hart nợ ack); sim tách hai vai nên cần cửa đọc riêng để parity `pending` so được
+    /// (`kt64_core_parity.rs` kịch bản C). Không có gì nợ ⇒ `None`; hart ngoài dải ⇒
+    /// `InvalidArgument`.
+    pub fn tlb_pending_ack(&self, hart: u16) -> Result<Option<u64>, KError> {
+        self.tlb_at(hart)?;
+        for p in self.tlb_pending.iter().flatten() {
+            if !p.posted {
+                continue;
+            }
+            for &(t, ack) in &p.acks {
+                if t == hart && self.tlbs[t as usize].acked < ack {
+                    return Ok(Some(p.seq));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Số lệnh shootdown đã phát (kể cả `active_on` rỗng).
     pub fn tlb_shootdown_count(&self) -> u64 {
         self.tlb_shootdown_count
@@ -3144,6 +3165,17 @@ impl Machine {
         self.tlb_msg_total += p.messages as u64;
         self.tlb_shootdown_count += 1;
         p.posted = true;
+        // **KT-64a (D2-92c)** — **không còn hart nào phải ack** (mọi hart đích trùng hart gọi ⇒
+        // ack ngầm, hoặc `active_on` rỗng) ⇒ shootdown **xong ngay ở `begin`**: không giữ ô
+        // `pending` rỗng. Đây là chi tiết sim **thiếu** so với chuẩn core (core: `targets == 0`
+        // ⇒ không `pending`, `TlbFlushReport{local:true, acked==targets==0}`) và so với kernel
+        // KT-51 (`completed` ở vòng chờ đầu vì ack ngầm đã đủ) — trước KT-64a sim để
+        // `tlb_pending(hart) = Some(seq)` tới `wait` nên parity `pending` ca 1 hart lệch.
+        if p.acks.is_empty() {
+            let acked = self.tlb_acked_mask(&p);
+            self.last_tlb_shootdown = Some(p.info(acked, true));
+            return Ok(seq);
+        }
         self.tlb_pending[hart as usize] = Some(p);
         Ok(seq)
     }
@@ -10455,6 +10487,14 @@ impl Machine {
                     self.cancel_reply(*id)?;
                 }
             }
+            // **KT-64a (D2-89/D2-90)** — anti-hang: waiter `Recv`/`Notification` **và** sender
+            // `BlockedOnSend` trên object sắp chết được đánh thức `Cancelled + Ready` (core KT-63
+            // đã làm cho waiter; đây là chỗ sim khớp chuẩn và **bỏ loại trừ parity**). Làm **trước**
+            // khi body về free-list để còn đọc hàng gửi/waiter; message bị huỷ đã đếm `ipc_dropped`
+            // ở vòng `dropped_msgs` phía trên (D2-90: drop **có đếm**).
+            for id in &dead_objs {
+                self.finalise_ipc_waiters(*id);
+            }
             // **KT-36** — finalise Frame trước khi object chết (bộ đếm đã kiểm bằng 0 ở trên;
             // đánh dấu `live = false` để `frame_meta` sau chết đọc được trạng thái đúng).
             for id in &dead_objs {
@@ -10574,6 +10614,79 @@ impl Machine {
                 }
             }
         }
+    }
+
+    /// **KT-64a (D2-89 + D2-90)** — finalise IPC **body** trước khi trả về free-list: đánh thức
+    /// **mọi** TCB đang chờ object sắp chết bằng `Cancelled` + `Ready` (anti-hang), đúng chuẩn
+    /// mà core đã cài từ KT-63. Ba loại chờ trên object:
+    ///
+    /// - `BlockedOnRecv{ep}` — Recv waiter của Endpoint (`Endpoint.recv`);
+    /// - `BlockedOnNotification{ntfn}` — waiter của Notification;
+    /// - `BlockedOnSend{ep, ..}` — **sender đang xếp hàng** (`Endpoint.send`). D2-90: message của
+    ///   nó bị huỷ **có đếm** (`ipc_dropped`, đếm ở vòng trước của [`Machine::revoke_children`]);
+    ///   ở đây chỉ đánh thức + trạng thái, **không** đụng hàng (body sắp bị `free`).
+    ///
+    /// Caller `BlockedOnReply` đã đúng từ KT-25 (`cancel_reply`), nên không nằm ở đây. Chỉ đánh
+    /// thức TCB còn **đúng** trạng thái trỏ object này: TCB đã `Dead`/đã được đánh thức, hay
+    /// sender **không chặn** (`NBSend` xếp hàng nhưng vẫn `Ready`), đều là no-op.
+    ///
+    /// **Trước KT-64a** sim để cả ba **treo** trên object đã chết (lỗi mô hình — D2-89); hàm này
+    /// xoá lệch đó nên parity KT-63/KT-64 không còn phải loại trừ đường finalise-có-waiter.
+    fn finalise_ipc_waiters(&mut self, obj: ObjId) {
+        match self.objects[obj as usize - 1].ty {
+            ObjType::Endpoint => {
+                let (recv, senders) = match self.body(obj, |k| match k {
+                    Kind::Endpoint(e) => Ok((
+                        e.recv.map(|(t, _)| t),
+                        e.send.iter().map(|q| q.sender).collect::<Vec<_>>(),
+                    )),
+                    _ => Err(KError::WrongObjectType),
+                }) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                if let Some(w) = recv {
+                    self.wake_cancelled(
+                        w,
+                        |st| matches!(st, TcbState::BlockedOnRecv { ep, .. } if *ep == obj),
+                    );
+                }
+                for s in senders {
+                    self.wake_cancelled(
+                        s,
+                        |st| matches!(st, TcbState::BlockedOnSend { ep, .. } if *ep == obj),
+                    );
+                }
+            }
+            ObjType::Notification => {
+                let waiter = match self.body(obj, |k| match k {
+                    Kind::Notification(n) => Ok(n.waiter),
+                    _ => Err(KError::WrongObjectType),
+                }) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+                if let Some(w) = waiter {
+                    self.wake_cancelled(
+                        w,
+                        |st| matches!(st, TcbState::BlockedOnNotification { ntfn } if *ntfn == obj),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Đánh thức **một** TCB đang chờ object bị finalise: chỉ khi trạng thái hiện tại khớp
+    /// (`khop`), đặt `last_ipc_error = Cancelled` rồi `→ Ready` qua **một** cửa
+    /// [`Machine::transition_tcb`] (hook KT-21 tự trả donation; `sched_sync` đưa vào ready queue).
+    fn wake_cancelled<F: Fn(&TcbState) -> bool>(&mut self, tcb: ObjId, khop: F) {
+        let Ok(st) = self.tcb_state(tcb) else { return };
+        if !khop(&st) {
+            return;
+        }
+        let _ = self.set_last_ipc_error(tcb, KError::Cancelled);
+        let _ = self.transition_tcb(tcb, TcbState::Ready);
     }
 
     /// Bỏ tham chiếu tới object/cap chết (thiết kế §4.2: không trường nào trỏ tới object chết).

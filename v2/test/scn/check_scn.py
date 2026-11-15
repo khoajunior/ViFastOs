@@ -573,7 +573,7 @@ def main():
                    for m in obj.get("method", {}).values())
 
     files = sorted(scn_dir.glob("*.scn")) if scn_dir.exists() else []
-    check(len(files) == 26, f"phải có đúng 26 tệp .scn, đang có {len(files)}")
+    check(len(files) == 27, f"phải có đúng 27 tệp .scn, đang có {len(files)}")
 
     names, tags_seen, blocked, has_exit_case = set(), set(), [], False
 
@@ -651,7 +651,7 @@ def main():
     missing = TAG_GROUPS - tags_seen
     check(not missing, f"thiếu nhóm phủ: {sorted(missing)}")
 
-    check(not blocked, f"DoD KT-04c/KT-42: phải 26/26 tệp không blocked, còn {len(blocked)}")
+    check(not blocked, f"DoD KT-04c/KT-42/KT-64a: phải 27/27 tệp không blocked, còn {len(blocked)}")
     for name, reason in blocked:
         print(f"# blocked: {name} — {reason}")
 

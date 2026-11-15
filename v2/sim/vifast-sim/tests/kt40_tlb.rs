@@ -547,19 +547,35 @@ fn loi_bien_hart_va_vspace() {
         r.m.tlb_shootdown_begin(2, vs, va(0)),
         Err(KError::InvalidArgument)
     );
-    // `active_on` rỗng ⇒ **không gửi** message nào (DoD), begin/wait vẫn xong ngay.
+    // `active_on` rỗng ⇒ **không gửi** message nào (DoD) và shootdown **xong ngay ở `begin`**:
+    // `targets == 0` ⇒ không còn hart nào phải ack nên **không có `pending`** (KT-64a — căn theo
+    // chuẩn core `TlbFlushReport{targets:0, acked:0, local:true}` và kernel KT-51: ack ngầm đủ
+    // ở vòng chờ đầu). `wait` vì thế là no-op.
     let seq =
         r.m.tlb_shootdown_begin(0, vs2, va(0))
             .expect("active_on rỗng vẫn begin được");
     assert_eq!(r.m.mail_len(0), Ok(0), "active_on rỗng ⇒ không gửi gì");
     assert_eq!(r.m.mail_len(1), Ok(0));
-    // Đã có shootdown đang chờ ⇒ begin thứ hai `Busy` (không ghi đè trạng thái chờ).
-    assert_eq!(r.m.tlb_shootdown_begin(0, vs2, va(0)), Err(KError::Busy));
+    assert!(
+        r.m.tlb_pending(0).expect("pending").is_none(),
+        "targets rỗng ⇒ xong ngay, không giữ pending"
+    );
     r.m.tlb_shootdown_wait(0).expect("wait shootdown rỗng");
     let s = r.m.last_tlb_shootdown().expect("shootdown rỗng");
     assert_eq!(s.seq, seq);
     assert!(s.targets.is_empty(), "active_on rỗng ⇒ targets rỗng");
     assert_eq!(s.acked, s.targets);
+    // `Busy` khi **có** shootdown đang chờ thật (KT-64a giữ nguyên luật chống ghi đè): active_on
+    // = {0,1} ⇒ begin post cho hart 1, lần hai từ cùng hart ⇒ `Busy`; ack xong thì mới `Ok`.
+    r.m.vspace_activate(vs, 1).expect("activate hart 1");
+    r.m.tlb_shootdown_begin(0, vs, va(0))
+        .expect("begin có hart đích");
+    assert_eq!(
+        r.m.tlb_shootdown_begin(0, vs, va(0)),
+        Err(KError::Busy),
+        "đang có shootdown chưa ack ⇒ begin thứ hai `Busy` (không ghi đè)"
+    );
+    r.m.tlb_shootdown_wait(0).expect("wait đủ ack");
     // VSpace đã chết (Revoke Untyped chứa nó ⇒ finalise VSpace) ⇒ thao tác TLB trả lỗi rõ,
     // không panic và không dùng asid/gen của object đã chết.
     let cap = r.m.vspace_create(r.sva).expect("vs tạm");

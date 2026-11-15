@@ -973,6 +973,10 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
         && m.tcb_last_ipc_error(t3) == Ok(Some(KError::Cancelled));
     let t4_free = m.tcb_state(t4) == Ok(TcbState::Ready)
         && m.tcb_last_ipc_error(t4) == Ok(Some(KError::Cancelled));
+    // **KT-64a (D2-90)** — sender `BlockedOnSend` trên Endpoint bị finalise cũng phải
+    // `Cancelled + Ready` (nhánh core trước KT-64a để **treo**; nay đóng nợ D2-90).
+    let t2_free = m.tcb_state(t2) == Ok(TcbState::Ready)
+        && m.tcb_last_ipc_error(t2) == Ok(Some(KError::Cancelled));
     let pending55 = m.ipc_pending();
     let dropped55 = m.ipc_dropped().saturating_sub(dropped_truoc);
     let sent55 = m.ipc_sent().saturating_sub(sent_truoc);
@@ -980,6 +984,7 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
         && queued55 == 1
         && deleted55 >= 5
         && t0_free
+        && t2_free
         && t3_free
         && t4_free
         && pending55 == 0
@@ -993,7 +998,7 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
             w,
-            "# ipc: revoke deleted={} caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready queue={} queued={} pending={} sent={} dropped={} check_ipc={} check_reply_links={} check_notifications={}",
+            "# ipc: revoke deleted={} caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready sender=Ready sender_err=Cancelled queue={} queued={} pending={} sent={} dropped={} check_ipc={} check_reply_links={} check_notifications={}",
             deleted55,
             pending55,
             queued55,
@@ -1011,7 +1016,7 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
             w,
-            "not ok 55 - core revoke finalise: caller={caller55} t0={t0_free} t3={t3_free} t4={t4_free} pending={pending55} dropped={dropped55} deleted={deleted55}"
+            "not ok 55 - core revoke finalise: caller={caller55} t0={t0_free} t2={t2_free} t3={t3_free} t4={t4_free} pending={pending55} dropped={dropped55} deleted={deleted55}"
         );
         *fails += 1;
     }

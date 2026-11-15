@@ -427,7 +427,7 @@ __EVID24__
 ^# core: invariants caps=1 objects=[0-9]+ used=0 free=65536 deleted=[0-9]+ check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 check_sc_refs=1 check_budget=1 check_mailboxes=1 check_ipc=1 check_reply_links=1 check_notifications=1 check_waitaddr=1 check_fault=1 leak=0$
 ^# ipc: cap-transfer installed=8 failed=1 unwrap=1 caps4=4 len=2 rights=0xb caps3=3 caps1=1 extra=1 badge=0xa5a5 check_ipc=1 check_caps=1$
 ^# ipc: cap-message direction=call-reply caller_caps=2 reply_caps=2 caller_bound=1 caller_ready=1 rights=0xb reply_caller=0 check_ipc=1 check_reply_links=1$
-^# ipc: revoke deleted=[0-9]+ caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready queue=0 queued=1 pending=0 sent=[0-9]+ dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1$
+^# ipc: revoke deleted=[0-9]+ caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready sender=Ready sender_err=Cancelled queue=0 queued=1 pending=0 sent=[0-9]+ dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1$
 ^# core: phase fails=0 static=188872 pin=196608 image_cap=262144$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
