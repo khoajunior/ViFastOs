@@ -65,6 +65,7 @@ mod objstate;
 pub mod sched;
 mod slotpool;
 pub mod spec;
+pub mod syscall;
 pub mod tcb;
 mod tcbdata;
 

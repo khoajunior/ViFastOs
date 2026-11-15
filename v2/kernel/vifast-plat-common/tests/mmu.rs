@@ -323,7 +323,7 @@ fn builder_map_kernel_2m_image_va_noload_4k() {
     b.map(high, kbase, 1, PteFlags::kernel_rwx()).unwrap();
     let mut va = 0x8040_0000u64;
     while va < 0x8042_5000 {
-        if !(va >= 0x8040_0000 && va < 0x8040_1000) {
+        if !(0x8040_0000..0x8040_1000).contains(&va) {
             b.map(va, va, 0, PteFlags::kernel_rw_nx()).unwrap();
             b.map(high + (va - kbase), va, 0, PteFlags::kernel_rw_nx())
                 .unwrap();

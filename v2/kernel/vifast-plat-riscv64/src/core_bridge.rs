@@ -96,6 +96,8 @@ pub struct CoreReport {
     pub arena_bytes: usize,
     /// Object Untyped của core.
     pub untyped: ObjId,
+    /// Số hart **nền tảng** đã truyền vào `Machine::init_zeroed` (D2-88(a)).
+    pub harts: usize,
     /// Số object trong bảng core.
     pub objects: usize,
     /// Số cap sống.
@@ -173,7 +175,10 @@ pub fn init(base: u64, bytes: usize) -> CoreReport {
     let raw = core::ptr::addr_of_mut!(MACHINE).cast::<Machine>();
     unsafe { core::ptr::write_bytes(raw, 0, 1) };
     let m = unsafe { &mut *raw };
-    m.init_zeroed(1);
+    // D2-88(a): `Machine` chạy **số hart nền tảng thật** (SBI HSM/DTB), không hardcode 1; TAP
+    // pin trên `-smp 1/2/4` thấy 1/2/4.
+    let harts = crate::smp::hart_count();
+    m.init_zeroed(u16::try_from(harts).unwrap_or(1));
     MACHINE_INIT.store(true, Ordering::Release);
     let untyped = m.add_untyped(base, bytes);
     let check_caps = m.check_caps().is_ok();
@@ -186,6 +191,7 @@ pub fn init(base: u64, bytes: usize) -> CoreReport {
         base,
         arena_bytes: bytes,
         untyped,
+        harts,
         objects: m.object_count(),
         caps: m.live_cap_count(),
         check_caps,

@@ -326,6 +326,30 @@ impl Machine {
         expected: u64,
     ) -> Result<(), KError> {
         let tcb_obj = self.require_type(tcb, ObjType::Tcb)?;
+        self.wait_addr_steps(tcb_obj, frame, offset, expected)
+    }
+
+    /// `WaitAddr` nhận thẳng `ObjId` của TCB (KT-62: syscall dispatch giữ `ObjId`, không có slot
+    /// cap của chính TCB). Cùng ngữ nghĩa [`Machine::wait_addr`] — **một** thân hàm.
+    pub fn wait_addr_obj(
+        &mut self,
+        tcb: ObjId,
+        frame: ObjId,
+        offset: u32,
+        expected: u64,
+    ) -> Result<(), KError> {
+        // `tcb_data` kiểm object sống + đúng kiểu TCB (cùng mã lỗi như `require_type`).
+        self.tcb_data(tcb)?;
+        self.wait_addr_steps(tcb, frame, offset, expected)
+    }
+
+    fn wait_addr_steps(
+        &mut self,
+        tcb_obj: ObjId,
+        frame: ObjId,
+        offset: u32,
+        expected: u64,
+    ) -> Result<(), KError> {
         let state = self.ensure_started(tcb_obj)?;
         if state != TcbState::Ready && !matches!(state, TcbState::Running { .. }) {
             return Err(KError::IllegalOperation);

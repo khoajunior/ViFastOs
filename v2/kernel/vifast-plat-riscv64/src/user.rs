@@ -42,6 +42,10 @@ use core::arch::{asm, global_asm};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use vifast_core::syscall::{
+    SyscallEnv, FEATURE_DEBUG_HALT, FEATURE_DEBUG_PUT_STR, FEATURE_MCS_YIELD, FEATURE_WAIT_ADDR,
+};
+use vifast_core::{ObjId, TcbState};
 use vifast_elf::ElfError;
 use vifast_plat_common::fault::{self, FaultKind, PteFacts, TrapFacts, FAULT_STATS};
 use vifast_plat_common::mmu::{PTE_EXEC, PTE_READ, PTE_USER, PTE_WRITE};
@@ -51,10 +55,10 @@ use vifast_plat_common::trap::{
     SSTATUS_SPIE, SSTATUS_SPP, TF_SEPC_OFFSET, TF_SSTATUS_OFFSET,
 };
 use vifast_plat_common::user::{
-    self as abi, SyscallAction, UserMem, UserRange, UserSnapshot, UserTask, ERR_INVALID_ARGUMENT,
+    self as abi, SyscallAction, UserRange, UserSnapshot, UserTask, ERR_INVALID_ARGUMENT,
     ERR_NOT_MAPPED,
 };
-use vifast_plat_common::PlatformWriter;
+use vifast_plat_common::{Platform, PlatformWriter};
 
 use crate::obj as aobj;
 use crate::{debug_put_byte, mmu, Riscv64Virt};
@@ -150,6 +154,70 @@ static USER_RANGES: UserRanges = UserRanges::new();
 
 /// Trạng thái tác vụ user (TCB-like tối thiểu) — TAP đọc sau mỗi lượt.
 pub static USER_TASK: UserTask = UserTask::new();
+
+/// TCB **core** của `init` (KT-62) — `ecall` từ U-mode dispatch vào `Machine` thật của ảnh.
+/// `u32::MAX` = chưa gắn (ảnh không dựng core ⇒ handler coi là lỗi nội bộ và halt, không "đường
+/// tạm" nào được dựng lại).
+static CORE_TCB: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// Gắn TCB core cho tác vụ U-mode của ảnh này (KT-62) — gọi **trước** [`enter`].
+pub fn bind_core_tcb(tcb: ObjId) {
+    CORE_TCB.store(tcb, Ordering::Release);
+}
+
+/// Số syscall tối đa ghi sổ theo số hiệu (ABI `0..15`) — KT-62.
+pub const SYS_MAX: usize = 16;
+/// Số lần gọi theo số hiệu (KT-62) — TAP ảnh `ktest-user` đọc sau lượt U-mode.
+static SYS_CALLS: [AtomicU64; SYS_MAX] = [const { AtomicU64::new(0) }; SYS_MAX];
+/// `a0` (error) lần gần nhất theo số hiệu.
+static SYS_ERR: [AtomicU64; SYS_MAX] = [const { AtomicU64::new(0) }; SYS_MAX];
+/// `a1` (value) lần gần nhất theo số hiệu.
+static SYS_VAL: [AtomicU64; SYS_MAX] = [const { AtomicU64::new(0) }; SYS_MAX];
+
+/// Ghi sổ **một** syscall đã dispatch (KT-62) — bằng chứng `# sys:`/TAP, không đổi ngữ nghĩa.
+pub fn record_sys(nr: u64, error: u64, value: u64) {
+    if let Ok(index) = usize::try_from(nr) {
+        if index < SYS_MAX {
+            SYS_CALLS[index].fetch_add(1, Ordering::Relaxed);
+            SYS_ERR[index].store(error, Ordering::Relaxed);
+            SYS_VAL[index].store(value, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Số lần syscall `nr` đã dispatch.
+pub fn sys_calls(nr: usize) -> u64 {
+    SYS_CALLS
+        .get(nr)
+        .map(|v| v.load(Ordering::Relaxed))
+        .unwrap_or(0)
+}
+
+/// `a0` lần gần nhất của syscall `nr`.
+pub fn sys_err(nr: usize) -> u64 {
+    SYS_ERR
+        .get(nr)
+        .map(|v| v.load(Ordering::Relaxed))
+        .unwrap_or(0)
+}
+
+/// `a1` lần gần nhất của syscall `nr`.
+pub fn sys_val(nr: usize) -> u64 {
+    SYS_VAL
+        .get(nr)
+        .map(|v| v.load(Ordering::Relaxed))
+        .unwrap_or(0)
+}
+
+/// TCB core đã gắn (KT-62).
+pub fn core_tcb() -> Option<ObjId> {
+    let value = CORE_TCB.load(Ordering::Acquire);
+    if value == u32::MAX {
+        None
+    } else {
+        Some(value)
+    }
+}
 
 /// Lỗi nạp `init` — đủ để TAP in/log, **không panic** trong đường nạp.
 #[derive(Clone, Copy, Debug)]
@@ -487,31 +555,111 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
             tf.arg(4),
             tf.arg(5),
         ];
-        match abi::dispatch(nr, args, &mut UserMemAccess, &USER_TASK) {
-            SyscallAction::Return { error, value } => {
+        // KT-62: mọi số hiệu `0..15` đi vào `Machine` thật qua `vifast_core::syscall::dispatch`
+        // (façade `abi::dispatch` chỉ ghi sổ ABI). Không còn nhánh "3 syscall + NotSupported".
+        let Some(tcb) = core_tcb() else {
+            {
+                let mut w = PlatformWriter(&Riscv64Virt);
+                let _ = writeln!(w, "# u-mode syscall: nr={nr} core_tcb=none");
+            }
+            crate::TRAP_STATS.record_exception(&saved, exc.kind, false);
+            vifast_plat_common::Platform::put_str(
+                &Riscv64Virt,
+                "PANIC: u-mode khong co core tcb\n",
+            );
+            crate::debug_halt(1)
+        };
+        let action = crate::core_bridge::with_machine(|m| {
+            abi::dispatch(m, tcb, 0, nr, args, &mut UserMemAccess, &USER_TASK)
+        });
+        match action {
+            SyscallAction::Return {
+                error,
+                value,
+                info,
+                mr,
+            } => {
                 tf.set_arg(0, error);
                 tf.set_arg(1, value);
+                tf.set_arg(2, info);
+                for (index, word) in mr.iter().enumerate() {
+                    tf.set_arg(3 + index, *word);
+                }
+                record_sys(nr, error, value);
+                {
+                    // Bằng chứng `# sys:` KT-62: số hiệu, mã trả về, TCB + trạng thái **core**.
+                    let state = crate::core_bridge::with_machine(|m| m.tcb_state(tcb).ok());
+                    let mut w = PlatformWriter(&Riscv64Virt);
+                    let _ = writeln!(
+                        w,
+                        "# sys: nr={nr} err={error} value={value} tcb={tcb} state={} src=core",
+                        state.map(tcb_state_name).unwrap_or("none")
+                    );
+                }
                 tf.advance_pc(4);
                 crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
             }
             SyscallAction::Exit { code } => {
+                record_sys(nr, 0, code);
+                {
+                    let state = crate::core_bridge::with_machine(|m| m.tcb_state(tcb).ok());
+                    let mut w = PlatformWriter(&Riscv64Virt);
+                    let _ = writeln!(
+                        w,
+                        "# sys: nr={nr} err=0 value={code} tcb={tcb} state={} src=core",
+                        state.map(tcb_state_name).unwrap_or("none")
+                    );
+                }
                 // KT-56/D2-56a: `Exit` là fault kind ABI (đi hàng gửi không Reply — D2-25).
                 let kind = FaultKind::Exit { code };
                 FAULT_STATS.record(kind);
+                // Bằng chứng từ **core**: TCB đã `BlockedOnSend{call:false, fault=Exit}` (hoặc
+                // `Inactive` khi không có `fault_ep`) — TAP đọc, không đoán.
+                let state = crate::core_bridge::with_machine(|m| m.tcb_state(tcb).ok());
                 {
                     let mut w = PlatformWriter(&Riscv64Virt);
-                    let _ = writeln!(w, "# u-mode exit: code={code} faultkind={kind}");
+                    let _ = write!(
+                        w,
+                        "# u-mode exit: code={code} faultkind={kind} tcb={tcb} state="
+                    );
+                    match state {
+                        Some(state) => {
+                            let _ = writeln!(w, "{}", tcb_state_name(state));
+                        }
+                        None => {
+                            let _ = writeln!(w, "none");
+                        }
+                    }
                 }
                 exit_to_kernel(tf);
                 crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
             }
             SyscallAction::Halt { code } => {
+                record_sys(nr, 0, code);
                 {
                     let mut w = PlatformWriter(&Riscv64Virt);
                     let _ = writeln!(w, "# user debug_halt: code={code} nr=13");
                 }
                 crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
                 crate::debug_halt(code as usize)
+            }
+            SyscallAction::Switched { state } => {
+                // KT-62: ảnh U-mode chưa có scheduler; TCB chặn/ngủ mà quay lại U-mode là sai.
+                // Dừng có chẩn đoán (TAP kernel đọc trạng thái của nó trước khi tới đây).
+                {
+                    let mut w = PlatformWriter(&Riscv64Virt);
+                    let _ = writeln!(
+                        w,
+                        "# u-mode switched: nr={nr} tcb={tcb} state={}",
+                        tcb_state_name(state)
+                    );
+                }
+                crate::TRAP_STATS.record_exception(&saved, exc.kind, false);
+                vifast_plat_common::Platform::put_str(
+                    &Riscv64Virt,
+                    "PANIC: u-mode syscall khong the quay lai U-mode\n",
+                );
+                crate::debug_halt(1)
             }
         }
         return;
@@ -607,7 +755,25 @@ fn is_kernel_addr(addr: u64) -> bool {
 /// `sstatus.SUM`, in **raw** từng byte ra UART.
 struct UserMemAccess;
 
-impl UserMem for UserMemAccess {
+/// Tên trạng thái TCB ổn định cho log/TAP (không in `{:?}` có số hart).
+fn tcb_state_name(state: TcbState) -> &'static str {
+    match state {
+        TcbState::Inactive => "Inactive",
+        TcbState::Ready => "Ready",
+        TcbState::Running { .. } => "Running",
+        TcbState::BlockedOnSend { .. } => "BlockedOnSend",
+        TcbState::BlockedOnRecv { .. } => "BlockedOnRecv",
+        TcbState::BlockedOnReply { .. } => "BlockedOnReply",
+        TcbState::BlockedOnNotification { .. } => "BlockedOnNotification",
+        TcbState::BlockedOnAddress { .. } => "BlockedOnAddress",
+        TcbState::Sleeping { .. } => "Sleeping",
+        TcbState::Stopping => "Stopping",
+        TcbState::Dead => "Dead",
+    }
+}
+
+impl SyscallEnv for UserMemAccess {
+    /// KT-62: `DebugPutStr` (12) — cùng đường đọc user như KT-53 (dải đã map + `sstatus.SUM`).
     fn put_str(&mut self, ptr: u64, len: u64) -> Result<u64, u64> {
         let range = UserRange::new(USER_BASE, USER_TOP);
         if !range.contains(ptr, len) {
@@ -645,6 +811,70 @@ impl UserMem for UserMemAccess {
             copied += n as u64;
         }
         Ok(len)
+    }
+
+    /// WaitAddr/WakeAddr (9/10): dịch VA user ⇒ **nhãn** `(ppn, offset)` cho core (D2-83 — core
+    /// chỉ giữ khoá, không sở hữu Frame/PTE).
+    ///
+    /// Đang chạy với `satp` = root user ([`crate::obj::copy_kernel_low_root`]) nên **không** có
+    /// physmap để walk: tạm khôi phục root kernel, walk PTE thật, rồi trả lại root user trước khi
+    /// về U-mode. Lỗi ⇒ `NotMapped` (11) / `InvalidArgument` (5), không panic.
+    fn resolve_addr(&mut self, va: u64) -> Result<(u32, u32), u64> {
+        let range = UserRange::new(USER_BASE, USER_TOP);
+        if !range.contains_addr(va) {
+            return Err(ERR_INVALID_ARGUMENT);
+        }
+        let vs = LAST_VSPACE.load(Ordering::Relaxed);
+        if vs == u32::MAX {
+            return Err(ERR_NOT_MAPPED);
+        }
+        let vspace = CapId(vs as u16);
+        let (root, asid) = {
+            let m = aobj::machine();
+            (m.vspace_root_pa(vspace), m.vspace_asid(vspace))
+        };
+        let (Ok(root), Ok(asid)) = (root, asid) else {
+            return Err(ERR_NOT_MAPPED);
+        };
+        if !aobj::restore_kernel_root() {
+            return Err(ERR_NOT_MAPPED);
+        }
+        let walk = aobj::machine().walk(vspace, va);
+        let back = aobj::switch_root(root, asid);
+        if !back {
+            // F7 reviewer-kt62: từ đây `satp` = root kernel mà đường về U-mode vẫn `sret` ⇒ sai
+            // nặng (user chạy với root kernel). Dừng có chẩn đoán, không trả lỗi mềm.
+            vifast_plat_common::Platform::put_str(
+                &Riscv64Virt,
+                "PANIC: u-mode resolve_addr khong tra duoc satp user\n",
+            );
+            crate::debug_halt(1)
+        }
+        let Ok(info) = walk else {
+            return Err(ERR_NOT_MAPPED);
+        };
+        if !info.valid || !info.leaf || info.level != 0 {
+            return Err(ERR_NOT_MAPPED);
+        }
+        Ok(((info.phys >> 12) as u32, (va & 0xfff) as u32))
+    }
+
+    /// `ClockRead` (11) — đồng hồ đơn điệu của nền tảng: **`rdtime`** (`timer::now_ticks`, ns)
+    /// — D2-88(b); SBI TIME chỉ dùng cho **ngắt** timer, không phải clock read.
+    fn now_ns(&mut self) -> u64 {
+        Riscv64Virt.now_ns()
+    }
+
+    /// `DebugGetInfo` (15) — bitmap tính năng **runtime** của ảnh này (bit 0..3, xem
+    /// `vifast_core::syscall::FEATURE_*`).
+    fn features(&mut self) -> u64 {
+        FEATURE_DEBUG_PUT_STR | FEATURE_DEBUG_HALT | FEATURE_WAIT_ADDR | FEATURE_MCS_YIELD
+    }
+
+    /// `DebugGetInfo.num_harts` — **số hart nền tảng** (D2-88(a)): probe SBI HSM nếu SMP chưa
+    /// bring-up; `-smp 1/2/4` ⇒ 1/2/4. Không phải số hart model core đang chạy.
+    fn num_harts(&mut self) -> u64 {
+        crate::smp::hart_count() as u64
     }
 }
 

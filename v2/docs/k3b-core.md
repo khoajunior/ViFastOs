@@ -702,3 +702,144 @@ bash v2/test/boot/run.sh 1 1
 bash v2/test/boot/soak.sh 1000 3
 ./v2/bin/v2 gate --fast
 ```
+
+## 11. KT-62 — 16 syscall `0..15` đi vào `Machine` thật + `init` U-mode dùng core (K3.5 tầng 1)
+
+**Trạng thái:** KT-62 **DONE (đề xuất; chờ review độc lập + Agent 0 lật QUEUE)**. Phạm vi: xoá shim
+3-syscall của KT-53 (`vifast-plat-common::user::dispatch` cũ), đưa **mọi** số hiệu `0..15` qua
+`vifast_core::syscall::dispatch` rồi vào API công khai của `Machine`; `init` U-mode gọi
+`DebugGetInfo`/`Yield`/`Exit` **qua core**; TAP mới trên QEMU. **Không** đổi `spec/`, sim semantics,
+`.scn`, QUEUE/DECISIONS/AGENTS, `viscript/`; `unsafe` **chỉ** ở `kernel/vifast-plat-riscv64`
+(D2-17); `vifast-core` vẫn `#![forbid(unsafe_code)]`.
+
+### 11.1 Bảng 16 syscall → core (một nguồn: `kernel/vifast-core/src/syscall.rs`)
+
+| nr | tên | đường vào core | kênh trả |
+|---|---|---|---|
+| 0 | `Call` | `Machine::call_msg` (Endpoint; cap khác ⇒ `NotSupported`, D2-53 Q11) | `a0/a1`; nhận ⇒ `a2` = `MessageInfo`, `a3..a6` = MR0..3 |
+| 1 | `Send` | `Machine::send` (Endpoint/Reply/Notification) | `a0/a1` |
+| 2 | `NBSend` | `Machine::nb_send` | `a0/a1` |
+| 3 | `Recv` | `Machine::recv` (`a1` = reply cptr hoặc [`REPLY_NONE`]) | `a0/a1` + `a2`/MR |
+| 4 | `NBRecv` | `Machine::nb_recv` (`Busy` 14 khi rỗng) | `a0/a1` + `a2`/MR |
+| 5 | `ReplyRecv` | `Machine::reply_recv` | `a0/a1` + `a2`/MR |
+| 6 | `NBSendRecv` | `Machine::nb_send_recv` (D2-53 Q15a) | `a0` = lỗi NBSend (nếu có) + `a2`/MR |
+| 7 | `NBSendWait` | `Machine::nb_send_wait` (D2-53 Q15a) | như 6 |
+| 8 | `Yield` | `Machine::yield_current` + `tcb_remaining` | `a1` = budget còn lại |
+| 9 | `WaitAddr` | `Machine::wait_addr_obj` qua hook `resolve_addr` | chặn / 5 khi `expected` lệch |
+| 10 | `WakeAddr` | `Machine::wake_addr` qua cùng hook | `a1` = số đánh thức |
+| 11 | `ClockRead` | hook `SyscallEnv::now_ns` (**`rdtime`** qua `timer::now_ticks`, ns — D2-88(b)) | `a1` = ns đơn điệu |
+| 12 | `DebugPutStr` | hook `SyscallEnv::put_str` (arch đọc user bằng `SUM`) | `a1` = số byte; quá 4 KiB ⇒ 5 |
+| 13 | `DebugHalt` | trả `SyscallOutcome::Halt` — arch quyết định dừng | không trả |
+| 14 | `Exit` | `Machine::exit` | fault_ep ⇒ `BlockedOnSend{call:false, fault=Exit{code}}`, **không Reply** |
+| 15 | `DebugGetInfo` | hằng sinh từ spec (`ABI_VERSION`/`MIN_COMPAT`), `env.features()`, `env.num_harts()` | `a1` = abi_version, `a3` = min_compat, `a4` = features, `a5` = **num_harts = số hart nền tảng** (D2-88(a)) |
+
+**Ngoài dải `0..15`** (kể cả EID SBI) ⇒ **19 `RangeError`** — D2-79, giữ nguyên hành vi KT-53; chỗ
+quyết định **duy nhất** là `vifast-core::syscall::dispatch` (façade plat-common không kiểm lại).
+
+**Quy ước thanh ghi** (không đổi `spec/`): `a7` = nr; `a2` = `MessageInfo` cho syscall **1/2/3**
+cap; MR0..MR3 = `a3..a6`. Hai chỗ **không đủ 6 thanh ghi** được ghi rõ:
+`ReplyRecv` (2 cap) dùng `a0` = reply cap, `a1` = cap, `a2` = info, `a3..a6` = MR;
+`NBSendRecv` (3 cap) dùng `a0` = send cap, `a1` = recv cap, `a2` = reply cap (**hoặc**
+`REPLY_NONE`), `a3` = info, `a4..a6` = MR0..2 (3 MR). Đây là quy ước **KT-62** cho tầng 1, không
+sửa `[calling.riscv64]`; KT-63 (chuyển cap) sẽ chốt lại nếu cần.
+
+**Chỉ số cap ngoài bảng CSpace** ⇒ **1 `InvalidCapability`** (không phải 19): 19 chỉ dành cho **số
+hiệu syscall**; `cap_at` của core trả `RangeError` cho chỉ số ngoài bảng nên dispatcher chặn trước
+(`syscall.rs`, có test host).
+
+**Notification payload** (F1 reviewer-kt62): Notification **không có** `MessageInfo`; `Recv` (3),
+`NBRecv` (4), `NBSendWait` (7) khi đích là cap Notification trả **`a1 = value = word`**,
+**`mr[0] = word`**, **`mr[1] = badge`** (lấy từ `Machine::nb_recv` → `notification_message`, hoặc
+`take_tcb_notification` — **không** đọc `ipc_area` của Endpoint cũ, tránh stale). Endpoint/Reply
+giữ nguyên `a2 = MessageInfo`, `a3..a6` = MR0..3.
+
+**D2-88(c)**: 16 hằng `SYS_*` **sinh từ `spec/abi.toml` `[syscall]`** bằng `vifast-gen`
+(`SYS_CALL`/`SYS_SEND`/…/`SYS_DEBUG_GET_INFO`), core tái xuất — không chép tay số hiệu.
+
+### 11.2 Biên core/arch (D2-83) — hook `SyscallEnv`
+
+Core **không** đọc bộ nhớ user, không sở hữu VSpace/PTE. Ba việc arch làm thay (trait `SyscallEnv`,
+`no_std`, không `unsafe` trong core):
+
+| Hook | Cài ở | Việc |
+|---|---|---|
+| `put_str(ptr, len)` | `vifast-plat-riscv64::user::UserMemAccess` | kiểm dải user đã map + đọc bằng `sstatus.SUM` (KT-53) |
+| `resolve_addr(va)` | nt | `walk` PTE thật của VSpace: **tạm** khôi phục root kernel (root user không có physmap), lấy **PPN + offset** rồi trả root user; lỗi ⇒ 11 |
+| `now_ns()` | nt | **`rdtime`** (`timer::now_ticks`) → ns — D2-88(b); SBI TIME chỉ dùng cho **ngắt** timer |
+| `num_harts()` | nt | `smp::hart_count()` — probe SBI HSM trước bring-up, sau đó dùng bitmask present ⇒ **1/2/4** theo `-smp` (D2-88(a)) |
+| `features()` | nt | bitmap runtime bit 0 `DebugPutStr`, 1 `DebugHalt`, 2 `WaitAddr`, 3 `Yield` (spec **không** định nghĩa bitmap — KT-62 đặt bit, ghi ở đây) |
+
+**Phủ QEMU (F4 reviewer-kt62):** các đường U-mode **thật sự chạy trên QEMU** là `DebugPutStr`
+(12), 5 số ngoài dải (⇒19), `DebugGetInfo` (15), `Yield` (8), `Exit` (14). `resolve_addr` (9/10),
+`now_ns` (11), `put_str` dùng lại KT-53 và nhánh `Switched` **chưa có phép thử QEMU** — chúng mới
+được **biên dịch** + kiểm qua host rig (`kt62_syscall.rs`)/TAP kernel-level dùng `TestEnv`; ghi
+đây là **nợ phủ**, không gọi là "đã chạy thật". Nếu `switch_root` trả về U-mode thất bại (F7) ⇒
+`PANIC: u-mode resolve_addr khong tra duoc satp user` + halt (không trả lỗi mềm khi `satp` còn root
+kernel).
+
+`# sys:` evidence (KT-62): **mỗi** syscall từ U-mode in
+`# sys: nr=<n> err=<mã> value=<a1> tcb=<id> state=<CoreTcbState> src=core` ngay trong trap handler;
+các TAP kernel-level in `# sys: tap=<7..13> …`. Đây là dòng **văn bản** (không phải bản ghi 32 B
+`vifast-traceformat`): trace record `KIND_SYSCALL` là binary ring, không xuất ra UART trong KT-62 —
+**không** mở rộng format conformance (`# trace:` chỉ dành cho `.scn`, so sim↔QEMU), do đó
+`trace_compare.py` không bị ảnh hưởng. Mở rộng sang bản ghi 32 B là việc của procsrv/K6.
+
+### 11.3 TAP mới trên QEMU (ảnh `ktest-user`: 7 → **17**)
+
+| TAP | Nhóm | Bằng chứng `# sys:` (neo) |
+|---|---|---|
+| 1 | `init u-mode` | `# init run: … syscalls=10 exits=1 exit=42` — 10 `ecall` U-mode |
+| 2 | `debug_put_str` | `# user put_str: calls=2 bytes=51 sum_off=1` |
+| 3 | `exit` | `# user exit: code=42 state=Exited exits=1` + `# sys: nr=14 err=0 value=42 …` |
+| 4 | ngoài dải | `# user badsys: nr=31 err=19 calls=5 panic=0` + `# sys: nr=31 err=19 …` |
+| 5 | `debug_get_info` | `# user getinfo: nr=15 calls=1 err=0 abi_version=1 exit=42` |
+| 6 | `yield` | `# user yield: nr=8 calls=1 err=0 budget_left=…` |
+| 7 | 16 số hiệu | 15 dòng `# sys: tap=7 nr=… out=… err=… state=… src=core` (nr 0..13 + 15; 14 là TAP 14); dòng nr=15 có thêm `harts=1/2/4` (**pin D2-88(a)**) |
+| 8 | sai cap | `# sys: tap=8 empty=1 wrong_type=2 call_nonep=18 recv_wrong=2` |
+| 9 | vòng IPC | `# sys: tap=9 call=1 recv=1 reply=1 mr=0x11/0x22 blocked=1 reply_caller=0 …` |
+| 10 | nhóm NB + Notification | `# sys: tap=10 nb_send=0 nb_recv_mr=0x55 busy=14 nbsr_mr=0x66 nbwait=0 notif=0x99/0xab/0xcd ok=1` (payload `word/badge` cho 4/3/7) |
+| 11 | WaitAddr | `# sys: tap=11 wait=1 wake=1 mismatch=5 notmapped=11 state=Ready ok=1` |
+| 12 | ClockRead | `# sys: tap=12 nr=11 clock1=… clock2=… mono=1` |
+| 13 | Yield đổi TCB | `# sys: tap=13 nr=8 tcb_before=… tcb_after=… state_after=Ready ok=1` |
+| 14 | Exit không Reply | `# sys: tap=14 nr=14 err=0 code=42 … state=BlockedOnSend call=0 fault=Exit{42} ep_len=1 sender=… reply=0` |
+| 15..17 | fault/wx (KT-56) | dời số, evidence giữ nguyên |
+
+**Đỏ trước:** log ảnh `ktest-user` **HEAD cũ** (`JOURNAL/kt62-red-before-old-image.log`) chạy bằng
+manifest/expected **mới** ⇒ **ĐỎ** (thiếu TAP 5..17 + evidence) — `JOURNAL/kt62-red-before-new-tap.log`.
+Không retry lấy xanh; không nới ngưỡng.
+
+### 11.4 Hai ngưỡng (D2-85a) + file ảnh
+
+| Ngưỡng | Áp cho | Số đo KT-62 | Kết quả |
+|---|---|---|---|
+| **196.608 B** (pin D2-84) | `size_of::<Machine>()` | **180.168 B** (không đổi: KT-62 chỉ thêm **hàm**, không thêm trường) | ĐẠT |
+| **262.144 B** (trần ảnh) | `.data+.sdata+.bss+.sbss` ELF thật | **191.416** (product) / **197.568** (ktest) / **2.680** (guard) / **192.304** (user) B | ĐẠT |
+
+File ảnh (byte): product **185.736**, ktest **484.704**, guard **53.808**, user **323.296** — log
+`JOURNAL/kt62-budget.log` (script `budget.sh` in, tài liệu không chép tay số đo ngoài log).
+`ktest-user` tăng từ 11.752 → 192.304 B `.data+.bss` vì **link `Machine` vào ảnh test U-mode**
+(+180.168 B `.bss`) — **bắt buộc** cho "syscall qua core", không phải "tiện cho test"; vẫn dưới
+trần 262.144. **Lưu ý số file**: `.bss` là `NOBITS` (0 byte trong file); phần "file" lớn hơn
+`.data+.bss` là **`.symtab`/`.strtab`** (bảng ký hiệu, không `PT_LOAD`, không nạp khi boot) — ngưỡng
+dự án đo `.data+.sdata+.bss+.sbss` theo D2-72 Q5/D2-85a, **không** đo file thô.
+
+### 11.5 Nợ mở (có chủ, không tô hồng)
+
+| # | Nợ | Chủ |
+|---|---|---|
+| 1 | chuyển cap trong message (`MessageInfo.caps > 0` vẫn `InvalidArgument`) | KT-63 |
+| 2 | MR4..MR63 qua IPC buffer user (`length > 4` ⇒ 5 hiện tại) | KT-63/64 |
+| 3 | invocation (Call trên cap không phải Endpoint) vẫn `NotSupported` (D2-53 Q11) | K3.5/K4 |
+| 4 | scheduler U-mode: TCB chặn/ngủ ⇒ `PANIC: u-mode syscall khong the quay lai U-mode` có chẩn đoán (chưa có context switch user) | KT-64/65 |
+| 5 | bản ghi trace 32 B cho syscall (hiện chỉ dòng văn bản `# sys:`) | K6 |
+| 6 | **phủ QEMU** cho `resolve_addr` (9/10), `now_ns` (11) và nhánh `Switched` — hiện chỉ biên dịch + host rig/TAP `TestEnv` (F4) | KT-64/65 |
+
+### 11.6 Chạy lại
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt62_syscall -- --test-threads=1
+cargo test --manifest-path v2/kernel/Cargo.toml -p vifast-plat-common
+bash v2/test/boot/ktest.sh 1 matrix
+./v2/bin/v2 gate --fast
+```

@@ -19,6 +19,14 @@ mod tests {
     #[test]
     fn so_syscall_va_error_dung_spec() {
         assert_eq!(SYSCALL_COUNT, 16);
+        // KT-62: `min_compat` sinh từ spec (DebugGetInfo trả nó) — không hardcode trong core.
+        assert_eq!(MIN_COMPAT, 1);
+        // KT-62/D2-88(c): tên + số hiệu syscall sinh từ `[syscall]`, không đọc chép tay.
+        assert_eq!(SYS_CALL, 0);
+        assert_eq!(SYS_YIELD, 8);
+        assert_eq!(SYS_DEBUG_PUT_STR, 12);
+        assert_eq!(SYS_EXIT, 14);
+        assert_eq!(SYS_DEBUG_GET_INFO, 15);
         assert_eq!(ERROR_COUNT, 19);
         assert_eq!(SYSCALLS[0].0, "Call");
         assert_eq!(SYSCALLS[15].0, "DebugGetInfo");

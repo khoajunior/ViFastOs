@@ -2,7 +2,8 @@
 # KT-53 — chương trình `init` **user** (U-mode), nhúng vào ảnh test dưới dạng ELF64.
 #
 # ABI `spec/abi.toml` `[calling.riscv64]`: a7 = số hiệu syscall, a0/a1 = tham số, trả
-# a0 = error (0 = OK), a1 = value. Ba syscall của KT-53:
+# a0 = error (0 = OK), a1 = value. KT-53: ba syscall; **KT-62** thêm DebugGetInfo (15) + Yield (8)
+# (đi vào `Machine` thật, không qua shim) và 4 số hiệu ngoài dải (SBI/99/16/17/31 ⇒ 19):
 #   - DebugPutStr = 12 (a0 = user ptr, a1 = len)
 #   - DebugHalt   = 13 (a0 = code)
 #   - Exit        = 14 (a0 = code; QD §1 Q-A)
@@ -33,24 +34,42 @@ _start:
     ld t2, 0(t0)
     bne t1, t2, bad
 
-    # --- 3) EID SBI qua ecall U-mode ⇒ scause=8 + dispatcher trả RangeError (19, D2-79)
-    #        vì EID nằm ngoài dải syscall 0..15.
+    # --- 3) Ngoài dải 0..15 ⇒ RangeError 19 (D2-79): EID SBI, 99, và **dải reserved** 16/17/31.
+    la t3, out_of_range
+    li t4, 0
+range_loop:
+    ld a7, 0(t3)
     li a0, 0
     li a1, 0
-    li a7, 0x53525354
     ecall
     li t0, 19
     bne a0, t0, bad
+    addi t3, t3, 8
+    addi t4, t4, 1
+    li t0, 5
+    blt t4, t0, range_loop
 
-    # --- 4) Số hiệu syscall lạ (99) ⇒ RangeError (19), không panic.
+    # --- 4) DebugGetInfo (15) QUA CORE (KT-62): a0=0, a1=abi_version=1, a3=min_compat=1,
+    #        a4=features != 0, a5=num_harts **nền tảng** (D2-88a: 1/2/4 theo `-smp` — chỉ kiểm
+    #        trong 1..8, TAP kernel-level pin đúng con số). Đọc trước Yield vì Yield ghi a3..a6.
     li a0, 0
-    li a1, 0
-    li a7, 99
+    li a7, 15
     ecall
-    li t0, 19
-    bne a0, t0, bad
+    bnez a0, bad
+    li t0, 1
+    bne a1, t0, bad
+    bne a3, t0, bad
+    beqz a5, bad
+    li t0, 8
+    bgt a5, t0, bad
+    beqz a4, bad
 
-    # --- 5) DebugPutStr(badmarker, 25) rồi Exit(42) — mã 42 chứng minh mọi phép kiểm trên ĐẠT.
+    # --- 5) Yield (8) QUA CORE (KT-62): a0 = 0 (một TCB ⇒ round-trip Running→Ready→Running).
+    li a7, 8
+    ecall
+    bnez a0, bad
+
+    # --- 6) DebugPutStr(badmarker, 25) rồi Exit(42) — mã 42 chứng minh mọi phép kiểm trên ĐẠT.
     la a0, badmarker
     li a1, 25
     li a7, 12
@@ -91,6 +110,13 @@ wx_mode:
     .balign 8
 marker:
     .ascii "U: init hello from u-mode\n"
+    .balign 8
+out_of_range:
+    .dword 0x53525354
+    .dword 99
+    .dword 16
+    .dword 17
+    .dword 31
 badmarker:
     .ascii "U: bad syscall err=19 ok\n"
 

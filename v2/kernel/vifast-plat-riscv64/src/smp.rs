@@ -171,6 +171,30 @@ static BARRIER_EXPECTED: AtomicU64 = AtomicU64::new(0);
 static BARRIER_RELEASED: AtomicU64 = AtomicU64::new(0);
 static BARRIER_ARRIVED: HartMask = HartMask::new();
 
+/// Số hart **nền tảng** trong domain (≤ [`MAX_HARTS`]) — D2-88(a).
+///
+/// Trước `smp::init` (ảnh sản phẩm/ktest gọi core sớm hơn bring-up SMP): probe SBI HSM
+/// `hart_get_status` — hart boot = 0 (`running`), hart khác cùng domain = 1 (`stopped`), hart
+/// ngoài domain = -3/-1 ⇒ **không** đếm. Sau `smp::init` ⇒ dùng bitmask `present` (cùng nguồn,
+/// cùng kết quả `1/2/4` với `-smp 1/2/4`). Không phải "số hart core model đang chạy".
+pub fn hart_count() -> usize {
+    let present = present_mask();
+    if present != 0 {
+        return crate::smp::mask_count(present) as usize;
+    }
+    let mut count = 0usize;
+    for hart in 0..MAX_HARTS {
+        if matches!(hart_status(hart), 0 | 1) {
+            count += 1;
+        }
+    }
+    if count == 0 {
+        1
+    } else {
+        count
+    }
+}
+
 /// Hart đang chạy ([`Riscv64Virt::hart_id`] đọc `tp` — mỗi hart một `tp`).
 pub fn current_hart() -> usize {
     Riscv64Virt.hart_id()

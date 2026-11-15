@@ -53,6 +53,9 @@ def gen_rs(doc: dict) -> str:
     out.append("#[rustfmt::skip]")
     out.append(f"pub const ABI_VERSION: u32 = {int(doc.get('abi_version', doc.get('version', 1)))};")
     out.append("#[rustfmt::skip]")
+    # KT-62: `min_compat` cũng là hằng ABI (`DebugGetInfo` trả nó) — cũng phải sinh từ spec (D2-11).
+    out.append(f"pub const MIN_COMPAT: u32 = {int(doc.get('min_compat', 1))};")
+    out.append("#[rustfmt::skip]")
     out.append(f"pub const SYSCALL_COUNT: usize = {len(syscalls)};")
     out.append("#[rustfmt::skip]")
     out.append("pub const SYSCALLS: [(&str, u16); SYSCALL_COUNT] = [")
@@ -61,6 +64,26 @@ def gen_rs(doc: dict) -> str:
     out.append("];")
     out.append("#[rustfmt::skip]")
     out.append(f"pub const ERROR_COUNT: usize = {len(errors)};")
+    # KT-62/D2-88(c): tên + số hiệu syscall cũng là hằng ABI sinh từ `[syscall]` — core/plat
+    # không chép tay `SYS_YIELD = 8`… Tên hằng đọc được (NBSendRecv → SYS_NBSEND_RECV).
+    sys_aliases = {
+        "NBSend": "NB_SEND",
+        "NBRecv": "NB_RECV",
+        "NBSendRecv": "NB_SEND_RECV",
+        "NBSendWait": "NB_SEND_WAIT",
+        "ReplyRecv": "REPLY_RECV",
+        "WaitAddr": "WAIT_ADDR",
+        "WakeAddr": "WAKE_ADDR",
+        "ClockRead": "CLOCK_READ",
+        "DebugPutStr": "DEBUG_PUT_STR",
+        "DebugHalt": "DEBUG_HALT",
+        "DebugGetInfo": "DEBUG_GET_INFO",
+    }
+    for num in sorted(syscalls):
+        name = syscalls[num]["name"]
+        const = "SYS_" + sys_aliases.get(name, name.upper())
+        out.append("#[rustfmt::skip]")
+        out.append(f"pub const {const}: u64 = {num};")
     out.append("#[rustfmt::skip]")
     out.append("pub const ERRORS: [(&str, u16); ERROR_COUNT] = [")
     for num in sorted(errors):

@@ -11,3 +11,6 @@ description = "Platform dùng chung no_std cho kernel K3: trait Platform + Panic
 # KT-46: dùng lại hằng số/hình Sv39 của K2 (`VA_BITS=39`, 3 cấp, `walk_shape`, `Pte`) — crate
 # nội bộ, `no_std`, không dependency ngoài (D2-21). Không phải crate mới, không đổi `spec/`.
 vifast-pte = { path = "../../lib/vifast-pte" }
+# KT-62: façade syscall gọi thẳng bảng dispatch của core (`vifast_core::syscall`); core **không**
+# phụ thuộc ngược lại plat-common (một chiều, D2-83).
+vifast-core = { path = "../vifast-core" }

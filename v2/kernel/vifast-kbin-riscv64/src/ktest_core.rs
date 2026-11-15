@@ -376,7 +376,8 @@ fn core_taps(
             let mut w = PlatformWriter(&PLATFORM);
             let _ = writeln!(
                 w,
-                "# core: sched harts=1 pick0={} pick1={} dispatch0={} dispatch1={} t0={} t1={} suspended={} check_sched={}",
+                "# core: sched harts={} pick0={} pick1={} dispatch0={} dispatch1={} t0={} t1={} suspended={} check_sched={}",
+                m.hart_count(),
                 pick0.unwrap_or(0),
                 pick1.unwrap_or(0),
                 d0.unwrap_or(0),

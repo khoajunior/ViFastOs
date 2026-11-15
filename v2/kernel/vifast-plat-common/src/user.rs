@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! U-mode + syscall (KT-53) — phần **ngữ nghĩa** dùng chung, `no_std`, **không `unsafe`**, chạy
-//! được trên host.
+//! U-mode + syscall (KT-53 → **KT-62**) — phần **ngữ nghĩa** dùng chung, `no_std`, **không
+//! `unsafe`**, chạy được trên host.
+//!
+//! KT-62 (K3.5 tầng 1): hàm [`dispatch`] **không** còn bảng 3 syscall của KT-53 — nó gọi
+//! [`vifast_core::syscall::dispatch`] (16 syscall `0..15` → `Machine` thật), chỉ giữ phần ghi sổ
+//! `UserTask`/ánh xạ kết quả cho trap handler.
 //!
 //! # Phạm vi
 //!
@@ -20,10 +24,10 @@
 //! | `Exit` = 14 (`code`, không trả) | `[syscall]` + **QD §1 Q-A** |
 //! | 19 mã lỗi 1..19 | `[error]` |
 //!
-//! Số hiệu `0..=15` chưa cài ⇒ `NotSupported` (18); **ngoài dải** `0..=15` (kể cả EID SBI) ⇒
-//! `RangeError` (19, **D2-79** — số syscall là chỉ số vào bảng dispatch) — **không panic**. U-mode **không thể** gọi SBI trực
-//! tiếp: `ecall` từ U-mode luôn vào `scause=8` rồi tới dispatcher này, và EID SBI nằm ngoài dải
-//! syscall nên chỉ nhận lại mã lỗi ABI.
+//! Mọi số hiệu `0..=15` đi vào core thật; **ngoài dải** (kể cả EID SBI) ⇒ `RangeError` (19,
+//! **D2-79** — số syscall là chỉ số vào bảng dispatch) — **không panic**. U-mode **không thể**
+//! gọi SBI trực tiếp: `ecall` từ U-mode luôn vào `scause=8` rồi tới dispatcher này, và EID SBI
+//! nằm ngoài dải syscall nên chỉ nhận lại mã lỗi ABI.
 //!
 //! # Vì sao tách khỏi arch
 //!
@@ -33,17 +37,11 @@
 
 use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
-/// `DebugPutStr` — syscall 12 (`a0` = user ptr, `a1` = len).
-pub const SYS_DEBUG_PUT_STR: u64 = 12;
-/// `DebugHalt` — syscall 13 (`a0` = code, không trả).
-pub const SYS_DEBUG_HALT: u64 = 13;
-/// `Exit` — syscall 14 (`a0` = code, không trả; QD §1 Q-A).
-pub const SYS_EXIT: u64 = 14;
-/// `DebugGetInfo` — syscall 15 (ABI đóng băng; **chưa cài** ở KT-53 ⇒ `NotSupported`).
-pub const SYS_DEBUG_GET_INFO: u64 = 15;
-
-/// Số hiệu syscall lớn nhất của ABI (`[syscall]` 0..15; 16..31 reserved).
-pub const SYSCALL_MAX: u64 = 15;
+// KT-62: số hiệu + trần `DebugPutStr` **một nguồn** ở `vifast-core::syscall` (sinh từ spec);
+// façade tái xuất để caller cũ (`user::SYS_EXIT`, …) không phải đổi.
+pub use vifast_core::syscall::{
+    MAX_DEBUG_PUT, SYSCALL_MAX, SYS_DEBUG_GET_INFO, SYS_DEBUG_HALT, SYS_DEBUG_PUT_STR, SYS_EXIT,
+};
 
 /// `InvalidArgument` — mã lỗi ABI 5 (`[error]`).
 pub const ERR_INVALID_ARGUMENT: u64 = 5;
@@ -53,9 +51,6 @@ pub const ERR_NOT_MAPPED: u64 = 11;
 pub const ERR_NOT_SUPPORTED: u64 = 18;
 /// `RangeError` — mã lỗi ABI 19 (số hiệu syscall **ngoài dải** `0..=15`, D2-79).
 pub const ERR_RANGE_ERROR: u64 = 19;
-
-/// Trần số byte một lần `DebugPutStr` (chặn user giữ kernel trong vòng đọc vô hạn; `[TK]`).
-pub const MAX_DEBUG_PUT: u64 = 4096;
 
 /// Tên 19 mã lỗi + 0 = OK, đúng `spec/abi.toml` `[error]` (không sinh tên thứ hai).
 pub const fn error_name(code: u64) -> &'static str {
@@ -374,6 +369,9 @@ impl UserRange {
 }
 
 /// Lớp đọc bộ nhớ user (arch cài bằng `sstatus.SUM` + kiểm PTE; host test dùng bản giả).
+///
+/// KT-62: trait **giữ nguyên** cho arch; `put_str` là một phần của
+/// [`vifast_core::syscall::SyscallEnv`] — đường `DebugPutStr` (12) đi qua đây.
 pub trait UserMem {
     /// In `len` byte tại con trỏ user; trả số byte đã in hoặc mã lỗi ABI (1..19).
     fn put_str(&mut self, ptr: u64, len: u64) -> Result<u64, u64>;
@@ -382,80 +380,79 @@ pub trait UserMem {
 /// Việc trap handler phải làm sau khi dispatch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SyscallAction {
-    /// Trả `a0 = error`, `a1 = value` rồi `sepc += 4`.
+    /// Trả `a0 = error`, `a1 = value`, `a2 = info`, `a3..a6 = mr` rồi `sepc += 4`.
     Return {
         /// `a0` — 0 = OK, 1..19 = mã lỗi ABI.
         error: u64,
         /// `a1`.
         value: u64,
+        /// `a2` — `MessageInfo` đóng gói (syscall nhận) hoặc 0.
+        info: u64,
+        /// `a3..a6` — MR0..MR3 (hoặc `min_compat`/`features`/`num_harts` của `DebugGetInfo`).
+        mr: [u64; 4],
     },
-    /// `Exit(code)` — trạng thái đã ghi `Exited`; arch chuyển trapframe về S-mode, **không** U-mode.
+    /// `Exit(code)` — TCB đã vào `BlockedOnSend{fault_ep}` hoặc `Inactive`; **không** quay lại
+    /// U-mode.
     Exit {
         /// Mã thoát.
         code: u64,
     },
-    /// `DebugHalt(code)` — arch log rồi halt (chỉ test).
+    /// `DebugHalt(code)` — arch log rồi halt (chỉ ảnh test).
     Halt {
         /// Mã halt.
         code: u64,
     },
+    /// TCB không còn `Running` (chặn/ngủ/sẵn sàng) — chưa có scheduler U-mode ở KT-62.
+    Switched {
+        /// Trạng thái TCB sau syscall.
+        state: vifast_core::TcbState,
+    },
 }
 
-/// Dispatch một syscall theo ABI (3 syscall của KT-53 + nhánh lỗi ABI, **không panic**).
+/// Dispatch một syscall theo ABI — **façade** ghi state `UserTask` rồi chuyển sang bảng
+/// dispatch thật của core ([`vifast_core::syscall::dispatch`]).
 ///
-/// `args` là `a0..a5`. Hàm ghi state vào `task` **trước** khi trả; arch chỉ cần ghi `a0/a1` và
-/// (với `Exit`) chuyển trapframe về S-mode.
-pub fn dispatch(nr: u64, args: [u64; 6], mem: &mut impl UserMem, task: &UserTask) -> SyscallAction {
+/// KT-62: không còn nhánh giả cho 0..11 — mọi số hiệu `0..15` đi vào [`vifast_core::Machine`];
+/// ngoài dải ⇒ `RangeError` 19 (D2-79) từ **cùng** một chỗ trong core. Hàm này chỉ:
+///
+/// 1. ghi `syscalls`/`last_nr`;
+/// 2. ghi `put_calls`/`put_bytes` (12), `exits`/`exit_code` (14), `bad_calls` (nr > 15);
+/// 3. ghi `(a0, a1)` trả về;
+/// 4. đổi [`SyscallOutcome`] thành [`SyscallAction`].
+pub fn dispatch(
+    m: &mut vifast_core::Machine,
+    tcb: vifast_core::ObjId,
+    hart: u16,
+    nr: u64,
+    args: [u64; 6],
+    env: &mut impl vifast_core::syscall::SyscallEnv,
+    task: &UserTask,
+) -> SyscallAction {
     task.record_syscall(nr);
-    match nr {
-        SYS_DEBUG_PUT_STR => {
-            let ptr = args[0];
-            let len = args[1];
-            if len > MAX_DEBUG_PUT {
-                task.record_return(ERR_INVALID_ARGUMENT, 0);
-                return SyscallAction::Return {
-                    error: ERR_INVALID_ARGUMENT,
-                    value: 0,
-                };
+    match vifast_core::syscall::dispatch(m, tcb, hart, nr, args, env) {
+        vifast_core::syscall::SyscallOutcome::Return(r) => {
+            // Ngoài dải 0..15 (kể cả EID SBI) — core đã trả 19; façade chỉ ghi sổ `bad_calls`.
+            if nr > SYSCALL_MAX {
+                task.record_bad(nr, r.error);
             }
-            match mem.put_str(ptr, len) {
-                Ok(bytes) => {
-                    task.record_put(bytes);
-                    task.record_return(0, bytes);
-                    SyscallAction::Return {
-                        error: 0,
-                        value: bytes,
-                    }
-                }
-                Err(error) => {
-                    task.record_return(error, 0);
-                    SyscallAction::Return { error, value: 0 }
-                }
+            if nr == SYS_DEBUG_PUT_STR && r.error == 0 {
+                task.record_put(r.value);
             }
-        }
-        SYS_DEBUG_HALT => SyscallAction::Halt { code: args[0] },
-        SYS_EXIT => {
-            task.record_exit(args[0]);
-            SyscallAction::Exit { code: args[0] }
-        }
-        // Trong dải ABI nhưng KT-53 chưa cài (IPC/sched/clock/DebugGetInfo — K3b/K3.5).
-        0..=SYSCALL_MAX => {
-            task.record_return(ERR_NOT_SUPPORTED, 0);
+            task.record_return(r.error, r.value);
             SyscallAction::Return {
-                error: ERR_NOT_SUPPORTED,
-                value: 0,
+                error: r.error,
+                value: r.value,
+                info: r.info,
+                mr: r.mr,
             }
         }
-        // Ngoài dải 0..15 (kể cả EID SBI 0x53525354) — số syscall là **chỉ số** vào bảng dispatch
-        // nên ngoài dải là `RangeError` (19, D2-79), không panic; 5 chỉ dùng cho tham số sai trong
-        // một syscall hợp lệ.
-        _ => {
-            task.record_bad(nr, ERR_RANGE_ERROR);
-            task.record_return(ERR_RANGE_ERROR, 0);
-            SyscallAction::Return {
-                error: ERR_RANGE_ERROR,
-                value: 0,
-            }
+        vifast_core::syscall::SyscallOutcome::Exit { code } => {
+            task.record_exit(code);
+            SyscallAction::Exit { code }
+        }
+        vifast_core::syscall::SyscallOutcome::Halt { code } => SyscallAction::Halt { code },
+        vifast_core::syscall::SyscallOutcome::Switched { state } => {
+            SyscallAction::Switched { state }
         }
     }
 }

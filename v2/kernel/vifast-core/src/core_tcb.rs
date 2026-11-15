@@ -714,6 +714,17 @@ impl Machine {
         Ok(self.funding_sc(tcb))
     }
 
+    /// Ngân sách **còn lại** của SC đang cấp cho `tcb` (0 khi không có SC/chưa cấu hình).
+    ///
+    /// KT-62: `Yield` (8) trả phần budget còn lại cho user (`spec/abi.toml` `[syscall]`) mà
+    /// không cần slot cap của SC; cùng nguồn với [`Machine::sched_remaining`].
+    pub fn tcb_remaining(&self, tcb: ObjId) -> u64 {
+        self.funding_sc(tcb)
+            .and_then(|sc| self.sc_data(sc).ok())
+            .map(|s| s.budget.remaining())
+            .unwrap_or(0)
+    }
+
     /// TCB có được phép chạy theo ngân sách không (SC đã cấu hình và `consumed < budget`).
     pub fn tcb_has_budget(&self, tcb: ObjId) -> bool {
         let Some(sc) = self.funding_sc(tcb) else {

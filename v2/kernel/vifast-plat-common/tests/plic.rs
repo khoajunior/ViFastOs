@@ -204,5 +204,6 @@ fn priority_lon_hon_threshold_moi_forward() {
     // PLIC chỉ forward nguồn có priority > threshold; threshold 0 + priority 1 (K3-PLAN §4.1).
     assert_eq!(PLIC_THRESHOLD, 0);
     assert_eq!(PLIC_UART_PRIORITY, 1);
-    assert!(PLIC_UART_PRIORITY > PLIC_THRESHOLD);
+    let forward = PLIC_UART_PRIORITY > PLIC_THRESHOLD;
+    assert!(forward, "PLIC chỉ forward nguồn có priority > threshold");
 }

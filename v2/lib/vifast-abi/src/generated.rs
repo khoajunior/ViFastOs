@@ -5,6 +5,8 @@
 #[rustfmt::skip]
 pub const ABI_VERSION: u32 = 1;
 #[rustfmt::skip]
+pub const MIN_COMPAT: u32 = 1;
+#[rustfmt::skip]
 pub const SYSCALL_COUNT: usize = 16;
 #[rustfmt::skip]
 pub const SYSCALLS: [(&str, u16); SYSCALL_COUNT] = [
@@ -27,6 +29,38 @@ pub const SYSCALLS: [(&str, u16); SYSCALL_COUNT] = [
 ];
 #[rustfmt::skip]
 pub const ERROR_COUNT: usize = 19;
+#[rustfmt::skip]
+pub const SYS_CALL: u64 = 0;
+#[rustfmt::skip]
+pub const SYS_SEND: u64 = 1;
+#[rustfmt::skip]
+pub const SYS_NB_SEND: u64 = 2;
+#[rustfmt::skip]
+pub const SYS_RECV: u64 = 3;
+#[rustfmt::skip]
+pub const SYS_NB_RECV: u64 = 4;
+#[rustfmt::skip]
+pub const SYS_REPLY_RECV: u64 = 5;
+#[rustfmt::skip]
+pub const SYS_NB_SEND_RECV: u64 = 6;
+#[rustfmt::skip]
+pub const SYS_NB_SEND_WAIT: u64 = 7;
+#[rustfmt::skip]
+pub const SYS_YIELD: u64 = 8;
+#[rustfmt::skip]
+pub const SYS_WAIT_ADDR: u64 = 9;
+#[rustfmt::skip]
+pub const SYS_WAKE_ADDR: u64 = 10;
+#[rustfmt::skip]
+pub const SYS_CLOCK_READ: u64 = 11;
+#[rustfmt::skip]
+pub const SYS_DEBUG_PUT_STR: u64 = 12;
+#[rustfmt::skip]
+pub const SYS_DEBUG_HALT: u64 = 13;
+#[rustfmt::skip]
+pub const SYS_EXIT: u64 = 14;
+#[rustfmt::skip]
+pub const SYS_DEBUG_GET_INFO: u64 = 15;
 #[rustfmt::skip]
 pub const ERRORS: [(&str, u16); ERROR_COUNT] = [
     ("InvalidCapability", 1),

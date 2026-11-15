@@ -12,11 +12,10 @@
 #                     waitaddr/D2-83/invariants) + trap lồng fatal (53).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
-#   - `ktest-user`  : 7 TAP — U-mode: nạp `init` ELF (parse + map W^X), `sret`, 3 syscall (DebugPutStr
-#                     12, DebugHalt 13, Exit 14), syscall lạ trả 19 `RangeError`, U-mode đọc địa chỉ
-#                     kernel ⇒ trap thật `scause=13` phân loại `FaultKind::Vm{Read,Permission}` (TAP 5,
-#                     recover), `Exit(42)` ⇒ `FaultKind::Exit` (TAP 6), rồi U-mode thực thi trang
-#                     `.data` RW NX ⇒ `scause=12` `FaultKind::Vm{Execute,Wx}` + `PANIC: u-mode fault` (TAP 7).
+#   - `ktest-user`  : 17 TAP (KT-62) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
+#                     `Machine` thật (DebugGetInfo 15, Yield 8, Exit 14 + 5 lần ngoài dải ⇒ 19), TAP
+#                     kernel-level cho bảng 16 syscall/cap sai/IPC/NB/WaitAddr/Clock/Yield (7..13),
+#                     `Exit` không Reply (14), rồi 3 TAP fault/wx (15..17, PANIC `u-mode fault`).
 #
 # **KT-54 — nguồn sự thật duy nhất là `v2/test/boot/expected.txt`** (mỗi ảnh một dòng
 # `<ảnh> <kế hoạch TAP> <số dòng ok>`): runner **đọc số từ tệp**, không hardcode; `expected.txt` lệch
@@ -27,7 +26,7 @@
 #   4. **đúng 1 dòng `PANIC`, đúng mẫu cho phép của ảnh** (ảnh chính: trap lồng; guard: guard page
 #      fault; user: u-mode fault) — PANIC khác mẫu hoặc PANIC thứ hai ⇒ đỏ;
 #   5. mỗi TAP N có **đúng một** dòng `ok N - <tên>` khớp tên trong manifest của runner;
-#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **65** mục, guard **5**, user **13**);
+#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **65** mục, guard **5**, user **33** mục từ KT-62);
 #   8. **KT-55**: mỗi ca conformance in `# conf: scn=N name=… steps=K` và đúng **K** dòng
 #      `# trace: N …` đúng định dạng; ca 24 (2 hart) in `skipped=smp1` trên `-smp 1`;
 #   7. `Platform HART Count` của OpenSBI khớp `-smp` (số hart là **máy ảo** nói, không chỉ kernel tự khai).
@@ -268,6 +267,16 @@ init u-mode
 syscall debug_put_str
 syscall exit
 syscall la ma loi
+syscall debug_get_info
+syscall yield
+syscall 16 duong
+syscall sai cap
+syscall ipc vong
+syscall nb va notification
+syscall waitaddr wakeaddr
+syscall clock read
+syscall yield doi tcb
+syscall exit khong reply
 u-mode kernel read fault
 faultkind exit
 faultkind wx from u
@@ -398,7 +407,7 @@ __EVID24__
 ^# core: untyped id=[0-9]+ base=0x[0-9a-f]+ bytes=65536 used=0 free=65536 allocated=0 gap=0 objects=1 caps=0 check_bytes=1 check_all_bytes=1$
 ^# core: tcb retype tcb=[0-9]+ slot=1 objects=11 caps=11 used=[0-9]+ state=Inactive check_caps=1 check_bytes=1$
 ^# core: configure cspace=1 sc=1 priority=3 mcp=10 budget=4 period=8 suspended_ok=1 resume=1 state=Ready check_sched=1 check_sc_refs=1 check_budget=1$
-^# core: sched harts=1 pick0=[0-9]+ pick1=[0-9]+ dispatch0=[0-9]+ dispatch1=[0-9]+ t0=Ready t1=Running suspended=0 check_sched=1$
+^# core: sched harts=__SMP__ pick0=[0-9]+ pick1=[0-9]+ dispatch0=[0-9]+ dispatch1=[0-9]+ t0=Ready t1=Running suspended=0 check_sched=1$
 ^# core: ipc call=1 recv=1 reply=1 mr=0xfeed blocked_send=1 blocked_reply=1 t0=Ready ep_len=0 reply_caller=0 sent=[0-9]+ delivered=[0-9]+ check_ipc=1 check_reply_links=1$
 ^# core: ntfn signal=1 wake=1 word=0x0 badge=0x0 waiter=0 consumed=0x42 poll=0x8 state=Ready check_notifications=1$
 ^# core: waitaddr frame=0x[0-9a-f]+ label=[0-9]+ offset=64 value=0x1234 woke=1 waiters=0 buckets=0 state=Ready check_waitaddr=1$
@@ -418,13 +427,31 @@ EOF
 EOF
             ;;
         ktest-user) cat <<'EOF'
+^# user core: static=180168 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
 ^# user image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 root=0x[0-9a-f]+ obj_arena=0x[0-9a-f]+-0x[0-9a-f]+ untyped=2$
 ^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
-^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=5 exits=1 exit=42$
+^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=10 exits=1 exit=42$
 ^# u sstatus: enter=0x[0-9a-f]+ trap=0x[0-9a-f]+ spp=0 spie=0 sie=0 sum=0 uxl=2$
 ^# user put_str: calls=2 bytes=51 sum_off=1$
 ^# user exit: code=42 state=Exited exits=1$
-^# user badsys: nr=99 err=19 calls=2 panic=0$
+^# user badsys: nr=31 err=19 calls=5 panic=0$
+^# user getinfo: nr=15 calls=1 err=0 abi_version=1 num_harts=__SMP__ exit=42$
+^# user yield: nr=8 calls=1 err=0 budget_left=[0-9]+$
+^# sys: nr=15 err=0 value=1 tcb=[0-9]+ state=Running src=core$
+^# sys: nr=8 err=0 value=[0-9]+ tcb=[0-9]+ state=Running src=core$
+^# sys: nr=31 err=19 value=0 tcb=[0-9]+ state=Running src=core$
+^# sys: tap=7 nr=0 out=blocked err=0 tcb=[0-9]+ state=BlockedOnSend src=core$
+^# sys: tap=7 nr=13 out=halt err=0 tcb=[0-9]+ state=Running src=core$
+^# sys: tap=7 nr=15 out=ok err=0 tcb=[0-9]+ state=Running src=core harts=__SMP__$
+^# sys: tap=8 empty=1 wrong_type=2 call_nonep=18 recv_wrong=2 tcb=[0-9]+ state=Running$
+^# sys: tap=9 call=1 recv=1 reply=1 mr=0x11/0x22 blocked=1 reply_caller=0 caller=(Ready|Running) state_ok=1$
+^# sys: tap=10 nb_send=0 nb_recv_mr=0x55 busy=14 nbsr_mr=0x66 nbwait=0 notif=0x99/0xab/0xcd ok=1$
+^# sys: tap=11 wait=1 wake=1 mismatch=5 notmapped=11 state=Ready ok=1$
+^# sys: tap=12 nr=11 clock1=[0-9]+ clock2=[0-9]+ mono=1$
+^# sys: tap=13 nr=8 tcb_before=[0-9]+ tcb_after=[0-9]+ state_before=Running state_after=Ready ok=1$
+^# sys: tap=14 nr=14 err=0 code=42 tcb=[0-9]+ state=BlockedOnSend call=0 fault=Exit\{42\} ep_len=1 sender=[0-9]+ reply=0$
+^# sys: kernel phase invariants=1 caps=[0-9]+ objects=[0-9]+$
+^# user exit: code=42 state=Exited exits=1$
 ^# user exitkind: code=42 kind=Exit\{42\} ok=1$
 ^U: init hello from u-mode$
 ^U: bad syscall err=19 ok$
