@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-81`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-82`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-81: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-82: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -131,7 +131,8 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-80** Bằng chứng phải **neo vào ảnh**: mọi log dùng làm bằng chứng (ktest, conformance, soak) phải chứa **hash ảnh** (BUILD_ID/sha256 12+ ký tự) do **kernel tự in** trong cửa sổ boot đó, và runner/script so sánh **phải** kiểm hash này khớp ảnh đang chạy/bản ghi kỳ vọng, **từ chối** log không có hoặc lệch hash. Lý do đo được: `--compare` hiện nhận log có sẵn; đã chứng minh **chép trace của sim vào log QEMU vẫn PASS 61/61** — tức bằng chứng có thể bị ghép. Cấm dùng log không neo ảnh làm bằng chứng "xanh"; log tái lập phải ghi rõ là **tái lập**.| Số | Giá trị | Nguồn |
 
 - **D2-81** KT-56 được phép commit **`docs/abi.md`** (golden sinh từ `spec/` bởi `vifast-gen`) cùng hunk `FaultKind`: đây là **đầu ra sinh**, không sửa tay, và phải khớp `gen-check`; phạm vi commit của KT-56 = `v2/**` + `spec/abi.toml` (đúng 1 hunk) + `docs/abi.md` (sinh lại). Mọi tệp khác ngoài ba nhóm này **cấm**.|---|---|---|
-| slot cap | **48 B** `[TK]` (sửa 32 B) | QD §3.9 |
+
+- **D2-82** **K3 DONE** (phase-level, không phải kernel đầy đủ): 14 task KT-44..57; cổng §5.2 **9/9**: soak **0/1000** ảnh sản phẩm, không icount, 3 luồng, timeout 20 s, wall 219 s, BUILD_ID `e09ec255c17715ae` khớp ELF (D2-80); TAP **43/43 + 3/3 + 7/7** ở smp 1/2/4; L1 **400.000 lượt** (100k × smp 1/2/4/8) 0 vi phạm; conformance **61/61 dòng / 5/5 ca**; gate **574 test/75 suite**; budget 11.248/17.344/2.680/11.752 B ≤ 262.144; mutation 4/4 (M1/M2 KT-51 + X/Y KT-57); reviewer-kt57 DRIFT thấp → vá F1..F7 + T-INFRA trước commit. **Phạm vi đúng**: K3 = platform kernel **thật** (trap, Sv39, timer, PLIC, SMP, IPI, ASID/TLB, object, U-mode, runner, conformance) nhưng **CHƯA có core** (CNode/TCB/IPC/sched) — core chỉ tồn tại trong sim; port core là **K3b** KT-58..61. Nợ: soak chỉ 1 hart sản phẩm; perf chỉ máy này, jitter thật chưa đo; AIA/MSI/Sstc; pager/COW; `FaultKind.vspace` là nhãn; Frame 1 GiB `NotSupported`; `USER_RANGES`; sau `Exit` satp root user; TLB per-hart model-only.| slot cap | **48 B** `[TK]` (sửa 32 B) | QD §3.9 |
 | `MAX_HARTS` | mặc định **8**, trần cấu hình **64** `[TK]` (sửa 256) | QD §3.15 |
 | `vifast-core` | ≤ **25.000** dòng `[ƯL]` (sửa 15.000); tệp ≤ 1.500 dòng | QD §3.15 |
 | `.data + .bss` | ≤ **256 KiB** `[TK]` `[GT]`, đo ở K0.5 | QD §3.5, §9 Q8 |
