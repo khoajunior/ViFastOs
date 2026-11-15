@@ -159,8 +159,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-52 | Object layer `no_std` + Retype nội bộ (VSpace/PT/Frame) | KT-46 | 3 h | DONE | 320daa59; TAP 37/37; byte invariant; map 4K phần cứng; W^X 2 ca; 300/300 boot; gate 569 |
 | KT-53 | U-mode + 3 syscall + nạp `init` ELF | KT-46 | 3 h | DONE | 26adaa33; TAP U-mode 5/5; ecall U=8, U đọc kernel=13; 19 RangeError (D2-79); 450/450 boot; gate 569 |
 | KT-54 | ktest TAP + runner QEMU smp 1/2/4 + `expected.txt` | KT-45 | 2,5 h | DONE | d6526279; expected.txt nguồn duy nhất; 450/450 boot (30m53s); 17 ca harness (15 đỏ); 0-boot die; gate 569 |
-| KT-55 | Conformance 5 `.scn` × sim/QEMU, chuẩn hoá trace | KT-51 | 3 h | READY | 5/5 khớp; 0 khác ngoài trường cho phép |
-| KT-56 | `FaultKind` thật + W^X + `spec/abi.toml` **một lần** (D2-72 Q1) | KT-46 | 3 h | BLOCKED | cause→FaultKind 3/3; W^X fault; spec diff đúng 1 hunk |
+| KT-55 | Conformance 5 `.scn` × sim/QEMU, chuẩn hoá trace | KT-51 | 3 h | DONE | b3b8ed01; 61/61 dòng khớp smp2/4; TAP 37; gate 573; D2-80 hash ảnh; bắt lỗi W|X thật |
+| KT-56 | `FaultKind` thật + W^X + `spec/abi.toml` **một lần** (D2-72 Q1) | KT-46 | 3 h | READY | cause→FaultKind 3/3; W^X fault; spec diff đúng 1 hunk |
 | KT-57 | Cổng K3: soak 0/1000, matrix, 100k L1, perf, K3-DOD | KT-54 | 3 h | BLOCKED | soak 0/1000 `ps`; TAP 100 % 1/2/4; budget; perf |
 | KT-58 | **K3b** port core `no_std`: CNode/MDB/Untyped | KT-57 | 3 h | BLOCKED | parity với sim trên bộ test port |
 | KT-59 | **K3b** port TCB/transition/sched + hộp thư | KT-58 | 3 h | BLOCKED | TAP parity; schedule đúng |
@@ -184,7 +184,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3**: KT-44..54 DONE; **KT-55 READY** (conformance 5 .scn). Rồi KT-56/57, K3b KT-58..61.
+2. **K3**: KT-44..55 DONE; **KT-56 READY** (FaultKind + spec + W^X). Rồi KT-57 cổng K3, K3b KT-58..61.
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
