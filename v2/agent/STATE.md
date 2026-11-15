@@ -4,69 +4,109 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `26adaa33` ([KT-53] U-mode + 3 syscall + nạp `init` ELF — commit chỉ `v2/`; parent
-                `2fcb6e40` = [KT-00] D2-79; base KT-53 `5927063b` = [KT-00] Agent 0 mở KT-53, code KT-52
-                `320daa59`; commit `[KT-53b]` cập nhật STATE ngay sau) — **đã push**, `HEAD..origin/main = 0`
-BUILD_ID      : — ảnh K3 KT-53, cây cuối sau vá review (sha256 ở `JOURNAL/kt53-image-sha.log`):
+HEAD          : `d6526279` ([KT-54] runner ktest + `expected.txt` + §17 — commit chỉ `v2/`; parent
+                `d3027284` = [ST-00] tab ViScript (`git diff 540c0546..d3027284 -- v2/` **rỗng**); base
+                KT-54 `540c0546` = [KT-00] Agent 0 mở KT-54; commit `[KT-54b]` cập nhật STATE ngay sau)
+                — **đã push**, `HEAD..origin/main = 0`
+BUILD_ID      : — ảnh K3 **KHÔNG ĐỔI** so KT-53 (4 ảnh byte-identical; sha256 ở
+                `JOURNAL/kt54-image-sha.log`, `diff` với `kt53-image-sha.log` **rỗng**):
                 `vifast-kbin-riscv64` 89.640 B / data+bss 11.248 B,
                 `vifast-kbin-ktest` 230.912 B / 13.200 B,
-                `vifast-kbin-ktest-guard` 53.728 B / 2.680 B (3 ảnh này **không đổi** data+bss so KT-52),
-                `vifast-kbin-ktest-user` 141.992 B / 11.688 B (chỉ ảnh user bật module U-mode);
-                budget `JOURNAL/kt53-budget.log` PASS ≤ 262.144 B.
-Task          : **KT-53 (U-mode + 3 syscall + nạp `init` ELF)** — **DONE (commit `26adaa33` + `[KT-53b]`
-                đã push; reviewer-kt53 **DRIFT** (không UNSAFE) — vá D2-79 + bằng chứng + log trước commit)**:
-                `vifast-elf::parse` ELF64 LE `ET_EXEC` + map `PT_LOAD` **theo quyền** (`U|R|X` text,
-                `U|R|NX` rodata, `U|R|W|NX` data — **W^X** 3 lớp: parser/loader/object layer + walk PTE
-                `wx=0`), stack user 8 trang `U|R|W|NX` + **guard `0x40007000` không map** (`guard_none=1`
-                bằng walk); root VSpace chỉ chép **nửa thấp** root kernel (index 0/2..255, trừ index 1) —
-                **nửa cao (high alias/physmap) không map** (`high=1`); trapframe U-mode + `sret`
-                (`sstatus.SPP=0`, `SPIE=SIE=SUM=0`, `tp=0`) với **`sscratch` luôn giữ đỉnh trap stack
-                per-hart** (trap `csrrw sp, sscratch, sp`, không lộ con trỏ kernel); `ecall` U ⇒
-                `scause=8` dispatch **3 syscall** `DebugPutStr` 12 / `DebugHalt` 13 / `Exit` 14 (QD §1
-                Q-A; không Reply — chưa có TCB/fault_ep, K3.5); ngoài dải `0..15` ⇒ **19 `RangeError`**
-                (D2-79), trong dải chưa cài ⇒ 18, **không panic**; `Exit(42)` ⇒ `UserTask` `Exited` +
-                `exit_code`, **không** quay lại U (về S-mode qua `user_exit_resume` khôi phục
-                ra/sp/gp/tp/s0..s11); U-mode đọc `0x80200000` ⇒ **load page fault `scause=13`,
-                `stval=0x80200000`** + `PANIC: u-mode fault … from_u=1` + halt sạch. Ảnh **test user**
-                riêng (`vifast-kbin-ktest-user`, feature `user`) vì fault U-mode fatal cần kết thúc boot;
-                `expected.txt` `ktest-user 5 5`, ảnh chính vẫn **37 TAP**, guard **3 TAP** (không renumber).
-                **Đo thật**: matrix 1/2/4 9/9 sạch (`kt53-ktest.log`); **450/450 boot** = 150/150 mỗi
-                `smp 1/2/4` trên cây cuối (`kt53-boot50-smp{1,2,4}.log`, 0 `not ok`); host **102**
-                (`kt53-host.log`, `tests/user.rs` 11/11); product `run.sh 2 2` PASS (`kt53-product.log`);
-                mutation âm tính TAP 5 bắt đúng (`kt53-mutation-khong-fault.log`, revert + sha ảnh khôi
-                phục `e21f9ae6…`); budget 4 ảnh PASS; gate **PASS 569/73** (`kt53-gate.log`).
-Bước          : 8/8 xong (baseline gate **569/73** + baseline ktest 37/37+3/3 → **đỏ trước** host
-                `unresolved import user` + QEMU `can't find bin vifast-kbin-ktest-user` → `plat-common::user`
-                (dispatch/state/range, no_std/no unsafe, host test 11) → `vifast-elf` dep + `build.rs` sinh
-                `init.elf` bằng **`$RUSTC`** (byte-identical 2 lần build) + `init/init_user.S` → `arch::user`
-                (loader W^X, root nửa thấp, trapframe/`sscratch`/`user_enter`/`user_exit_resume`, fault cách ly,
-                `sstatus` hai đầu) → `ktest_user.rs` 5 TAP + runner/expected → matrix xanh → **review
-                `reviewer-kt53` DRIFT** → vá **D2-79 (19)**, bằng chứng `sstatus`/guard, log T-INFRA, host
-                92→**102** → **450/450 boot** + mutation + gate **569/73** → **commit `26adaa33` +
-                `[KT-53b]` + push**)
+                `vifast-kbin-ktest-guard` 53.728 B / 2.680 B,
+                `vifast-kbin-ktest-user` 141.992 B / 11.688 B; budget 4 ảnh PASS ≤ 262.144 B
+                (`budget.sh` sha256 `7dd9d761…`, **không sửa**).
+Task          : **KT-54 (ktest TAP + runner QEMU smp 1/2/4 + `expected.txt`)** — **DONE (commit
+                `d6526279` + `[KT-54b]`; reviewer-kt54 **DRIFT** → đã vá hết trước commit)**:
+                runner viết lại (**528 → 883 dòng**), `expected.txt` là **nguồn sự thật duy nhất**
+                (đọc số từ tệp, không hardcode; `plan == ok`; không nhãn lặp/nhãn lạ; đủ 3 ảnh;
+                kế hoạch == số TAP manifest). Mỗi boot kiểm **8 nhóm bất biến**: khung TAP + thứ
+                tự (`version` < `1..N` < `ok` đầu), dãy `ok 1..N` **liên tục/không trùng/không
+                thiếu**, không `not ok`, **đúng 1 PANIC** khớp **nguyên dòng** theo mẫu ảnh, mỗi
+                TAP N đúng **một** dòng `ok N - <tên>`, đủ evidence **neo `^…$`** (**51/5/13**) +
+                `OpenSBI vX.Y.Z` + `Platform HART Count : N`, **tập hart** `0..N-1` cho
+                `# timer hart=`/`# plic hart=` (không chỉ đếm dòng), và **0 boot không bao giờ
+                PASS** (`SMP_LIST` rỗng ⇒ `die`; `ROWS == NBOOT × smp × 3`). Log QEMU có CRLF ở
+                dòng **firmware** ⇒ chuẩn hoá `\r` vào bản tạm trước khi kiểm (không sửa log gốc).
+                Timeout 20 s `TERM`→`KILL` **đúng PID** (AGENTS §9), log riêng từng
+                `(ảnh, smp, boot)`, bảng tổng kết `image × smp × boot` + `PASS/FAIL/TIMEOUT/SKIP`
+                (SKIP chỉ khi TIMEOUT), exit 0/1/2; 5 chế độ (`matrix`, `--check-log`,
+                `--log-path`, `--print-expected`, `--print-evidence`). `selftest.sh` **mới**: 17 ca
+                mutation harness (1 xanh + **15 đỏ kèm đúng token lý do** + sha256 `expected.txt`
+                trước = sau). Docs **§17** (cách chạy/đọc/ý nghĩa từng dòng evidence/12 giới hạn).
+                **Đo thật**: `ktest.sh 50 matrix` **450/450 boot sạch** (0 `not ok`, wall 30 m 53 s,
+                `kt54-boot50-final.log`; script **đóng băng** sha256 trước = sau,
+                `kt54-freeze.sha`/`kt54-freeze-check.log`); matrix 1/2/4 **9/9** (`kt54-matrix1.log`
+                + 9 log `kt54-{ktest,guard,user}-smp{1,2,4}.log`); 9 log thật `--check-log` **9/9**,
+                kiểm chéo sai cấu hình/ảnh ⇒ **đỏ** (`kt54-checklog-cheo.log`); selftest **17/17**
+                (`kt54-selftest.log`), đỏ trước với runner cũ **1/10** (`kt54-selftest-red.log`);
+                7 ca phản biện log rỗng/cắt/ghép ⇒ đỏ hết (`kt54-adversarial.log`); gate **PASS
+                569/0** (`kt54-gate.log`).
+Bước          : 7/7 xong (baseline runner cũ **9/9** + rà ra **10 lỗ hổng** → **đỏ trước**
+                `selftest.sh` **1/10** → viết lại `ktest.sh` (`expected.txt` + 8 nhóm bất biến +
+                bảng + `--check-log`) → `selftest.sh` 12 ca → **review `reviewer-kt54` DRIFT**:
+                2 **đường xanh sai** (0 boot ⇒ PASS exit 0; `Platform HART Count` 1→10/12/19 vẫn
+                PASS) + 2 mức siết (evidence & per-hart chưa neo/kiểm tập) + lỗi số trong tài liệu
+                → **vá A/B/C/D** (thêm chuẩn hoá `\r` vì dòng firmware CRLF, nếu không 9/9 log
+                thật đỏ oan) + selftest **17 ca có token lý do** + `mut_diff` → **đóng băng** script
+                → **450/450 boot** + matrix 9/9 + selftest 17/17 + gate **569/0** → **commit
+                `d6526279` + `[KT-54b]` + push**)
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt53-gate.log`);
-                baseline cùng số (`JOURNAL/kt53-gate-baseline.log`). Kernel **không** nằm trong `gate
-                --fast` (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm bằng build 4 ảnh + `ktest.sh`
-                (icount shift=6, D2-74; 3 ảnh test/vòng) + `run.sh` (không icount) + host test **102**
-                + **450/450 boot** (`JOURNAL/kt53-{ktest,host,product,boot50-smp*}.log`).
-Miri          : KT-53 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO (D2-72 Q12); phần **ngữ nghĩa**
-                U-mode/syscall tách khỏi asm nên chạy host: `cargo test -p vifast-plat-common` **102**
-                (trong đó `tests/user.rs` **11/11**: 3 syscall, 19 mã lỗi, RangeError 19, `Exit` state,
-                `DebugPutStr` trần/lỗi, range, fault state, `sstatus` record).
-Việc dở       : **KT-53 xong**: commit `26adaa33` + `[KT-53b]` pushed. Kế tiếp: Agent 0 lật KT-53
-                DONE → **KT-54** (ktest TAP + runner QEMU smp 1/2/4 + `expected.txt` đầy đủ). KT-53 **không**
-                đụng `spec/`/sim/.scn/QUEUE/DECISIONS/AGENTS/`viscript/`; `git diff spec/` rỗng; dependency
-                mới duy nhất `vifast-elf` (crate nội bộ `no_std`, không dep, D2-21); `unsafe` chỉ
-                `kernel/vifast-plat-*`; không `cfg(target_arch)`. **Nợ đã ghi docs §16.8**: SUM mới đo
-                1 chiều; `sscratch` chứng minh gián tiếp; cách ly mới 1 địa chỉ (chưa root index 0/arena);
-                U-phase `SIE=0` ⇒ init lặp vô hạn treo hart; sau `Exit` `satp` vẫn root user + `SIE=0`
-                (fragile K3.5); `USER_RANGES` thay `walk` (root user không có physmap); store `scause=15`
-                từ U chưa có TAP; `DebugGetInfo` 15 chưa cài; loader lỗi giữa chừng không dọn object; ASID
-                VSpace nhãn chưa hợp nhất lease tlb (L4 KT-52).
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed**, L1 1.000 seed
+                871 ms (`JOURNAL/kt54-gate.log`), **không đổi** baseline KT-53; `v2 rules` PASS trên
+                cây mới. Kernel **không** nằm trong `gate --fast` (`v2/Cargo.toml`
+                `exclude = ["kernel"]`) — kernel kiểm bằng 4 ảnh sha **không đổi** + `ktest.sh`
+                **450/450** + host test (KT-53: 102) + `run.sh`.
+Miri          : KT-54 — **không chạy Miri** (D2-72 Q12) và task này **không chạm** một dòng
+                kernel/lib/sim nào ⇒ host test giữ nguyên như KT-53 (`vifast-plat-common` **102**,
+                `tests/user.rs` 11/11); bằng chứng "không chạm" = 4 ảnh sha256 byte-identical.
+Việc dở       : **KT-54 xong**: commit `d6526279` + `[KT-54b]` pushed. Kế tiếp: Agent 0 lật KT-54
+                DONE → **KT-55** (conformance 5 `.scn` × sim/QEMU; phụ thuộc KT-51/52/54) và **KT-56**
+                (`FaultKind` + `spec/abi.toml` một lần), rồi **KT-57** (soak 1.000 + matrix + K3-DOD)
+                chạy một mình. KT-54 **không** đụng `spec/`/sim/`.scn`/QUEUE/DECISIONS/AGENTS/
+                `viscript/`; không dependency mới; không `unsafe`/`cfg(target_arch)` mới. **Nợ
+                KT-54** (docs §17.7): runner kiểm **hình dạng** log, không kiểm ngữ nghĩa phép đo;
+                manifest tên TAP là bản sao có kiểm soát; đổi **nội dung** dòng evidence/PANIC phải
+                sửa mẫu cùng lúc (fail-closed); timeout là 200 lát 0,1 s (không phải đồng hồ tuyệt
+                đối); chạy tuần tự 1 QEMU; `selftest.sh` **không** chạy song song ma trận (nó phá
+                `expected.txt` ~1 s rồi `trap` trả lại).
 ```
 
-```
+
+## KT-54 — ktest TAP + runner QEMU smp 1/2/4 + `expected.txt` (K3)
+
+**Vào**: READY; HEAD `540c0546` ([KT-00] lật KT-53 DONE + mở KT-54); `HEAD..origin/main = 0`; working
+tree có `viscript/` của tab khác — **không chạm**; baseline runner cũ `ktest.sh 1 matrix` **9/9**
+(`kt54-baseline-matrix.log`) ⇒ hạ tầng KT-44..53 đã có, KT-54 chỉ **đóng lỗ hổng tin cậy**.
+
+**Mục tiêu** (K3-PLAN §4.1 KT-54 + D2-72 Q9/Q10, `k3-riscv64.md` §17): `expected.txt` **nguồn sự thật
+duy nhất**; runner kiểm dãy `ok 1..N` liên tục/không trùng/không thiếu, **đúng 1 PANIC** theo mẫu ảnh,
+đủ `# evidence`, **tập hart** theo `-smp`, log riêng từng `(ảnh, smp, boot)`, timeout 20 s + `kill`
+đúng PID; **bảng tổng kết** `image × smp × boot`; **chứng minh runner đỏ** bằng mutation harness.
+
+**Đã làm**: viết lại `ktest.sh` (5 chế độ; `load_expected` + `check_manifests` fail-closed; manifest
+tên 37/3/5; evidence 51/5/13 **neo `^…$`**; PANIC neo **cả đầu+cuối**; `validate_log` chuẩn hoá `\r` +
+biến toàn cục `MISSING`; chặn **0 boot**; bảng + `SKIP` chỉ khi TIMEOUT) + `selftest.sh` (**17 ca**,
+15 ca đỏ kèm token lý do, `mut_diff`, `trap`) + header `expected.txt` (3 dòng số **không đổi**) +
+docs **§17**.
+
+**Đo thật**: matrix 1/2/4 **9/9** (`kt54-matrix1.log` + 9 log từng `(ảnh,smp)`); **450/450 boot**
+(`kt54-boot50-final.log`, 0 `not ok`, 30 m 53 s, script đóng băng); `--check-log` 9 log thật **9/9** +
+kiểm chéo sai cấu hình ⇒ **đỏ**; selftest **17/17** (`kt54-selftest.log`), đỏ trước **1/10**
+(`kt54-selftest-red.log`); phản biện 7 ca log hỏng ⇒ đỏ hết (`kt54-adversarial.log`); budget 4 ảnh
+**không đổi** + sha **giống hệt** KT-53 (`kt54-image-sha.log`); gate **569/73, 0 failed**
+(`kt54-gate.log`).
+
+**Review**: `reviewer-kt54` **DRIFT** (không UNSAFE) — tìm 2 **đường xanh sai** (0 boot ⇒ PASS exit 0;
+`Platform HART Count` 1→10/12/19 vẫn PASS) + 2 mức siết (evidence & per-hart) + lỗi số trong tài liệu.
+Đã vá **hết** (A: `SMP_COUNT`/`ROWS`/`SMP_LIST` rỗng ⇒ `die`; B: neo `$`; C: neo toàn bộ evidence +
+chuẩn hoá `\r`; D: kiểm **tập hart**; selftest token lý do + `mut_diff` + sha256), **đóng băng**
+script rồi **chạy lại** 450 boot + selftest + gate. Chi tiết `JOURNAL/kt54-journal.md` §5.3.
+
+**Nợ** (docs §17.7): runner kiểm hình dạng log, không kiểm ngữ nghĩa phép đo (lớp 2 = host test/sim);
+manifest tên TAP là bản sao có kiểm soát; đổi nội dung evidence/PANIC phải sửa mẫu (fail-closed);
+timeout 200 lát 0,1 s; chạy tuần tự 1 QEMU; `selftest.sh` không chạy song song ma trận. **Không** thuộc
+KT-54: TAP mới (kernel sau), `.scn` (KT-55), `FaultKind`/`spec/` (KT-56), soak 1.000/perf/K3-DOD
+(KT-57), `run.sh` ảnh sản phẩm.
 
 ## KT-53 — U-mode + 3 syscall + nạp `init` ELF (K3)
 
@@ -327,7 +367,6 @@ Nhánh         : main
 Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 569 test/73 suite, 0 failed** (`JOURNAL/kt48-gate-fast.log`); baseline cùng số (`JOURNAL/kt48-baseline-gate-fast.log`). Kernel **không** nằm trong `gate --fast` (`v2/Cargo.toml` `exclude = ["kernel"]`) — kernel kiểm bằng build 3 ảnh + `ktest.sh` (**icount shift=6**, D2-74) + `run.sh` (**không icount**, D2-72 Q2) + host test **46/46** (`JOURNAL/kt48-{host-tests,ktest,ktest-2rounds,ktest-main-raw,ktest-guard-raw,boot50,budget,product-boot-nographic-raw}.log`).
 Miri          : KT-48 — **không chạy Miri** trên ảnh `no_std`/asm/MMIO (D2-72 Q12); Miri vẫn áp `lib/` + sim. Phần **logic** PLIC chạy host: `cargo test -p vifast-plat-common` **46/46** = 13 trap KT-45 + 1 API `Platform` KT-47 + 8 MMU KT-46 + 12 timer KT-47 + **12 PLIC KT-48** (hình học đăng ký, context `2*hart+1` cho hart 0..3, word/bit enable, offset threshold/claim, hai cửa sổ phủ `MAX_HARTS=8`, phân loại claim 3 nhánh, claim/complete cân bằng + 0 IRQ giả, limit tắt sau N, `ndev` không giả định 95, priority > threshold).
 Việc dở       : **`reviewer-kt48` DRIFT nhẹ (code/DoD đạt, không UNSAFE)**, 4 mục đã vá + D2-75; đã commit `[KT-48]`; `[KT-48b]` cập nhật HEAD + push. Kế tiếp Agent 0 lật KT-48 → KT-49 SMP. `viscript/` + `review/` của tab khác **không chạm** (chỉ stage `v2/`).
-```
 
 
 
