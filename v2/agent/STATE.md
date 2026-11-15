@@ -4,65 +4,57 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `b3b8ed01` ([KT-55] conformance 5 `.scn` × sim/QEMU + `# trace:` + D2-80 — commit
-                chỉ `v2/`; parent **`419d3013`** = [ST-00] ST-117 DONE của **dòng ViScript** chen
-                giữa trong lúc làm — worktree dùng chung, không phải base `54fd75b6` lúc mở KT-55;
-                commit `[KT-55b]` cập nhật STATE ngay sau) — **đã push**, `HEAD..origin/main = 0`
-BUILD_ID      : 4 ảnh **đổi** so KT-54 (W^X fix nằm trong `plat-common` dùng chung; ảnh ktest
-                thêm pha conformance + D2-80): product 89.640 B / data+bss 11.248,
-                ktest 304.760 / **13.200**, guard 53.800 / 2.680, user 142.072 / 11.688
-                (budget 262.144 PASS, `JOURNAL/kt55-budget.log`); BUILD_ID (FNV-1a 64 trên
-                `.text`, D2-80): product `809dbcb24fe9b479`, ktest `c6ab70c8adb16cbb`,
-                guard `c16ba36437e4f898`, user `0a6abab9c77509fd`
-Task          : **KT-55 (conformance 5 `.scn` × sim/QEMU, chuẩn hoá trace)** — **DONE (commit
-                `b3b8ed01` + `[KT-55b]`; reviewer-kt55 **DRIFT** → vá 7/7 trước commit)**:
-                `lib/vifast-scenario` (mới) đọc **chính** 5 tệp `.scn` (kernel `include_str!`, sim
-                đọc đĩa) và chiếu sang tập bước cả hai backend quan sát được — loại **có lý do đo
-                được**: Frame 1 GiB (KT-52 L7), mô hình TLB per-hart (TLB thật ở TAP 25..29),
-                TCB/procsrv (Q13); `vm_touch` **không** phủ, dòng `fault` phát tại
-                `vm_expect_fault`. `vifast-traceformat::TraceLine` = **một** định dạng
-                `# trace: <scn> <step> <op> k=v… => kết quả` (chỉ trường quan sát, không
-                PA/thời gian/hart). Kernel `ktest_conf.rs`: rig **mỗi ca mới**, map/unmap/protect/
-                walk trên **PTE Sv39 thật**, `fault` phân loại từ PTE (**KHÔNG** phải trap/KT-56),
-                ca 24 shootdown **thật** qua IPI (`-smp≥2`, ép `active_on={0,1}` rồi khôi phục;
-                `-smp1` in `skipped=smp1`). So: **61/61 dòng khớp, 5/5 ca** trên smp=2 và smp=4
-                (`JOURNAL/kt55-trace-compare.log`); `check_scn.py --trace` kiểm **chiều sim** độc
-                lập. **D2-80**: `# conf image: build=<16 hex> text=<len>` (FNV-1a 64 `.text` đã
-                nạp) — `ktest.sh` + `trace_compare.py --image` băm lại ELF, **từ chối** log không
-                có/lệch (log ghép bị đỏ, `JOURNAL/kt55-splice-check.log`). Đỏ trước: `trace rỗng`
-                khi kernel chưa in trace (`JOURNAL/kt55-red-diff.log` — **log tái lập**, ghi rõ
-                trong tệp). **Conformance bắt lỗi platform thật**: `map`/`protect` cho phép **một**
-                mapping `W|X` (tự phá D2-67, K2 từ chối) → sửa **atomic** `obj/vspace.rs` + test
-                host `wx_ca_3…` đỏ trước→xanh; KT-52 không bắt vì **khoảng trống phủ** (chỉ X→W +
-                Device+EXEC). TAP **37** (`conformance 5/5`; `-smp1`: `4/5 + 1 skipped`), trap lồng
-                dời **38** (TAP 1..36 không đổi); `expected.txt`+manifest+plan cùng commit.
-Bước          : 8/8 xong (baseline gate **569** → đỏ trước: so trace QEMU rỗng ⇒ `not ok` →
-                `vifast-scenario` + `TraceLine` → sim in trace (`kt42_scn`, 1 luồng) → kernel
-                `ktest_conf` TAP 37 → `trace_compare` 61/61 (smp2/4) → **reviewer-kt55 DRIFT**:
-                vá 7 mục (docs 38 TAP; D2-80 hash ảnh; tập step thay vì đếm; số ca theo
-                `--require`; nhãn TAP smp1; ghi rõ log tái lập; `vm_touch` không phủ) → matrix
-                9/9 + selftest 17/17 + gate 573 → **commit `b3b8ed01` + `[KT-55b]`**)
+HEAD          : `25251719` ([KT-56] FaultKind thật + W^X + spec 1 hunk) + `[KT-56b]` — **đã push**,
+                `HEAD..origin/main = 0`; parent `62474cc8` ([KT-00] D2-81: KT-56 được commit
+                `docs/abi.md` golden cùng hunk `FaultKind`). Worktree có `viscript/` của tab khác —
+                **không chạm**; commit KT-56 = `v2/**` + `spec/abi.toml` (1 hunk) + `docs/abi.md`.
+BUILD_ID      : ảnh **đổi** so KT-55 (fault.rs + probe + TAP 38..42; W^X Device toàn cục):
+                product 89.848 B / data+bss 11.248, ktest 332.176 / **17.344**,
+                guard 53.800 / 2.680, user 152.048 / 11.752 (budget 262.144 PASS,
+                `JOURNAL/kt56-budget.log`); BUILD_ID (FNV-1a 64 `.text`, D2-80):
+                ktest `3e6ae37a278300df` (khớp `trace_compare --image`), user/guard/product
+                đổi theo ảnh.
+Task          : **KT-56 (`FaultKind` thật + W^X + `spec/abi.toml` một lần)** — **DONE
+                (`25251719` + `[KT-56b]`; reviewer-kt56 **APPROVE** → vá 4/4 trước commit)**:
+                `vifast-plat-common::fault` (enum `FaultKind` **khớp K2** `tcb.rs`:
+                Exit/Vm/UnknownSyscall/UserException; `FaultAccess`/`VmFaultReason`; `classify_trap`
+                + `vm_reason`; `FaultStats`), `vifast-plat-riscv64::probe` (trap **phần cứng thật**
+                load/store/insn, không tiêm), `user.rs` (`Exit`⇒`FaultKind::Exit`; fault U-mode ⇒
+                khôi phục root kernel + walk PTE thật + classify; cờ test một lần
+                `enter_expect_fault` cho TAP 5, mặc định vẫn log+halt), `ktest_conf` `vm_expect_fault`
+                dùng cùng probe (ca 26 scratch-map đúng PA/cờ tại **đúng** VA, `reason` đọc từ
+                **leaf thật** `mmu::walk_sw`, `# faultprobe … pte=0x… src=trap`), `ktest_fault` TAP
+                38..42, `Frame.mapped_device` + chặn Device↔exec **toàn cục** (giải nợ L3 KT-52) +
+                `check_objmem`, `ObjError::abi_code()`; `spec/abi.toml` **đúng 1 hunk** (§19 docs);
+                `vifast-gen` sinh `FAULT_KINDS` (gen-check không còn rỗng cho hunk; chạy 2 lần cùng
+                sha256 — D2-81).
+Bước          : 9/9 xong (baseline gate 573 → đỏ trước `kt56-red.txt` → fault.rs + host test →
+                spec 1 hunk + gen/FAULT_KINDS → probe thật + TAP 38..42 + `mapped_device` →
+                `.scn` 25/26 từ trap thật → user TAP 5..7 (Wx từ execute trang RW) → ktest matrix
+                **9/9**, trace **61/61**, **450/450 boot** (50×smp1/2/4×3 ảnh), selftest 17/17,
+                gate **574** → reviewer APPROVE + vá M1/M2/L2/L1-L3 → gate lại 574).
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 573 test/75 suite, 0 failed**, L1 1.000 seed
-                (`JOURNAL/kt55-gate.log`); baseline KT-54 **569**, +4 test `vifast-scenario`.
-                Kernel **không** trong `gate --fast` (`exclude=["kernel"]`): kiểm bằng `ktest.sh
-                1 matrix` **9/9** boot 38/38 (`JOURNAL/kt55-ktest-matrix.log`), `selftest.sh`
-                **17/17** (`JOURNAL/kt55-selftest.log`), host `cargo test -p vifast-plat-common`
-                (obj **14/14** có `wx_ca_3`), `run.sh 1` product PASS.
-Miri          : KT-55 — **không chạy Miri** (D2-72 Q12): phần mới là sim (I/O đọc `.scn`, cùng
-                quy ước KT-42) + kernel `no_std`/asm (không Miri); không thêm `unsafe` ngoài
-                `kernel/vifast-plat-*` (D2-17: **1** khối `image_digest` đọc `.text` của chính ảnh).
-Việc dở       : **KT-55 xong**: commit `b3b8ed01` + `[KT-55b]` pushed. Kế tiếp: Agent 0 lật KT-55
-                DONE → **KT-56** (`FaultKind` + `spec/abi.toml` một lần; mở khoá reason cho
-                conformance), rồi **KT-57** (soak 1.000 + matrix + K3-DOD) chạy một mình.
-                **450 boot KHÔNG chạy** trong KT-55 (không bắt buộc; matrix 9/9 + 38 TAP đủ,
-                soak là KT-57). **Nợ KT-55** (§18.9): `fault` là phân loại PTE (không phải trap);
-                ca 24 chỉ smp≥2; trace so **văn bản chuẩn hoá** (không bắt lỗi chỉ ảnh hưởng PA
-                tuyệt đối); BUILD_ID là fingerprint FNV (không phải MAC — chặn ghép log thiếu
-                hash, không chống người có đủ hai nguồn); sim phải `--test-threads=1`.
-                Không đụng `spec/`/QUEUE/DECISIONS/AGENTS/`viscript/`; không dependency ngoài
-                allowlist (2 crate nội bộ); không `cfg(target_arch)` mới.
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 574 test/75 suite, 0 failed**, L1 1.000 seed
+                (`JOURNAL/kt56-gate.log`); baseline KT-55 **573**, +1 test `vifast-abi`
+                (`fault_kind_du_bon_bien_the_dung_spec`). Kernel **không** trong gate
+                (`exclude=["kernel"]`): host **11 suite/110 test** (`kt56-host-fault.log`),
+                `ktest.sh 50 matrix` **450/450** boot 43/3/7 TAP (`kt56-boot50.log`),
+                sim↔QEMU **61/61** (`kt56-trace-compare.log`), `selftest.sh` **17/17**,
+                product `run.sh 1` PASS (`kt56-product.log`).
+Miri          : KT-56 — **không chạy Miri** (D2-72 Q12): phần mới là kernel `no_std`/asm
+                (`vifast-plat-*`) + host test thuần `fault.rs`/`obj` (đã chạy `cargo test`);
+                `unsafe` mới **chỉ** trong `kernel/vifast-plat-riscv64` (`probe.rs`, `mmu.rs`
+                scratch, `user.rs` recover), đúng danh sách đóng D2-17; `fault.rs` không `unsafe`.
+Việc dở       : **KT-56 xong**: 2 commit pushed. Kế tiếp **KT-57** (soak 1.000 × 3 luồng + matrix
+                + 100k L1 + perf `[ĐO]` + `K3-DOD.md`) chạy **một mình**. **Nợ KT-56** (§19.7):
+                conformance ca 26 dùng scratch mapping (test-only, gỡ ngay; `reason` đọc leaf thật;
+                `scause/stval` phần cứng); `mmu::map_scratch_4k` là đường ghi bảng trang thứ hai
+                **bỏ qua** kế toán object layer; `UnknownSyscall` chưa có nguồn phần cứng (K3.5);
+                `FaultKind.vspace` là nhãn ASID (chưa phải cap); ảnh sản phẩm không có probe/scratch
+                và mọi fault không guard vẫn fatal. Không đụng `spec/kernel.toml`, `.scn` 22..26,
+                sim semantics, QUEUE/DECISIONS/AGENTS/`viscript/`; không dependency mới.
 ```
+
 
 
 ## KT-55 — conformance 5 `.scn` × sim/QEMU + chuẩn hoá trace (K3)
@@ -2577,6 +2569,7 @@ ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |
 |---|---|---|---|---|---|---|
+| 2026-11-15 | **KT-56** | 9/9 | `25251719` | — | `gate --fast` PASS (**574 test/75 suite**, L1 1.000 seed) + `ktest.sh 50 matrix` **450/450** boot (43/3/7 TAP) + trace **61/61** + `selftest.sh` **17/17** + product `run.sh 1` PASS | **commit `25251719` + `[KT-56b]` pushed**; `FaultKind` ABI **khớp K2** (Exit/Vm/UnknownSyscall/UserException, `Vm{access,reason}`, `va=stval`) từ **trap phần cứng thật** (`probe` load/store/insn; `.scn` 25/26 `fault` không còn phân loại PTE; ca 26 scratch-map đúng PA/cờ tại đúng VA, `reason` đọc leaf thật `mmu::walk_sw`); `spec/abi.toml` **đúng 1 hunk** + `vifast-gen` sinh `FAULT_KINDS` (D2-81, 2 lần cùng sha256); W^X: map `W\|X` ⇒ `WxViolation`+ABI 4 atomic, U-mode thực thi trang RW NX ⇒ `Vm{Execute,Wx}`+PANIC, `Frame.mapped_device` chặn Device↔exec **toàn cục** (giải nợ L3 KT-52); TAP 38..42 (ktest 43, trap lồng 43) + user 5..7; reviewer-kt56 **APPROVE → vá 4/4** (M1 reason từ leaf thật, M2 450 boot thật, L2 nhánh non-ktest, L1/L3 ghi nợ) |
 | 2026-11-15 | **KT-55** | 8/8 | `b3b8ed01` | — | `gate --fast` PASS (**573 test/75 suite**, L1 1.000 seed) + `ktest.sh 1 matrix` **9/9** boot (38 TAP, 65 evidence) + `selftest.sh` **17/17** | **commit `b3b8ed01` + `[KT-55b]` pushed**; conformance 5 `.scn` nền tảng (22..26) chạy **cùng chương trình bước** ở sim host + kernel QEMU, `# trace:` chuẩn hoá **61/61 dòng khớp 5/5 ca** (smp2/4); IR `vifast-scenario` loại bước **có lý do** (Frame 1 GiB, TLB per-hart model, TCB/procsrv Q13); `fault` kernel = phân loại **PTE** (không phải trap/KT-56); ca 24 shootdown **thật** `-smp≥2`, `-smp1` `skipped`; TAP **37** (`5/5` / `4/5 + 1 skipped`), trap lồng dời 38; **D2-80** `# conf image: build=…` (FNV `.text`) — runner + `trace_compare --image` **từ chối** log thiếu/lệch, chứng minh chép trace sim vào log khác bị **đỏ**; **conformance bắt lỗi platform thật**: `map`/`protect` cho phép **một** mapping `W|X` (tự phá D2-67, K2 từ chối) → sửa atomic + test host đỏ→xanh (KT-52 không bắt vì khoảng trống phủ); ngân sách không đổi; docs §18 + `check_scn --trace` kiểm **chiều sim**; reviewer-kt55 **DRIFT → vá 7/7** |
 | 2026-11-15 | **KT-50** | 8/8 | `74c22d4b` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed) + **300/300 boot** (matrix 1/2/4 × 50, 0 `not ok`) | **commit `74c22d4b` đã push**; SBI IPI EID `0x735049` + `Event::Ipi` (tách 1/5/9), hộp thư per-hart coalesce 3 kind, `sent/delivered/coalesced/spurious`, **không self-target** (D2-68), **drain trước mỗi bước** + timeout luôn hết; **D2-76** `sip.SSIP` thay ACLINT MSWI (PMP chặn, log `-d int`); **D2-77** post hart offline ⇒ `Invalid` + gỡ bit khi SBI lỗi; TAP 20..24 (`100 ipi delivered` / `100 ipi traps (self)`), nested dời 25 (25/25 + guard 3/3); host **67/67**; **reviewer-kt50 DRIFT nhẹ, 6/6 mục vá**; budget 2840/4304/2688 B ≤ 262.144; product `run.sh 1 2` PASS |
 | 2026-11-14 | **KT-44** | 8/8 | `efe128fb` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed; baseline cùng số) | **xong mã — chờ Agent 0 lật sổ**; `vifast-plat-common` no_std/`forbid(unsafe)` + trait `Platform`/`PanicHandler`; 2 ảnh bằng feature `ktest` (sản phẩm 0 chuỗi `ktest`, ảnh test 8); budget `data+bss 0 B`/262.144, `.stack` 65.536 + guard 4.096 báo riêng; TAP 1 boot ×2 ảnh; host test 3/3 |
