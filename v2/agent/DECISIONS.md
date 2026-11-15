@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-78`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-79`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-78: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-79: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -126,6 +126,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 - **D2-78** KT-51 — **`shootdown` KHÔNG nhận mask từ ngoài: tự lấy `active_on()`** (bỏ tham số mask khỏi API công khai) để không thể chờ/không chờ sai tập hart. TAP “hart ngoài `active_on`” phải chứng minh bằng **trạng thái thật**: TAP test-only **gỡ 2 hart phụ khỏi `ACTIVE_ON`** (ghi lại mask cũ), chạy shootdown ⇒ hart bị gỡ **không** ack, **không** bị chờ, và bất biến `ack_mask == active_on()` phải giữ; sau đó **khôi phục** `ACTIVE_ON`. Cấm dùng mask hẹp truyền vào để giả lập “ngoài active_on”. Đồng thời: mọi log/sha/journal được trích phải **tồn tại thật** trong `JOURNAL/`; nếu 300-boot chưa xong thì **không** được viết “300/300” (bài học KT-50).
 
+- **D2-79** KT-53 — **số syscall ngoài `0..15` trả lỗi 19 `RangeError`** (không phải 5 `InvalidArgument`): `spec/abi.toml` định nghĩa 19 = "chỉ số/chỉ số dải ngoài phạm vi", và số syscall chính là chỉ số vào bảng dispatch — đúng ngữ nghĩa. Áp dụng cho dispatch, `init_user.S`, TAP, docs §16.4, journal. Ghi rõ: đây là **sửa ngữ nghĩa cho khớp spec**, không phải nới ngưỡng; các mã khác (5) chỉ dùng cho tham số sai trong một syscall hợp lệ.
 | Số | Giá trị | Nguồn |
 |---|---|---|
 | slot cap | **48 B** `[TK]` (sửa 32 B) | QD §3.9 |
