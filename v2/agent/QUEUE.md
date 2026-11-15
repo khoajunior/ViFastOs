@@ -167,8 +167,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-60 | **K3b** port IPC/Reply/Notification/WaitAddr/fault | KT-59 | 3 h | DONE | L1 driver chạy `no_std`; C1/C2 đạt |
 | KT-61 | **K3b** cổng: TAP + soak + conformance trên nhân thật | KT-60 | 3 h | DONE | 1e2455c8; core TAP 43..52 trên QEMU; 53/53, 9/9; soak 0/1000; conf 61/61; gate 598; .bss 180.168 |
 | KT-62 | **K3.5** syscall 0..15 đi vào `Machine` thật + `init` U-mode dùng core | KT-61 | 3 h | DONE | 58e0cd59; 16 syscall vào core; SYS_* sinh từ spec; notif payload 3/4/7; TAP user 17; gate 607; num_harts thật (D2-88) |
-| KT-63 | **K3.5** chuyển cap qua IPC + finalise IPC khi Revoke | KT-62 | 3 h | READY | receive window + `plan_cap_transfer` + `RIGHT_GRANT`; Revoke huỷ caller/waiter/hàng; TAP |
-| KT-64 | **K3.5** `TlbFlush` thật + `SlotPool`→arena + `Bind` + `resume_with_regs` | KT-63 | 3 h | BLOCKED | một nguồn sự thật cap; `bound_sc` sống; resume sau fault; TAP |
+| KT-63 | **K3.5** chuyển cap qua IPC + finalise IPC khi Revoke | KT-62 | 3 h | DONE | 489b0883; cap transfer + finalise IPC; 3 vá nguyên tử (F1/F2/F3); gate 625; TAP 56; soak 0/1000 |
+| KT-64 | **K3.5** `TlbFlush` thật + `SlotPool`→arena + `Bind` + `resume_with_regs` | KT-63 | 3 h | READY | một nguồn sự thật cap; `bound_sc` sống; resume sau fault; TAP |
 | KT-64a | **K3.5** đồng bộ sim theo D2-89: finalise có waiter ⇒ `Cancelled`+`Ready` | KT-64 | 2 h | BLOCKED | `.scn` đỏ trước; parity phủ lại đường finalise; bỏ loại trừ §12.5 |
 | KT-65 | **K3.5** procsrv (U-mode, Rust) + shell tối thiểu | KT-64 | 3 h | BLOCKED | `Recv` FaultKind, `wait`/`kill`; shell chạy lệnh thật trên UART |
 | KT-66 | **K3.5** cổng: TAP + soak + L1 400k + `K35-DOD` | KT-65 | 3 h | BLOCKED | TAP 100 %; soak 0/1000; L1 100k × smp 1/2/4/8; conf 5/5 |
@@ -190,7 +190,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62 DONE (16 syscall→core, gate 607); **KT-63 READY** (cap transfer + finalise IPC).
+2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62 DONE (gate 607), KT-63 DONE (cap transfer, gate 625); **KT-64 READY**; KT-64a chờ.
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
