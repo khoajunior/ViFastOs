@@ -20,15 +20,20 @@
 //!    chờ nào của KT-24..28 để gỡ); `TlbFlush` trong hộp thư là no-op (core chưa có TLB).
 
 use crate::arena::Region;
+use crate::captable::{CapChildren, CapTable};
 use crate::error::{CapId, CapInfo, KError, ObjId, ObjType, SlotRef};
 use crate::mailbox::HartMailbox;
-use crate::mcs::ScBudget;
+use crate::objstate::{
+    AddrWord, EndpointData, NotificationData, QueuedMsg, ReplyData, WaitNode, MAX_ADDR_WORDS,
+    MAX_WAIT_NODES, NODE_NONE, WAITADDR_BUCKETS,
+};
 use crate::sched::{HartSched, Published};
 use crate::slotpool::SlotPool;
 use crate::spec::{
     ARENA_ALIGN, CNODE_BASE_BYTES, DEFAULT_ALIGN_BYTES, FLAG_GUEST, RIGHTS_ALL, RIGHT_WRITE,
 };
-use crate::tcb::{TcbInfo, TcbState, TCB_STATE_COUNT};
+use crate::tcb::{TcbState, TCB_STATE_COUNT};
+use crate::tcbdata::{ScData, TcbData};
 
 /// Số object tối đa trong bảng tĩnh (id **không tái dùng**, kể cả object đã chết).
 pub const MAX_OBJECTS: usize = 256;
@@ -42,6 +47,16 @@ pub const MAX_SLOT_WORDS: usize = 4096;
 pub const MAX_TCBS: usize = 64;
 /// Số **body SchedContext** tối đa (biên tĩnh `[TK]`).
 pub const MAX_SCHED_CONTEXTS: usize = 32;
+/// Số **body Endpoint** tối đa (biên tĩnh `[TK]`; sim không biên vì `Box`).
+pub const MAX_ENDPOINTS: usize = 16;
+/// Số **body Reply** tối đa (biên tĩnh `[TK]`).
+pub const MAX_REPLIES: usize = 32;
+/// Số **body Notification** tối đa (biên tĩnh `[TK]`).
+pub const MAX_NOTIFICATIONS: usize = 16;
+/// Số message **đang chờ** tối đa trong mọi hàng gửi Endpoint (pool chung, biên tĩnh
+/// `[TK]`). Mỗi Endpoint vẫn có sức chứa riêng [`crate::objstate::ENDPOINT_QUEUE_CAP`] = 8;
+/// pool chung nhỏ hơn tổng 8 × `MAX_ENDPOINTS` là biên của mô hình (như `MAX_TCBS`).
+pub const MAX_QUEUED_MESSAGES: usize = 24;
 /// Số hart tối đa của mô hình (`MAX_HARTS = 8`, KT-49/D2-72 Q4).
 pub const MAX_HARTS: usize = 8;
 /// Số dòng log finalise TCB tối đa — **bằng `MAX_OBJECTS`** (không phải `MAX_TCBS`).
@@ -62,6 +77,12 @@ pub(crate) const BODY_NONE: u8 = 0;
 pub(crate) const BODY_TCB: u8 = 1;
 /// Body SchedContext (`Machine::scs`).
 pub(crate) const BODY_SC: u8 = 2;
+/// Body Endpoint (`Machine::endpoints`, KT-60).
+pub(crate) const BODY_ENDPOINT: u8 = 3;
+/// Body Reply (`Machine::replies`, KT-60).
+pub(crate) const BODY_REPLY: u8 = 4;
+/// Body Notification (`Machine::notifications`, KT-60).
+pub(crate) const BODY_NOTIFICATION: u8 = 5;
 
 /// Tham chiếu body của object — chỉ số + cờ sống.
 ///
@@ -79,88 +100,6 @@ impl BodyRef {
         kind: BODY_NONE,
         idx: 0,
         alive: false,
-    };
-}
-
-/// Ruột TCB — port `TcbData` của sim (D2-33/§4.4), bỏ các trường IPC của KT-24..28
-/// (`last_ipc_error`/`recv_window`/`last_fault`/`notif` — KT-60).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TcbData {
-    pub(crate) state: TcbState,
-    pub(crate) suspended: bool,
-    pub(crate) exit_code: Option<u64>,
-    /// Cap `fault_ep` (`Tcb.SetFaultEp`).
-    pub(crate) fault_ep: Option<CapId>,
-    /// CSpace của TCB (object CNode).
-    pub(crate) cspace: Option<ObjId>,
-    pub(crate) priority: u8,
-    pub(crate) max_controlled_priority: u8,
-    /// HartMask ≤ 64 bit.
-    pub(crate) affinity: u64,
-    pub(crate) home: u16,
-    /// SchedContext riêng (`set_sched_params`).
-    pub(crate) sched_context: Option<ObjId>,
-    /// SC đang nhận donation (KT-21 — chưa có đường tạo ở KT-59, luôn `None`).
-    pub(crate) donated_sc: Option<ObjId>,
-    /// Notification đang bind (KT-27 — chưa có ở KT-59, luôn `None`).
-    pub(crate) bound_notification: Option<ObjId>,
-    /// 60 word "IPC buffer model" (KT-24 — KT-59 chỉ giữ chỗ + accessor; transfer thuộc KT-60).
-    pub(crate) ipc_buffer: [u64; 60],
-    /// 4 MR "thanh ghi" (KT-24 — như trên).
-    pub(crate) regs: [u64; 4],
-}
-
-impl TcbData {
-    pub(crate) const EMPTY: Self = Self {
-        state: TcbState::Inactive,
-        suspended: false,
-        exit_code: None,
-        fault_ep: None,
-        cspace: None,
-        priority: 0,
-        max_controlled_priority: 0,
-        affinity: 1,
-        home: 0,
-        sched_context: None,
-        donated_sc: None,
-        bound_notification: None,
-        ipc_buffer: [0; 60],
-        regs: [0; 4],
-    };
-
-    pub(crate) fn snapshot(&self) -> TcbInfo {
-        TcbInfo {
-            state: self.state,
-            suspended: self.suspended,
-            exit_code: self.exit_code,
-            fault_ep: self.fault_ep,
-            cspace: self.cspace,
-            priority: self.priority,
-            max_controlled_priority: self.max_controlled_priority,
-            affinity: self.affinity,
-            home: self.home,
-            sched_context: self.sched_context,
-            donated_sc: self.donated_sc,
-            bound_notification: self.bound_notification,
-        }
-    }
-}
-
-/// Ruột `SchedContext` — port `SchedData` của sim, bỏ phần `bound` (KT-27).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ScData {
-    pub(crate) budget: ScBudget,
-    /// TCB đang nhận donation (KT-21 — chưa tạo ở KT-59).
-    pub(crate) donated_to: Option<ObjId>,
-    /// TCB đang cho mượn SC (KT-21 — chưa tạo ở KT-59).
-    pub(crate) donor: Option<ObjId>,
-}
-
-impl ScData {
-    pub(crate) const EMPTY: Self = Self {
-        budget: ScBudget::new(),
-        donated_to: None,
-        donor: None,
     };
 }
 
@@ -257,6 +196,39 @@ pub struct Machine {
     pub(crate) n_scs: usize,
     pub(crate) sc_free: [u16; MAX_SCHED_CONTEXTS],
     pub(crate) n_sc_free: usize,
+    /// Body Endpoint/Reply/Notification (KT-60) + free-list chỉ số.
+    pub(crate) endpoints: [EndpointData; MAX_ENDPOINTS],
+    pub(crate) n_endpoints: usize,
+    pub(crate) endpoint_free: [u16; MAX_ENDPOINTS],
+    pub(crate) n_endpoint_free: usize,
+    pub(crate) replies: [ReplyData; MAX_REPLIES],
+    pub(crate) n_replies: usize,
+    pub(crate) reply_free: [u16; MAX_REPLIES],
+    pub(crate) n_reply_free: usize,
+    pub(crate) notifications: [NotificationData; MAX_NOTIFICATIONS],
+    pub(crate) n_notifications: usize,
+    pub(crate) notification_free: [u16; MAX_NOTIFICATIONS],
+    pub(crate) n_notification_free: usize,
+    /// Pool message đang chờ trong hàng gửi Endpoint (KT-60) + free-list chỉ số.
+    pub(crate) ipc_msgs: [QueuedMsg; MAX_QUEUED_MESSAGES],
+    pub(crate) n_ipc_msgs: usize,
+    pub(crate) ipc_msg_free: [u16; MAX_QUEUED_MESSAGES],
+    pub(crate) n_ipc_msg_free: usize,
+    /// Bảng WaitOnAddress: `(frame, offset) -> u64` + bucket waiter (KT-60).
+    pub(crate) addr_words: [AddrWord; MAX_ADDR_WORDS],
+    pub(crate) n_addr_words: usize,
+    pub(crate) wait_nodes: [WaitNode; MAX_WAIT_NODES],
+    pub(crate) n_wait_nodes: usize,
+    pub(crate) wait_free: [u16; MAX_WAIT_NODES],
+    pub(crate) n_wait_free: usize,
+    pub(crate) wait_buckets: [u16; WAITADDR_BUCKETS],
+    pub(crate) wait_buckets_tail: [u16; WAITADDR_BUCKETS],
+    /// Bộ đếm IPC (KT-24/25/26/27 — cùng tên/nghĩa sim).
+    pub(crate) ipc_sent: u64,
+    pub(crate) ipc_delivered: u64,
+    pub(crate) ipc_dropped: u64,
+    pub(crate) transfer_calls: u64,
+    pub(crate) fault_events: u64,
     /// Bộ đếm cặp chuyển trạng thái 11×11 (KT-18 DoD 4).
     pub(crate) pair_hits: [u32; TCB_STATE_COUNT * TCB_STATE_COUNT],
     /// Bộ đếm cặp **cấm** bị thử (KT-23 DoD 3).
@@ -286,29 +258,6 @@ pub struct Machine {
     pub(crate) preempt_every_step: bool,
     /// Thời gian ảo (tick) — **không** đọc wall clock (D2-49(h)).
     pub(crate) now: u64,
-}
-
-/// Số thành phần của báo cáo [`Footprint`] (14 bảng/mảng + scalar + padding).
-pub const FOOTPRINT_PARTS: usize = 14;
-
-/// Phân bố byte **tĩnh** của [`Machine`] (D2-84) — không cấp phát; dùng cho test pin và
-/// KT-61 trước khi link vào ảnh.
-///
-/// `bytes[i]` là `size_of::<[T; N]>()` của từng bảng; `scalars` là tổng 9 `usize` + 4 `u64` +
-/// 1 `u16` + 1 `u32` + 1 `bool` (các trường đếm/cờ); `padding` là byte đệm/đuôi do `repr(Rust)`:
-/// `sum(bytes) + scalars + padding == total == size_of::<Machine>()`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Footprint {
-    /// Tên 14 thành phần (cùng thứ tự `bytes`).
-    pub names: [&'static str; FOOTPRINT_PARTS],
-    /// Byte của từng thành phần.
-    pub bytes: [usize; FOOTPRINT_PARTS],
-    /// Tổng byte của các trường vô hướng.
-    pub scalars: usize,
-    /// Byte đệm (giữa các trường/đuôi struct).
-    pub padding: usize,
-    /// `size_of::<Machine>()`.
-    pub total: usize,
 }
 
 impl Default for Machine {
@@ -348,6 +297,40 @@ impl Machine {
             n_scs: 0,
             sc_free: [0; MAX_SCHED_CONTEXTS],
             n_sc_free: 0,
+            endpoints: [EndpointData::EMPTY; MAX_ENDPOINTS],
+            n_endpoints: 0,
+            endpoint_free: [0; MAX_ENDPOINTS],
+            n_endpoint_free: 0,
+            replies: [ReplyData::EMPTY; MAX_REPLIES],
+            n_replies: 0,
+            reply_free: [0; MAX_REPLIES],
+            n_reply_free: 0,
+            notifications: [NotificationData {
+                word: 0,
+                badge: 0,
+                waiter: None,
+                bound_sc: None,
+            }; MAX_NOTIFICATIONS],
+            n_notifications: 0,
+            notification_free: [0; MAX_NOTIFICATIONS],
+            n_notification_free: 0,
+            ipc_msgs: [QueuedMsg::EMPTY; MAX_QUEUED_MESSAGES],
+            n_ipc_msgs: 0,
+            ipc_msg_free: [0; MAX_QUEUED_MESSAGES],
+            n_ipc_msg_free: 0,
+            addr_words: [AddrWord::EMPTY; MAX_ADDR_WORDS],
+            n_addr_words: 0,
+            wait_nodes: [WaitNode::EMPTY; MAX_WAIT_NODES],
+            n_wait_nodes: 0,
+            wait_free: [0; MAX_WAIT_NODES],
+            n_wait_free: 0,
+            wait_buckets: [NODE_NONE; WAITADDR_BUCKETS],
+            wait_buckets_tail: [NODE_NONE; WAITADDR_BUCKETS],
+            ipc_sent: 0,
+            ipc_delivered: 0,
+            ipc_dropped: 0,
+            transfer_calls: 0,
+            fault_events: 0,
             pair_hits: [0; TCB_STATE_COUNT * TCB_STATE_COUNT],
             forbidden_hits: [0; TCB_STATE_COUNT * TCB_STATE_COUNT],
             budget_sleeps: 0,
@@ -370,61 +353,6 @@ impl Machine {
             migrate_count: 0,
             preempt_every_step: false,
             now: 0,
-        }
-    }
-
-    // ------------------------------------------------------- dấu chân tĩnh (D2-84)
-
-    /// Báo cáo phân bố byte tĩnh của [`Machine`] (D2-84).
-    pub fn footprint() -> Footprint {
-        use core::mem::size_of;
-        let bytes = [
-            size_of::<[Region; MAX_UNTYPEDS]>(),
-            size_of::<[Meta; MAX_OBJECTS]>(),
-            size_of::<[Cap; MAX_CAPS]>(),
-            size_of::<SlotPool>(),
-            size_of::<[TcbData; MAX_TCBS]>(),
-            size_of::<[u16; MAX_TCBS]>(),
-            size_of::<[ScData; MAX_SCHED_CONTEXTS]>(),
-            size_of::<[u16; MAX_SCHED_CONTEXTS]>(),
-            size_of::<[u32; TCB_STATE_COUNT * TCB_STATE_COUNT]>(),
-            size_of::<[u32; TCB_STATE_COUNT * TCB_STATE_COUNT]>(),
-            size_of::<[FinaliseEntry; MAX_FINALISE]>(),
-            size_of::<[HartSched; MAX_HARTS]>(),
-            size_of::<[HartMailbox; MAX_HARTS]>(),
-            size_of::<[Published; MAX_HARTS]>(),
-        ];
-        // 9 × usize (n_regions/n_objects/n_caps/n_tcbs/n_tcb_free/n_scs/n_sc_free/
-        // n_finalise/n_harts) + 4 × u64 (budget_sleeps/budget_refills/migrate_count/now)
-        // + 1 × u16 (current_hart) + 1 × bool (preempt_every_step).
-        let scalars = 9 * size_of::<usize>()
-            + 4 * size_of::<u64>()
-            + size_of::<u16>()
-            + size_of::<u32>()
-            + size_of::<bool>();
-        let total = size_of::<Machine>();
-        let used: usize = bytes.iter().sum::<usize>() + scalars;
-        Footprint {
-            names: [
-                "regions[16]",
-                "objects[256]",
-                "caps[512]",
-                "slot_pool",
-                "tcbs[64]",
-                "tcb_free[64]",
-                "scs[32]",
-                "sc_free[32]",
-                "pair_hits[121]",
-                "forbidden_hits[121]",
-                "finalise_log[256]",
-                "sched[8]",
-                "mail[8]",
-                "published[8]",
-            ],
-            bytes,
-            scalars,
-            padding: total.saturating_sub(used),
-            total,
         }
     }
 
@@ -507,6 +435,15 @@ impl Machine {
             ObjType::SchedContext => self
                 .alloc_sc_body()
                 .expect("vifast-core: hết MAX_SCHED_CONTEXTS (harness)"),
+            ObjType::Endpoint => self
+                .alloc_endpoint_body()
+                .expect("vifast-core: hết MAX_ENDPOINTS (harness)"),
+            ObjType::Reply => self
+                .alloc_reply_body()
+                .expect("vifast-core: hết MAX_REPLIES (harness)"),
+            ObjType::Notification => self
+                .alloc_notification_body()
+                .expect("vifast-core: hết MAX_NOTIFICATIONS (harness)"),
             _ => BodyRef::NONE,
         };
         self.push_meta(ty, None, 0, 0, None, slots_meta, slot_base, slot_len, body)
@@ -822,6 +759,9 @@ impl Machine {
             || (need_region && self.n_regions >= MAX_UNTYPEDS)
             || (ty == ObjType::Tcb && !self.tcb_body_available())
             || (ty == ObjType::SchedContext && !self.sc_body_available())
+            || (ty == ObjType::Endpoint && !self.endpoint_body_available())
+            || (ty == ObjType::Reply && !self.reply_body_available())
+            || (ty == ObjType::Notification && !self.notification_body_available())
         {
             return Err(KError::NotEnoughMemory);
         }
@@ -857,6 +797,11 @@ impl Machine {
         let body = match ty {
             ObjType::Tcb => self.alloc_tcb_body().ok_or(KError::NotEnoughMemory)?,
             ObjType::SchedContext => self.alloc_sc_body().ok_or(KError::NotEnoughMemory)?,
+            ObjType::Endpoint => self.alloc_endpoint_body().ok_or(KError::NotEnoughMemory)?,
+            ObjType::Reply => self.alloc_reply_body().ok_or(KError::NotEnoughMemory)?,
+            ObjType::Notification => self
+                .alloc_notification_body()
+                .ok_or(KError::NotEnoughMemory)?,
             _ => BodyRef::NONE,
         };
         let obj = self.push_meta(
@@ -1110,10 +1055,13 @@ impl Machine {
                     m.alive = false;
                     m.body.alive = false;
                 }
-                if body.kind == BODY_TCB {
-                    self.free_tcb_body(body.idx);
-                } else if body.kind == BODY_SC {
-                    self.free_sc_body(body.idx);
+                match body.kind {
+                    BODY_TCB => self.free_tcb_body(body.idx),
+                    BODY_SC => self.free_sc_body(body.idx),
+                    BODY_ENDPOINT => self.free_endpoint_body(body.idx),
+                    BODY_REPLY => self.free_reply_body(body.idx),
+                    BODY_NOTIFICATION => self.free_notification_body(body.idx),
+                    _ => {}
                 }
                 let (base, len) = (self.objects[idx].slot_base, self.objects[idx].slot_len);
                 if len > 0 {
@@ -1268,6 +1216,105 @@ impl Machine {
         if self.n_sc_free < MAX_SCHED_CONTEXTS {
             self.sc_free[self.n_sc_free] = idx;
             self.n_sc_free += 1;
+        }
+    }
+
+    pub(crate) fn endpoint_body_available(&self) -> bool {
+        self.n_endpoint_free > 0 || self.n_endpoints < MAX_ENDPOINTS
+    }
+
+    pub(crate) fn reply_body_available(&self) -> bool {
+        self.n_reply_free > 0 || self.n_replies < MAX_REPLIES
+    }
+
+    pub(crate) fn notification_body_available(&self) -> bool {
+        self.n_notification_free > 0 || self.n_notifications < MAX_NOTIFICATIONS
+    }
+
+    fn alloc_endpoint_body(&mut self) -> Option<BodyRef> {
+        let idx = if self.n_endpoint_free > 0 {
+            self.n_endpoint_free -= 1;
+            self.endpoint_free[self.n_endpoint_free] as usize
+        } else if self.n_endpoints < MAX_ENDPOINTS {
+            let i = self.n_endpoints;
+            self.n_endpoints += 1;
+            i
+        } else {
+            return None;
+        };
+        self.endpoints[idx] = EndpointData::EMPTY;
+        Some(BodyRef {
+            kind: BODY_ENDPOINT,
+            idx: idx as u16,
+            alive: true,
+        })
+    }
+
+    fn alloc_reply_body(&mut self) -> Option<BodyRef> {
+        let idx = if self.n_reply_free > 0 {
+            self.n_reply_free -= 1;
+            self.reply_free[self.n_reply_free] as usize
+        } else if self.n_replies < MAX_REPLIES {
+            let i = self.n_replies;
+            self.n_replies += 1;
+            i
+        } else {
+            return None;
+        };
+        self.replies[idx] = ReplyData::EMPTY;
+        Some(BodyRef {
+            kind: BODY_REPLY,
+            idx: idx as u16,
+            alive: true,
+        })
+    }
+
+    fn alloc_notification_body(&mut self) -> Option<BodyRef> {
+        let idx = if self.n_notification_free > 0 {
+            self.n_notification_free -= 1;
+            self.notification_free[self.n_notification_free] as usize
+        } else if self.n_notifications < MAX_NOTIFICATIONS {
+            let i = self.n_notifications;
+            self.n_notifications += 1;
+            i
+        } else {
+            return None;
+        };
+        self.notifications[idx] = NotificationData::default();
+        Some(BodyRef {
+            kind: BODY_NOTIFICATION,
+            idx: idx as u16,
+            alive: true,
+        })
+    }
+
+    fn free_endpoint_body(&mut self, idx: u16) {
+        // Message đang chờ trong hàng của Endpoint bị finalise phải trả về pool (không rò
+        // chỉ số pool sau revoke) — tương đương sim huỷ `Box` khi body chết.
+        let mut q = self.endpoints[idx as usize].send;
+        while let Some(m) = q.pop_front() {
+            self.free_ipc_msg(m);
+        }
+        self.endpoints[idx as usize] = EndpointData::EMPTY;
+        if self.n_endpoint_free < MAX_ENDPOINTS {
+            self.endpoint_free[self.n_endpoint_free] = idx;
+            self.n_endpoint_free += 1;
+        }
+    }
+
+    fn free_reply_body(&mut self, idx: u16) {
+        self.replies[idx as usize] = ReplyData::EMPTY;
+        if self.n_reply_free < MAX_REPLIES {
+            self.reply_free[self.n_reply_free] = idx;
+            self.n_reply_free += 1;
+        }
+    }
+
+    fn free_notification_body(&mut self, idx: u16) {
+        self.notifications[idx as usize] = NotificationData::default();
+        if self.n_notification_free < MAX_NOTIFICATIONS {
+            self.notification_free[self.n_notification_free] = idx;
+            self.n_notification_free += 1;
         }
     }
 
@@ -1426,58 +1473,4 @@ fn sort_dedup(out: &mut [CapId; MAX_CAPS], n: &mut usize) {
         }
     }
     *n = w;
-}
-
-/// Iterator bảng cap (thay `Vec<CapInfo>` của sim).
-#[derive(Debug, Clone)]
-pub struct CapTable<'a> {
-    caps: &'a [Cap],
-    idx: usize,
-}
-
-impl Iterator for CapTable<'_> {
-    type Item = CapInfo;
-
-    fn next(&mut self) -> Option<CapInfo> {
-        let i = self.idx;
-        if i >= self.caps.len() {
-            return None;
-        }
-        self.idx += 1;
-        let c = &self.caps[i];
-        Some(CapInfo {
-            cap: (i as u32) + 1,
-            obj: c.obj,
-            ty: c.ty,
-            parent: c.parent,
-            slot: c.slot,
-            rights: c.rights,
-            badge: c.badge,
-            alive: c.alive,
-        })
-    }
-}
-
-/// Iterator con trực tiếp của một cap (thay `Vec<CapId>` của sim).
-#[derive(Debug, Clone)]
-pub struct CapChildren<'a> {
-    caps: &'a [Cap],
-    parent: CapId,
-    idx: usize,
-}
-
-impl Iterator for CapChildren<'_> {
-    type Item = CapId;
-
-    fn next(&mut self) -> Option<CapId> {
-        while self.idx < self.caps.len() {
-            let i = self.idx;
-            self.idx += 1;
-            let c = &self.caps[i];
-            if c.alive && c.parent == Some(self.parent) {
-                return Some((i as u32) + 1);
-            }
-        }
-        None
-    }
 }

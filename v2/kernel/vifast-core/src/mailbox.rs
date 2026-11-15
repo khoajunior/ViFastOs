@@ -24,7 +24,7 @@ use crate::error::{CheckFailure, ObjId};
 pub const MAILBOX_CAP: usize = 8;
 
 /// Số message **đã xử lý** tối đa được ghi nhật ký mỗi hart (biên `.bss`, `[TK]`).
-pub const MAX_MAIL_LOG: usize = 64;
+pub const MAX_MAIL_LOG: usize = 32;
 
 /// Một lệnh shootdown TLB trong message `TlbFlush` — kiểu dữ liệu thuần (không TLB).
 ///

@@ -48,26 +48,49 @@
 #![forbid(unsafe_code)]
 
 pub mod arena;
+mod captable;
 mod check;
+mod check_ipc;
+mod core_ipc;
 mod core_sched;
+mod core_sync;
 mod core_tcb;
 mod error;
+mod footprint;
+pub mod ipc;
 mod machine;
 pub mod mailbox;
 pub mod mcs;
+mod objstate;
 pub mod sched;
 mod slotpool;
 pub mod spec;
 pub mod tcb;
+mod tcbdata;
 
 pub use arena::Region;
+pub use captable::{CapChildren, CapTable};
+pub use check_ipc::TcbIds;
+pub use core_ipc::NotificationValue;
+pub use core_ipc::{EndpointInfo, MsgIds, QueuedIter, QueuedView, SendItems, TcbIpcArea};
+pub use core_sched::MailItems;
+pub use core_sync::Waiters;
 pub use error::{CapId, CapInfo, CheckFailure, KError, ObjId, ObjType, SlotRef};
+pub use footprint::{Footprint, FOOTPRINT_PARTS};
+pub use ipc::{
+    transfer, IpcArea, Message, MessageInfo, MAX_CAPS as IPC_MAX_CAPS, MAX_WORDS as IPC_MAX_WORDS,
+    WORDS_IN_IPC_BUFFER, WORDS_IN_REGISTERS,
+};
 pub use machine::{
-    FinaliseEntry, Footprint, Machine, FOOTPRINT_PARTS, MAX_CAPS, MAX_FINALISE, MAX_HARTS,
-    MAX_OBJECTS, MAX_SCHED_CONTEXTS, MAX_SLOT_WORDS, MAX_TCBS, MAX_UNTYPEDS,
+    FinaliseEntry, Machine, MAX_CAPS, MAX_ENDPOINTS, MAX_FINALISE, MAX_HARTS, MAX_NOTIFICATIONS,
+    MAX_OBJECTS, MAX_QUEUED_MESSAGES, MAX_REPLIES, MAX_SCHED_CONTEXTS, MAX_SLOT_WORDS, MAX_TCBS,
+    MAX_UNTYPEDS,
 };
 pub use mailbox::{FlushMsg, HartMailbox, Mailbox, MailboxMsg, MAILBOX_CAP, MAX_MAIL_LOG};
 pub use mcs::{donated_priority, ScBudget, ScInfo};
+pub use objstate::{
+    waitaddr_bucket, ENDPOINT_QUEUE_CAP, MAX_ADDR_WORDS, MAX_WAIT_NODES, WAITADDR_BUCKETS,
+};
 pub use sched::{HartSched, Published, BITMAP_WORDS, MAX_PRIORITY};
 pub use tcb::{
     allowed, allowed_count, coverage, coverage_design, forbidden_count, reserved_count,

@@ -9,11 +9,13 @@
 
 use crate::error::{KError, ObjId, ObjType, SlotRef};
 use crate::machine::{
-    FinaliseEntry, Machine, ScData, TcbData, BODY_SC, BODY_TCB, MAX_FINALISE, MAX_SCHED_CONTEXTS,
-    MAX_TCBS,
+    FinaliseEntry, Machine, BODY_SC, BODY_TCB, MAX_FINALISE, MAX_SCHED_CONTEXTS, MAX_TCBS,
 };
 use crate::mcs::{donated_priority, ScInfo};
-use crate::tcb::{SleepReason, SuspendMode, TcbInfo, TcbSnapshot, TcbState, TCB_STATE_COUNT};
+use crate::tcb::{
+    FaultKind, SleepReason, SuspendMode, TcbInfo, TcbSnapshot, TcbState, TCB_STATE_COUNT,
+};
+use crate::tcbdata::{ScData, TcbData};
 
 impl Machine {
     // ------------------------------------------------------- body TCB/SchedContext
@@ -88,7 +90,7 @@ impl Machine {
         }
     }
 
-    fn sc_data_mut(&mut self, obj: ObjId) -> Result<&mut ScData, KError> {
+    pub(crate) fn sc_data_mut(&mut self, obj: ObjId) -> Result<&mut ScData, KError> {
         let idx = self.object_index(obj)?;
         let body = self.objects[idx].body;
         match body.kind {
@@ -111,7 +113,7 @@ impl Machine {
     }
 
     /// `require_type` của sim: cap phải sống và đúng **kiểu cap**, trả `ObjId`.
-    fn require_type(&self, slot: SlotRef, ty: ObjType) -> Result<ObjId, KError> {
+    pub(crate) fn require_type(&self, slot: SlotRef, ty: ObjType) -> Result<ObjId, KError> {
         let cap = self.cap_at(slot.cnode, slot.slot)?;
         let c = self.cap(cap)?;
         if c.ty != ty {
@@ -188,8 +190,11 @@ impl Machine {
             return Err(KError::InvalidArgument);
         }
         let info = self.tcb_data(tcb_obj)?.snapshot();
-        // KT-21: donor đang donate không đổi priority — KT-59 chưa tạo donation nên nhánh
-        // `is_donation_donor` của sim là vô hiệu (KT-60 nối lại cùng chỗ này).
+        // KT-21: priority của **donor** đang được donate không đổi được (sẽ đổi priority hiệu
+        // lực của donee giữa chừng) — phải `Reply`/huỷ donation trước (như sim).
+        if self.is_donation_donor(tcb_obj) {
+            return Err(KError::IllegalOperation);
+        }
         if info.state == TcbState::Ready || info.donated_sc.is_some() {
             self.sched_remove_all(tcb_obj);
         }
@@ -261,7 +266,7 @@ impl Machine {
             None => None,
         };
         let info = self.tcb_data(tcb_obj)?.snapshot();
-        if info.donated_sc.is_some() {
+        if info.donated_sc.is_some() || self.is_donation_donor(tcb_obj) {
             return Err(KError::IllegalOperation);
         }
         if let Some(sc) = sched_obj {
@@ -303,14 +308,49 @@ impl Machine {
         Ok(self.tcb_data(tcb)?.state)
     }
 
-    /// 60 word "IPC buffer model" của TCB (KT-59 chỉ đọc; transfer thuộc KT-60).
+    /// 60 word "IPC buffer model" của message **vừa nhận** ở TCB (KT-60, `IpcArea`).
     pub fn tcb_ipc_buffer(&self, tcb: ObjId) -> Result<[u64; 60], KError> {
-        Ok(self.tcb_data(tcb)?.ipc_buffer)
+        Ok(self.tcb_data(tcb)?.ipc.buffer)
     }
 
-    /// 4 MR "thanh ghi" của TCB (KT-59 chỉ đọc).
+    /// 4 MR "thanh ghi" của message **vừa nhận** ở TCB (KT-60, `IpcArea`).
     pub fn tcb_regs(&self, tcb: ObjId) -> Result<[u64; 4], KError> {
-        Ok(self.tcb_data(tcb)?.regs)
+        Ok(self.tcb_data(tcb)?.ipc.regs)
+    }
+
+    /// `MessageInfo` của message **vừa nhận** (`None` = chưa nhận).
+    pub fn tcb_ipc_info(&self, tcb: ObjId) -> Result<Option<crate::ipc::MessageInfo>, KError> {
+        Ok(self.tcb_data(tcb)?.ipc.info)
+    }
+
+    /// `msg_id` của message **vừa nhận** (`None` = chưa nhận).
+    pub fn tcb_ipc_msg_id(&self, tcb: ObjId) -> Result<Option<u64>, KError> {
+        Ok(self.tcb_data(tcb)?.ipc.msg_id)
+    }
+
+    /// Badge của message **vừa nhận**.
+    pub fn tcb_ipc_badge(&self, tcb: ObjId) -> Result<u64, KError> {
+        Ok(self.tcb_data(tcb)?.ipc.badge)
+    }
+
+    /// Lỗi IPC kernel gán ở lần giao gần nhất (`Cancelled` — D2-53 Q7(b)).
+    pub fn tcb_last_ipc_error(&self, tcb: ObjId) -> Result<Option<KError>, KError> {
+        Ok(self.tcb_data(tcb)?.last_ipc_error)
+    }
+
+    /// `(sender, FaultKind)` của fault **vừa giao** cho TCB làm bên nhận.
+    pub fn tcb_last_fault(&self, tcb: ObjId) -> Result<Option<(ObjId, FaultKind)>, KError> {
+        Ok(self.tcb_data(tcb)?.last_fault)
+    }
+
+    /// Như [`Machine::tcb_last_fault`] nhưng **tiêu thụ** bản ghi.
+    pub fn take_last_fault(&mut self, tcb: ObjId) -> Result<Option<(ObjId, FaultKind)>, KError> {
+        Ok(self.tcb_data_mut(tcb)?.last_fault.take())
+    }
+
+    /// Ảnh chụp vùng nhận IPC (info/regs/buffer/badge/msg_id) — model API `[TK]`.
+    pub fn tcb_ipc_area(&self, tcb: ObjId) -> Result<crate::ipc::IpcArea, KError> {
+        Ok(self.tcb_data(tcb)?.ipc)
     }
 
     /// **Một cửa** đổi trạng thái TCB (D2-49(d)): tra bảng [`crate::tcb::ALLOWED`]; cặp cấm
@@ -323,6 +363,35 @@ impl Machine {
         if !crate::tcb::allowed(from, to) {
             self.forbidden_hits[from.index() * TCB_STATE_COUNT + to.index()] += 1;
             return Err(KError::IllegalOperation);
+        }
+        // **KT-21** — rời `BlockedOnReply` bằng đường **khác** `Reply` = bỏ cuộc gọi ⇒ trả SC
+        // donation về client ngay (hook thứ nhất còn nợ từ KT-59).
+        if matches!(from, TcbState::BlockedOnReply { .. })
+            && !matches!(to, TcbState::BlockedOnReply { .. })
+            && self.is_donation_donor(tcb)
+        {
+            self.release_donation_of(tcb)?;
+        }
+        // **KT-34** (C2, D2-63) — giữ liên kết `Reply ⇔ BlockedOnReply` ở **chính** cổng
+        // trạng thái (hook thứ hai còn nợ từ KT-59):
+        // - vào `BlockedOnReply{reply}` ⇒ `Reply.caller = Some(tcb)`; Reply **đã** bind người
+        //   khác ⇒ `IllegalOperation`, **không** ghi đè;
+        // - rời `BlockedOnReply` ⇒ gỡ `caller` nếu đang là `tcb`.
+        if let TcbState::BlockedOnReply { reply } = to {
+            if self.object_alive(reply) && self.object_type(reply) == Some(ObjType::Reply) {
+                match self.reply_caller(reply)? {
+                    None => self.reply_set_caller(reply, Some(tcb))?,
+                    Some(c) if c == tcb => {}
+                    Some(_) => return Err(KError::IllegalOperation),
+                }
+            }
+        } else if let TcbState::BlockedOnReply { reply } = from {
+            if self.object_alive(reply)
+                && self.object_type(reply) == Some(ObjType::Reply)
+                && self.reply_caller(reply)? == Some(tcb)
+            {
+                self.reply_set_caller(reply, None)?;
+            }
         }
         // Bất biến ≤1 `Running`/hart (KT-19 DoD 2): TCB vào `Running{hart}` khi hart đang có
         // TCB chạy ⇒ đưa TCB cũ về `Ready` **trước**, qua đúng cửa này.
@@ -402,6 +471,10 @@ impl Machine {
         if !state.is_live() || state == TcbState::Inactive {
             return Err(KError::IllegalOperation);
         }
+        // KT-21 DoD 5 (hook F1 reviewer-kt60): huỷ donation **trước** khi gỡ hàng — donor thì
+        // thu SC (donee Running mất ngân sách ⇒ Sleeping{Budget}); donee thì trả SC + đánh
+        // thức client (`cancel_reply_of`) như sim, không để T0 treo trên Reply không ai trả.
+        self.release_donation_of(obj)?;
         self.unlink_tcb_queues(obj);
         if state.is_blocked() || matches!(state, TcbState::Running { .. }) {
             self.transition_tcb(obj, TcbState::Ready)?;
@@ -444,6 +517,8 @@ impl Machine {
             self.finalise_overflow = self.finalise_overflow.saturating_add(1);
             return Err(KError::NotEnoughMemory);
         }
+        // KT-21 DoD 5: huỷ donation trước khi finalise — không để SC trỏ tới TCB chết.
+        self.release_donation_of(tcb)?;
         self.unlink_tcb_queues(tcb);
         let released = {
             let t = self.tcb_data_mut(tcb)?;

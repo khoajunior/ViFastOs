@@ -352,6 +352,16 @@ pub struct EndpointInfo {
     pub recv_waiter: Option<ObjId>,
 }
 
+/// **KT-60** — một message đang chờ trong hàng gửi Endpoint (ảnh chụp đọc-only cho parity).
+#[derive(Debug, Clone)]
+pub struct QueuedView {
+    pub sender: ObjId,
+    pub msg: Option<Message>,
+    pub call: bool,
+    pub fault: Option<FaultKind>,
+    pub blocking: bool,
+}
+
 /// **KT-27** — giá trị `Wait`/`Poll` trên Notification: **word 64 bit** + **badge** (thiết kế
 /// §4.7 `:328`). Model-only `[TK]`, **không** phải ABI.
 ///
@@ -5835,6 +5845,15 @@ impl Machine {
         Ok(self.mail[hart as usize].len())
     }
 
+    /// **KT-60** — đọc **nội dung** hàng chờ hộp thư hart (chỉ đọc; đóng nợ §7.5 "oracle
+    /// không có accessor công khai cho message đang treo"). Thứ tự FIFO = thứ tự drain.
+    pub fn mail_items(&self, hart: u16) -> Result<Vec<MailboxMsg>, KError> {
+        if hart as usize >= self.mail.len() {
+            return Err(KError::InvalidArgument);
+        }
+        Ok(self.mail[hart as usize].iter().copied().collect())
+    }
+
     /// Nhật ký message **đã xử lý** của hộp thư hart, đúng thứ tự drain (nguồn kiểm FIFO).
     pub fn mail_log(&self, hart: u16) -> Result<&[MailboxMsg], KError> {
         if hart as usize >= self.mail.len() {
@@ -8554,6 +8573,28 @@ impl Machine {
                 .send
                 .iter()
                 .filter_map(|q| q.msg.as_ref().map(|m| m.msg_id))
+                .collect()),
+            _ => Err(KError::WrongObjectType),
+        })
+    }
+
+    /// **KT-60** — ảnh chụp message **đang chờ** trong hàng gửi Endpoint (chỉ đọc; accessor
+    /// parity, **không** đổi semantics): người gửi + message + cờ `call`/`blocking` + fault.
+    ///
+    /// Trước KT-60 oracle chỉ có `endpoint_send_items` (sender/fault) và `endpoint_msg_ids`;
+    /// nội dung message đang treo chưa đọc được nên parity KT-59 không so được — nợ §7.5.
+    pub fn endpoint_queued(&self, ep: ObjId) -> Result<Vec<QueuedView>, KError> {
+        self.body(ep, |k| match k {
+            Kind::Endpoint(e) => Ok(e
+                .send
+                .iter()
+                .map(|q| QueuedView {
+                    sender: q.sender,
+                    msg: q.msg.as_deref().cloned(),
+                    call: q.call,
+                    fault: q.fault,
+                    blocking: q.blocking,
+                })
                 .collect()),
             _ => Err(KError::WrongObjectType),
         })

@@ -9,7 +9,7 @@
 
 use crate::error::{CheckFailure, KError, ObjId, ObjType};
 use crate::machine::{Machine, MAX_HARTS, MAX_OBJECTS};
-use crate::mailbox::MailboxMsg;
+use crate::mailbox::{HartMailbox, MailboxMsg};
 use crate::sched::Published;
 use crate::tcb::TcbState;
 
@@ -192,8 +192,21 @@ impl Machine {
         let cur = self.sched[hart as usize]
             .current()
             .ok_or(KError::IllegalOperation)?;
+        // KT-27 (F3 reviewer-kt60): `BlockedOnNotification` phải ghi waiter trên object — bất
+        // biến "waiter ⇔ TcbState"; kiểm **trước** khi gỡ hàng. Notification sai kiểu/chết
+        // trả lỗi như sim.
+        if let TcbState::BlockedOnNotification { ntfn } = to {
+            if let Some(w) = self.notification_waiter(ntfn)? {
+                if w != cur {
+                    return Err(KError::Busy);
+                }
+            }
+        }
         self.unlink_tcb_queues(cur);
         self.transition_tcb(cur, to)?;
+        if let TcbState::BlockedOnNotification { ntfn } = to {
+            self.notification_data_mut(ntfn)?.waiter = Some(cur);
+        }
         self.sched_after_op(false);
         Ok(cur)
     }
@@ -210,7 +223,7 @@ impl Machine {
         Ok(())
     }
 
-    fn wake_step(&mut self, tcb: ObjId) -> Result<(), KError> {
+    pub(crate) fn wake_step(&mut self, tcb: ObjId) -> Result<(), KError> {
         let state = self.tcb_state(tcb)?;
         if state == TcbState::Ready {
             return Ok(());
@@ -312,6 +325,26 @@ impl Machine {
         if let Err(e) = self.check_mailboxes() {
             debug_assert!(false, "bất biến mailbox vỡ sau public op: {e}");
         }
+        // KT-60: bất biến IPC/Reply/Notification/WaitAddr/fault — như `sched_after_op` của sim
+        // (cùng chỗ, mỗi hàm có cửa sổ nhanh).
+        if let Err(e) = self.check_ipc() {
+            debug_assert!(
+                false,
+                "bất biến IPC (bảo toàn message) vỡ sau public op: {e:?}"
+            );
+        }
+        if let Err(e) = self.check_reply_links() {
+            debug_assert!(false, "bất biến Reply (C2) vỡ sau public op: {e:?}");
+        }
+        if let Err(e) = self.check_notifications() {
+            debug_assert!(false, "bất biến Notification vỡ sau public op: {e:?}");
+        }
+        if let Err(e) = self.check_waitaddr() {
+            debug_assert!(false, "bất biến WaitOnAddress vỡ sau public op: {e:?}");
+        }
+        if let Err(e) = self.check_fault() {
+            debug_assert!(false, "bất biến fault vỡ sau public op: {e:?}");
+        }
     }
 
     /// Một vòng **push migration** tất định (thiết kế §4.8 `:338-342`, D2-53 Q2).
@@ -391,10 +424,6 @@ impl Machine {
 
     /// KT-59: core chưa có hàng chờ Endpoint/Reply/Notification/WaitAddr (KT-60) nên chỉ là
     /// mốc — scheduler queue do `sched_sync` gỡ; trả số hàng đã gỡ (0).
-    pub(crate) fn unlink_tcb_queues(&mut self, _tcb: ObjId) -> usize {
-        0
-    }
-
     pub(crate) fn set_tcb_suspended(&mut self, tcb: ObjId, suspended: bool) -> Result<(), KError> {
         self.tcb_data_mut(tcb)?.suspended = suspended;
         self.sched_sync(tcb)
@@ -484,6 +513,17 @@ impl Machine {
             return Err(KError::InvalidArgument);
         }
         Ok(self.mail[hart as usize].len())
+    }
+
+    /// **KT-60** — nội dung hàng chờ hộp thư hart (FIFO) — parity so head/tail.
+    pub fn mail_items(&self, hart: u16) -> Result<MailItems<'_>, KError> {
+        if hart as usize >= self.n_harts {
+            return Err(KError::InvalidArgument);
+        }
+        Ok(MailItems {
+            m: &self.mail[hart as usize],
+            idx: 0,
+        })
     }
 
     /// Nhật ký message **đã xử lý** của hộp thư hart, đúng thứ tự drain.
@@ -745,7 +785,9 @@ impl Machine {
                         let s = self
                             .sc_data(sc)
                             .map_err(|_| CheckFailure::two("TCB tro SC chet", obj, sc))?;
-                        if s.donated_to.is_some() {
+                        // KT-60: donor (chủ SC) vẫn giữ `sched_context` khi SC đang donate —
+                        // chỉ TCB khác dùng SC đang donate mới là lỗi.
+                        if s.donated_to.is_some() && s.donor != Some(obj) {
                             return Err(CheckFailure::two("TCB dung SC dang donate", obj, sc));
                         }
                     }
@@ -862,5 +904,24 @@ impl Machine {
             }
         }
         Ok(())
+    }
+}
+
+/// Iterator nội dung hàng chờ hộp thư hart (`mail_items`).
+#[derive(Debug, Clone)]
+pub struct MailItems<'a> {
+    m: &'a HartMailbox,
+    idx: usize,
+}
+
+impl Iterator for MailItems<'_> {
+    type Item = MailboxMsg;
+
+    fn next(&mut self) -> Option<MailboxMsg> {
+        let msg = self.m.iter().nth(self.idx).copied();
+        if msg.is_some() {
+            self.idx += 1;
+        }
+        msg
     }
 }

@@ -2207,7 +2207,7 @@ fn core_dau_chan_tinh_va_bang_phan_bo_d2_84() {
     assert_eq!(kc::MAX_SCHED_CONTEXTS, 32);
     assert_eq!(kc::MAX_HARTS, 8);
     assert_eq!(kc::MAILBOX_CAP, 8);
-    assert_eq!(kc::MAX_MAIL_LOG, 64);
+    assert_eq!(kc::MAX_MAIL_LOG, 32);
     assert_eq!(kc::tcb::allowed_count(), 48);
     assert_eq!(kc::tcb::reserved_count(), 2);
     assert_eq!(kc::tcb::forbidden_count(), 73);
