@@ -284,7 +284,7 @@ impl Machine {
 
     /// Nhận message vào đường IPC: biên cap (`≤ 4`, khớp `MessageInfo.caps` + **đủ** ảnh
     /// chụp), cấp `msg_id` từ `ipc_sent` (không tái dùng) — như `admit_message` của sim.
-    fn admit_message(&mut self, mut msg: Message) -> Result<Message, KError> {
+    pub(crate) fn admit_message(&mut self, mut msg: Message) -> Result<Message, KError> {
         if msg.n_caps as usize > MAX_CAPS
             || msg.n_caps as usize != msg.info.caps() as usize
             || msg.n_snaps != msg.n_caps

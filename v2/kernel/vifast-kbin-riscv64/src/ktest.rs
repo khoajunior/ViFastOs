@@ -114,6 +114,7 @@
 
 mod ktest_conf;
 mod ktest_core;
+mod ktest_core64;
 mod ktest_fault;
 mod ktest_ipi;
 mod ktest_obj;
@@ -173,7 +174,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..56\n");
+    PLATFORM.put_str("TAP version 13\n1..60\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -972,7 +973,7 @@ pub extern "C" fn rust_main() -> ! {
     // ------------------------------------------------ 56) trap LỒNG (fatal, có chủ đích)
     // In `ok 56` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 56 - trap nested panic\n");
+    PLATFORM.put_str("ok 60 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

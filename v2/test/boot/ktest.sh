@@ -253,6 +253,10 @@ core invariants
 core cap transfer
 core cap message
 core revoke finalise
+core slot arena
+core sched bind
+core fault resume
+core tlb flush
 trap nested panic
 EOF
 }
@@ -385,6 +389,10 @@ evidence_for() {
 ^# rollover: generation=1 exhaustions=1 rollover=1 flush=Ok asid=0 satp_asid=0 stale_seen=1 fresh_ok=1 free=255 issued=1 asid_ok=0x__MASK__ online=0x__MASK__ primed=0x4b51c000000000c2 wrong=0$
 ^# timeout: outcome=Timeout narrowed=0x[0-9a-f]+ targets=0x[0-9a-f]+ acked=0x[0-9a-f]+ missing=0x[0-9a-f]+ waited=[0-9]+ probe=1000000 timeouts=[1-9][0-9]* mailbox_empty=1 recovered=1 wrong=0$
 ^# tlb asid: ok=0x__MASK__ online=0x__MASK__ phase=0x[0-9a-f]+ arrived=0x__MASK__ timeout=0 satp_asid_boot=0 lease_asid=0 generation=1$
+^# tlb: core asid=[0-9]+ requests=[1-9][0-9]* seq=[1-9][0-9]* local=[1-9][0-9]* targets=0 acked=0 pending=0 stale_load=13 stval_ok=1 protect_read=1 restore=1 root_fault=13 harts=1 check=1$
+^# slot: arena=0x[0-9a-f]+\+[0-9]+ span=0x[0-9a-f]+ bytes=768 within=1 used0=[0-9]+ used1=[0-9]+ used2=0 grown=1 slot_ok=1 revoke_back=1 check=1$
+^# bind: sc=[0-9]+ ntfn=[0-9]+ two_way=1 second=IllegalOperation rebind_clears=1 wrong_target=1 signal_wake=1 other_blocked=1 unbind=1 delete_clears=1 check=1$
+^# resume: fault=1 state=Ready regs=0xaa/0xbb running=IllegalOperation regs_kept=1 reply=1 reply_caller=0 cap=InvalidArgument inactive=IllegalOperation exit_kept=1 user_nr_max=15 user_path=0 check=1$
 ^# conf image: build=[0-9a-f]{16} text=[0-9]+$
 ^# conf: scn=22 name=vm-map steps=[0-9]+ ok=1$
 ^# conf: scn=23 name=vm-wx steps=[0-9]+ ok=1$
@@ -407,7 +415,7 @@ __EVID24__
 ^# faultprobe: va=0x200040 access=Read scause=0xd stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
 ^# faultprobe: va=0x200040 access=Write scause=0xf stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
 ^# faultprobe: va=0x1000 access=Write scause=0xf stval=0x1000 sepc=0x[0-9a-f]+ pte=0x[0-9a-f]+ reason=Permission mapped=1 scratch=1 src=trap$
-^# core: link addr=0x[0-9a-f]+ bytes=188448 pin=196608 image_cap=262144 parts=27 sum=188448 scalars=[0-9]+ padding=[0-9]+ sum_ok=1 in_image=1$
+^# core: link addr=0x[0-9a-f]+ bytes=188872 pin=196608 image_cap=262144 parts=29 sum=188872 scalars=[0-9]+ padding=[0-9]+ sum_ok=1 in_image=1$
 ^# core: untyped id=[0-9]+ base=0x[0-9a-f]+ bytes=65536 used=0 free=65536 allocated=0 gap=0 objects=1 caps=0 check_bytes=1 check_all_bytes=1$
 ^# core: tcb retype tcb=[0-9]+ slot=1 objects=11 caps=11 used=[0-9]+ state=Inactive check_caps=1 check_bytes=1$
 ^# core: configure cspace=1 sc=1 priority=3 mcp=10 budget=4 period=8 suspended_ok=1 resume=1 state=Ready check_sched=1 check_sc_refs=1 check_budget=1$
@@ -420,7 +428,7 @@ __EVID24__
 ^# ipc: cap-transfer installed=8 failed=1 unwrap=1 caps4=4 len=2 rights=0xb caps3=3 caps1=1 extra=1 badge=0xa5a5 check_ipc=1 check_caps=1$
 ^# ipc: cap-message direction=call-reply caller_caps=2 reply_caps=2 caller_bound=1 caller_ready=1 rights=0xb reply_caller=0 check_ipc=1 check_reply_links=1$
 ^# ipc: revoke deleted=[0-9]+ caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready queue=0 queued=1 pending=0 sent=[0-9]+ dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1$
-^# core: phase fails=0 static=188448 pin=196608 image_cap=262144$
+^# core: phase fails=0 static=188872 pin=196608 image_cap=262144$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -434,7 +442,7 @@ EOF
 EOF
             ;;
         ktest-user) cat <<'EOF'
-^# user core: static=188448 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
+^# user core: static=188872 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
 ^# user image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 root=0x[0-9a-f]+ obj_arena=0x[0-9a-f]+-0x[0-9a-f]+ untyped=2$
 ^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
 ^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=10 exits=1 exit=42$

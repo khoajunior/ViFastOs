@@ -158,6 +158,11 @@ impl Machine {
         if hart as usize >= self.n_harts {
             return Err(KError::InvalidArgument);
         }
+        // **KT-64** — hart còn `TlbFlush` chưa phục vụ **không** được chạy TCB: TLB có thể còn
+        // ánh xạ cũ của trang vừa unmap/protect. `Busy` cho tới khi `tlb_service` flush thật.
+        if self.tlb_blocks_dispatch(hart) {
+            return Err(KError::Busy);
+        }
         let h = hart as usize;
         if let Some(cur) = self.sched[h].current() {
             if !matches!(self.tcb_state(cur)?, TcbState::Running { .. }) {
@@ -584,7 +589,9 @@ impl Machine {
                 if info.state.is_blocked() || matches!(info.state, TcbState::Sleeping { .. }) {
                     let _ = self.wake_step(tcb);
                 }
-                if self.n_harts > 1 {
+                // **KT-64** — hart đang chờ `TlbFlush` thì **không** preempt/dispatch: phải
+                // phục vụ flush trước (tránh chạy trên TLB cũ); message vẫn được xử lý xong.
+                if self.n_harts > 1 && !self.tlb_pending[hart as usize].active {
                     let Ok(eff) = self.effective_priority(tcb) else {
                         return;
                     };
@@ -596,13 +603,15 @@ impl Machine {
                 }
             }
             MailboxMsg::Reschedule => {
-                if self.dispatch_step(hart).is_err() {
+                if !self.tlb_pending[hart as usize].active && self.dispatch_step(hart).is_err() {
                     debug_assert!(false, "Reschedule: dispatch lỗi (bất biến scheduler vỡ)");
                 }
             }
             MailboxMsg::Stop => self.mail[hart as usize].set_stopped(),
-            // KT-40 thuộc TLB — core KT-59 chưa sở hữu TLB (object layer K2/KT-61); message
-            // vẫn được đếm đã xử lý, handler thật nối ở KT-61 mà không đổi enum.
+            // **KT-64** — `TlbFlush` chỉ được **thi hành** bởi [`Machine::tlb_service`] (có
+            // `TlbEnv`: `sfence.vma` thật trên hart đó + ack). Drain hộp thư **không có env**
+            // (đường model cũ) chỉ đếm message đã xử lý và **giữ** `tlb_pending` ⇒
+            // `dispatch` vẫn `Busy` (fail-closed, không chạy trên TLB cũ).
             MailboxMsg::TlbFlush(_) => {}
             MailboxMsg::Migrate { tcb, to_hart } => {
                 if to_hart != hart {

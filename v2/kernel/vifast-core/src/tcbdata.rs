@@ -87,7 +87,7 @@ impl TcbData {
     }
 }
 
-/// Ruột `SchedContext` — port `SchedData` của sim, bỏ phần `bound` (KT-27).
+/// Ruột `SchedContext` — port `SchedData` của sim.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ScData {
     pub(crate) budget: ScBudget,
@@ -95,6 +95,10 @@ pub(crate) struct ScData {
     pub(crate) donated_to: Option<ObjId>,
     /// TCB đang cho mượn SC (KT-21 — chưa tạo ở KT-59).
     pub(crate) donor: Option<ObjId>,
+    /// **KT-64** — cap **Reply/Notification** đang bind `SchedContext.Bind(sc, target)`
+    /// (1:1 với `NotificationData.bound_sc`; `None` = chưa bind). Trước KT-64 trường này
+    /// **không có** ⇒ `bound_sc` là trường chết (§8.6.0).
+    pub(crate) bound: Option<CapId>,
 }
 
 impl ScData {
@@ -102,5 +106,6 @@ impl ScData {
         budget: ScBudget::new(),
         donated_to: None,
         donor: None,
+        bound: None,
     };
 }

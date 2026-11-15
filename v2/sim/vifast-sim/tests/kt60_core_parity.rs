@@ -2900,10 +2900,12 @@ fn kt60_pin_dau_chan_d2_84() {
         f.padding
     );
     // KT-63: + 3 bộ đếm chuyển cap (`cap_transfer_installed`/`cap_unwrapped`/
-    // `cap_transfer_failed`) ⇒ 12 × u64 (trước: 9).
+    // `cap_transfer_failed`) ⇒ 12 × u64. KT-64: + 4 bộ đếm TLB (`tlb_seq`/`tlb_local_flushes`/
+    // `tlb_remote_posts`/`tlb_serviced`) ⇒ **16 × u64**, + `slot_win_top` ⇒ **21 × usize**;
+    // `slot_pool` → `slot_mem` + `harness_region`; dải slot theo Region là **hằng**, không field.
     assert_eq!(
         f.scalars,
-        20 * core::mem::size_of::<usize>() + 12 * core::mem::size_of::<u64>() + 2 + 4 + 1
+        20 * core::mem::size_of::<usize>() + 16 * core::mem::size_of::<u64>() + 2 + 4 + 1
     );
     assert!(
         f.total <= 196_608,

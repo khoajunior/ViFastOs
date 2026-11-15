@@ -49,31 +49,31 @@ const WA_VALUE: u64 = 0x1234;
 const WA_OFFSET: u32 = 64;
 
 /// Bộ định danh dựng từ Untyped cho 10 TAP core.
-struct Rig {
-    root: ObjId,
-    us: SlotRef,
-    t0s: SlotRef,
-    t1s: SlotRef,
-    t2s: SlotRef,
-    eps: SlotRef,
-    rs: SlotRef,
-    ns: SlotRef,
-    ctl: SlotRef,
-    sc: SlotRef,
-    sc1: SlotRef,
-    cspace: SlotRef,
-    t0: ObjId,
-    t1: ObjId,
-    t2: ObjId,
-    ep: ObjId,
-    reply: ObjId,
-    ntfn: ObjId,
-    sc_obj: ObjId,
-    sc1_obj: ObjId,
+pub(crate) struct Rig {
+    pub(crate) root: ObjId,
+    pub(crate) us: SlotRef,
+    pub(crate) t0s: SlotRef,
+    pub(crate) t1s: SlotRef,
+    pub(crate) t2s: SlotRef,
+    pub(crate) eps: SlotRef,
+    pub(crate) rs: SlotRef,
+    pub(crate) ns: SlotRef,
+    pub(crate) ctl: SlotRef,
+    pub(crate) sc: SlotRef,
+    pub(crate) sc1: SlotRef,
+    pub(crate) cspace: SlotRef,
+    pub(crate) t0: ObjId,
+    pub(crate) t1: ObjId,
+    pub(crate) t2: ObjId,
+    pub(crate) ep: ObjId,
+    pub(crate) reply: ObjId,
+    pub(crate) ntfn: ObjId,
+    pub(crate) sc_obj: ObjId,
+    pub(crate) sc1_obj: ObjId,
 }
 
 /// Tên trạng thái TCB ổn định để in evidence.
-fn state_name(s: TcbState) -> &'static str {
+pub(crate) fn state_name(s: TcbState) -> &'static str {
     match s {
         TcbState::Inactive => "Inactive",
         TcbState::Ready => "Ready",
@@ -687,6 +687,12 @@ fn core_taps(
         }
         // ------------------------------------------------- TAP 53..55: chuyển cap + Revoke (KT-63)
         cap_ipc_taps(m, u, fails);
+        // ------------------------------------------------- TAP 58..60: KT-64 (trong khoá core)
+        // TAP 59 **ngoài** khoá: nó tự `with_machine` (lock không re-entrant) cho từng
+        // `FlushRequest`, nên không được gọi khi đang giữ khoá core.
+        crate::ktest_core64::slot_arena_tap(m, u, &rig, fails);
+        crate::ktest_core64::bind_tap(m, u, fails);
+        crate::ktest_core64::resume_tap(m, u, fails);
     });
 }
 
@@ -714,7 +720,7 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
     let us = SlotRef::new(root, 0);
     let uc = m.root_cap(u);
     m.put_cap(root, 0, uc).expect("kt63: cap Untyped");
-    let mut mk = |m: &mut Machine, ty: ObjType, slot: usize| -> ObjId {
+    let mk = |m: &mut Machine, ty: ObjType, slot: usize| -> ObjId {
         let cap = m.retype(us, ty, 0, 0).expect("kt63: retype");
         let obj = m.cap_obj(cap).expect("kt63: cap_obj");
         m.put_cap(root, slot, cap).expect("kt63: put cap");
@@ -725,9 +731,9 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
     let t2 = mk(m, ObjType::Tcb, 3);
     let t3 = mk(m, ObjType::Tcb, 4);
     let t4 = mk(m, ObjType::Tcb, 5);
-    let ep0 = mk(m, ObjType::Endpoint, 10);
-    let ep1 = mk(m, ObjType::Endpoint, 11);
-    let rep = mk(m, ObjType::Reply, 12);
+    let _ep0 = mk(m, ObjType::Endpoint, 10);
+    let _ep1 = mk(m, ObjType::Endpoint, 11);
+    let _rep = mk(m, ObjType::Reply, 12);
     for t in [t0, t1, t2, t3, t4] {
         m.transition_tcb(t, TcbState::Ready).expect("kt63: Ready");
     }
@@ -929,17 +935,17 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
         .expect("kt63: retype Untyped 2");
     m.put_cap(root, 20, u2cap).expect("kt63: put cap u2");
     let u2s = SlotRef::new(root, 20);
-    let mut mk2 = |m: &mut Machine, ty: ObjType, slot: usize| -> ObjId {
+    let mk2 = |m: &mut Machine, ty: ObjType, slot: usize| -> ObjId {
         let cap = m.retype(u2s, ty, 0, 0).expect("kt63: retype cây 2");
         let obj = m.cap_obj(cap).expect("kt63: cap_obj cây 2");
         m.put_cap(root, slot, cap).expect("kt63: put cây 2");
         obj
     };
-    let ep_a = mk2(m, ObjType::Endpoint, 21);
+    let _ep_a = mk2(m, ObjType::Endpoint, 21);
     let ep_b = mk2(m, ObjType::Endpoint, 22);
-    let ep_c = mk2(m, ObjType::Endpoint, 23);
+    let _ep_c = mk2(m, ObjType::Endpoint, 23);
     let rep_a = mk2(m, ObjType::Reply, 24);
-    let ntn_a = mk2(m, ObjType::Notification, 25);
+    let _ntn_a = mk2(m, ObjType::Notification, 25);
     let ep_as = SlotRef::new(root, 21);
     let ep_bs = SlotRef::new(root, 22);
     let ep_cs = SlotRef::new(root, 23);
@@ -1011,8 +1017,16 @@ fn cap_ipc_taps(m: &mut Machine, u: ObjId, fails: &mut usize) {
     }
 }
 
+/// Tên mã lỗi của `Option<KError>` (helper KT-64) hoặc `ok`.
+pub(crate) fn err_name_opt(e: Option<KError>) -> &'static str {
+    match e {
+        None => "ok",
+        Some(e) => e.name(),
+    }
+}
+
 /// Tên mã lỗi hoặc `ok` cho evidence của TAP 51.
-fn err_name<T>(r: &Result<T, KError>) -> &'static str {
+pub(crate) fn err_name<T>(r: &Result<T, KError>) -> &'static str {
     match r {
         Ok(_) => "ok",
         Err(e) => e.name(),
@@ -1028,6 +1042,9 @@ pub fn core_phase() -> usize {
     let report = core_bridge::init(obj.arena_end, core_bridge::CORE_ARENA_BYTES);
     tap43_link(&report, &mut fails);
     core_taps(&report, &obj, &mut fails);
+    // TAP 59 chạy **ngoài** khoá core (tự `with_machine` per `FlushRequest`), trước TAP 58..60
+    // về số hiệu nhưng sau phần khoá — thứ tự `ok` là ...55, 56, 57, 58, 59, 60.
+    crate::ktest_core64::tlb_tap(&mut fails);
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

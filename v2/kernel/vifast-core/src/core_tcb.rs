@@ -8,6 +8,7 @@
 //! KT-21 chỉ giữ trường + công thức.
 
 use crate::error::{KError, ObjId, ObjType, SlotRef};
+use crate::ipc::Message;
 use crate::machine::{
     FinaliseEntry, Machine, BODY_SC, BODY_TCB, MAX_FINALISE, MAX_SCHED_CONTEXTS, MAX_TCBS,
 };
@@ -499,6 +500,69 @@ impl Machine {
         }
         if dang_treo {
             self.sched_sync(obj)?;
+        }
+        self.sched_after_op(true);
+        Ok(())
+    }
+
+    /// **KT-64** — `tcb_resume_with_regs(tcb, msg)`: resume một TCB **sau fault** với thanh
+    /// ghi/MR mới, đúng một cửa của sim (KT-26, thiết kế §4.4 `:279`).
+    ///
+    /// Thứ tự **bắt buộc**: kiểm trạng thái đích **trước** → gỡ khỏi mọi hàng chờ/`Reply.caller`
+    /// → ghi `regs` qua **cùng** một cửa `ipc::transfer` (`admit` + `deliver`) **trước** khi đổi
+    /// trạng thái (không có cửa sổ “Ready nhưng message chưa tới”, r319) → bỏ `suspended` →
+    /// về trạng thái đích qua **một** cửa `transition_tcb`.
+    ///
+    /// Nhận **đúng bốn** trạng thái (sim KT-26):
+    /// - `BlockedOnReply { reply }` — chỉ khi `Reply.caller == tcb` (fault đã giao, procsrv giữ
+    ///   Reply); Reply của người khác ⇒ `IllegalOperation`;
+    /// - `BlockedOnSend { call: true, fault: Some(k) }` với `k` **không** phải `Exit` (huỷ message
+    ///   fault đang chờ — message fault không có `msg_id` nên không tăng `ipc_dropped`);
+    /// - `Ready` (bỏ `suspended`); `Sleeping { .. }` (**giữ nguyên** reason).
+    ///
+    /// Trạng thái khác (`Inactive`/`Running`/`Dead`/`BlockedOnRecv`/…) ⇒ `IllegalOperation` và
+    /// **không** đổi gì: đây là đường **model API** cho fault-resume, **không** phải syscall —
+    /// user **không** có cửa nào để tự resume tuỳ ý (TAP `# resume:` + test pin).
+    ///
+    /// Không phát lại Call/Send/Recv/Reply cũ; **giữ** `exit_code` (khác `Tcb.Resume`).
+    pub fn tcb_resume_with_regs(&mut self, tcb: SlotRef, msg: Message) -> Result<(), KError> {
+        let obj = self.require_type(tcb, ObjType::Tcb)?;
+        if msg.n_caps != 0 || msg.n_snaps != 0 || msg.info.caps() != 0 {
+            return Err(KError::InvalidArgument);
+        }
+        let state = self.tcb_state(obj)?;
+        let suspended = self.tcb_info_obj(obj)?.suspended;
+        // Trạng thái đích — kiểm **trước** khi gỡ hàng/giao thanh ghi (lỗi không đổi gì).
+        match state {
+            TcbState::BlockedOnReply { reply } => {
+                if self.reply_caller(reply)? != Some(obj) {
+                    return Err(KError::IllegalOperation);
+                }
+            }
+            TcbState::BlockedOnSend {
+                call: true,
+                fault: Some(kind),
+                ..
+            } if !kind.is_exit() => {}
+            TcbState::Ready => {}
+            TcbState::Sleeping { .. } => {}
+            _ => return Err(KError::IllegalOperation),
+        }
+        // Gỡ khỏi **mọi** hàng chờ/`Reply.caller` trước khi giao (bất biến §4.4); với
+        // `BlockedOnSend` đây là chỗ huỷ message fault đang chờ.
+        self.unlink_tcb_queues(obj);
+        // Ghi thanh ghi **trước** khi `Ready` — qua đúng một hàm `ipc::transfer`.
+        let mut m = msg;
+        self.resolve_caps(&mut m)?;
+        let mut m = self.admit_message(m)?;
+        self.deliver_message(obj, &mut m, None)?;
+        if suspended {
+            self.set_tcb_suspended(obj, false)?;
+        }
+        match state {
+            // `Sleeping` giữ nguyên (bảng §4.5); `Ready` đã đúng chỗ (cặp danh tính cấm).
+            TcbState::Sleeping { .. } | TcbState::Ready => {}
+            _ => self.transition_tcb(obj, TcbState::Ready)?,
         }
         self.sched_after_op(true);
         Ok(())

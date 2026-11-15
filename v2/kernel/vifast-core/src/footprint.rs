@@ -5,7 +5,8 @@
 //!
 //! KT-59 dựng bảng 14 dòng; KT-60 thêm body Endpoint/Reply/Notification + pool message đang
 //! chờ + bảng WaitOnAddress + biến thể `IpcArea` trong TCB; KT-63 thêm **receive window**
-//! (`TcbData.recv_window`, 4 CPTR) + cap nguồn/ảnh chụp trong `Message` + 3 bộ đếm cap. Hàm [`Machine::footprint`] trả
+//! (`TcbData.recv_window`, 4 CPTR) + cap nguồn/ảnh chụp trong `Message` + 3 bộ đếm cap;
+//! KT-64 thêm `slot_mem` + `harness_region` (thay `slot_pool`) + `tlb_pending[8]`. Hàm [`Machine::footprint`] trả
 //! **phân bố byte** để test pin và KT-61 đối chiếu trước khi link; bất biến
 //! `sum(bytes) + scalars + padding == size_of::<Machine>()` được test pin kiểm.
 
@@ -22,16 +23,17 @@ use crate::objstate::{
 };
 use crate::sched::{HartSched, Published};
 use crate::tcb::TCB_STATE_COUNT;
+use crate::tlb::TlbPending;
 
-/// Số thành phần của báo cáo [`Footprint`] (27 bảng/mảng; scalar + padding tính riêng).
-pub const FOOTPRINT_PARTS: usize = 27;
+/// Số thành phần của báo cáo [`Footprint`] (29 bảng/mảng; scalar + padding tính riêng).
+pub const FOOTPRINT_PARTS: usize = 29;
 
 /// Phân bố byte **tĩnh** của [`Machine`] (D2-84). `bytes[i]` là `size_of::<[T; N]>()` của
 /// từng bảng; `scalars` là tổng các trường đếm/cờ; `padding` là byte đệm/đuôi `repr(Rust)`:
 /// `sum(bytes) + scalars + padding == total == size_of::<Machine>()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Footprint {
-    /// Tên 27 thành phần (cùng thứ tự `bytes`).
+    /// Tên 29 thành phần (cùng thứ tự `bytes`).
     pub names: [&'static str; FOOTPRINT_PARTS],
     /// Byte của từng thành phần.
     pub bytes: [usize; FOOTPRINT_PARTS],
@@ -50,7 +52,8 @@ impl Machine {
             size_of::<[crate::arena::Region; MAX_UNTYPEDS]>(),
             size_of::<[crate::machine::Meta; MAX_OBJECTS]>(),
             size_of::<[crate::machine::Cap; MAX_CAPS]>(),
-            size_of::<crate::slotpool::SlotPool>(),
+            size_of::<crate::slotmem::SlotMem>(),
+            size_of::<crate::arena::Region>(),
             size_of::<[crate::tcbdata::TcbData; MAX_TCBS]>(),
             size_of::<[u16; MAX_TCBS]>(),
             size_of::<[crate::tcbdata::ScData; MAX_SCHED_CONTEXTS]>(),
@@ -74,11 +77,13 @@ impl Machine {
             size_of::<[u16; MAX_WAIT_NODES]>(),
             size_of::<[u16; WAITADDR_BUCKETS]>(),
             size_of::<[u16; WAITADDR_BUCKETS]>(),
+            size_of::<[TlbPending; MAX_HARTS]>(),
         ];
-        // 20 × usize + 12 × u64 (9 bộ đếm cũ + 3 bộ đếm chuyển cap KT-63) + u16
+        // 20 × usize + 16 × u64 (9 bộ đếm cũ + 3 bộ đếm chuyển cap KT-63 + `tlb_seq`/
+        // `tlb_local_flushes`/`tlb_remote_posts`/`tlb_serviced` của KT-64) + u16
         // (current_hart) + u32 (finalise_overflow) + bool.
         let scalars = 20 * size_of::<usize>()
-            + 12 * size_of::<u64>()
+            + 16 * size_of::<u64>()
             + size_of::<u16>()
             + size_of::<u32>()
             + size_of::<bool>();
@@ -89,7 +94,8 @@ impl Machine {
                 "regions[16]",
                 "objects[256]",
                 "caps[512]",
-                "slot_pool",
+                "slot_mem",
+                "harness_region",
                 "tcbs[64]",
                 "tcb_free[64]",
                 "scs[32]",
@@ -113,6 +119,7 @@ impl Machine {
                 "wait_free[64]",
                 "wait_buckets[64]",
                 "wait_buckets_tail[64]",
+                "tlb_pending[8]",
             ],
             bytes,
             scalars,

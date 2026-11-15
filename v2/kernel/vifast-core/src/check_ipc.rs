@@ -263,6 +263,60 @@ impl Machine {
                         sc,
                     ));
                 }
+                // **KT-64 (D2-92d)** — chiều **ngược**: SC phải trỏ lại **đúng** notification này
+                // (cap còn sống, đúng object) ⇒ không còn "binding một chiều" mồ côi.
+                let back_ok = self
+                    .sc_data(sc)
+                    .ok()
+                    .and_then(|d| d.bound)
+                    .and_then(|cap| self.cap(cap).ok().map(|c| (c.obj, c.alive)))
+                    .map(|(obj, alive)| alive && obj == ntfn)
+                    .unwrap_or(false);
+                if !back_ok {
+                    return Err(CheckFailure::two(
+                        "Notification bound_sc nhung SC.bound khong tro lai",
+                        ntfn,
+                        sc,
+                    ));
+                }
+            }
+        }
+        // **KT-64 (D2-92d)** — `ScData.bound` 1:1 hai chiều: mỗi SC sống có `bound` phải trỏ cap
+        // Reply/Notification **còn sống**; nếu là Notification thì `bound_sc` phải trỏ lại SC đó.
+        // Binding mồ côi (một chiều) ⇒ lỗi bất biến (đi kèm hook `delete`/`Revoke`).
+        for idx in 0..self.n_objects {
+            let meta = &self.objects[idx];
+            if !meta.alive || meta.ty != ObjType::SchedContext {
+                continue;
+            }
+            let sc = (idx + 1) as u32;
+            let Some(cap) = self.sc_data(sc).ok().and_then(|d| d.bound) else {
+                continue;
+            };
+            let Ok(c) = self.cap(cap) else {
+                return Err(CheckFailure::one("SC.bound cap khong hop le", sc));
+            };
+            if !c.alive {
+                return Err(CheckFailure::two("SC.bound cap da chet", sc, c.obj));
+            }
+            match c.ty {
+                ObjType::Notification => {
+                    if self.notification_bound_sc(c.obj).ok().flatten() != Some(sc) {
+                        return Err(CheckFailure::two(
+                            "SC.bound nhung Notification.bound_sc khong tro lai",
+                            sc,
+                            c.obj,
+                        ));
+                    }
+                }
+                ObjType::Reply => {}
+                _ => {
+                    return Err(CheckFailure::two(
+                        "SC.bound sai kieu (phai Reply/Notification)",
+                        sc,
+                        c.obj,
+                    ));
+                }
             }
         }
         Ok(())

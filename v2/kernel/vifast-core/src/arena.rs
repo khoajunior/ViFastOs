@@ -69,6 +69,17 @@ impl Region {
         Some(offset)
     }
 
+    /// Offset **sẽ** được cấp cho `(len, align)` — **không** đổi watermark.
+    ///
+    /// Dùng để kiểm điều kiện phụ (vd. cửa sổ slot của CNode, KT-64) **trước** khi cấp, giữ
+    /// lỗi nguyên tử; phép tính trùng đúng [`Region::alloc`] nên hai bên không lệch.
+    pub fn probe(&self, len: usize, align: usize) -> Option<usize> {
+        debug_assert!(align.is_power_of_two(), "align phải lũy thừa 2");
+        let offset = align_up(self.cursor, align)?;
+        let end = offset.checked_add(len)?;
+        (end <= self.capacity).then_some(offset)
+    }
+
     /// Untyped `Revoke`: watermark về 0 sau khi mọi object trong vùng đã chết.
     pub fn reset(&mut self) {
         self.cursor = 0;

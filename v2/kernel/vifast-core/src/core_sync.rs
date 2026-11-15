@@ -12,7 +12,7 @@
 //!
 //! Model-only `[TK]`, không phải ABI. Bảng có biên tĩnh; đầy ⇒ `NotEnoughMemory` nguyên tử.
 
-use crate::error::{KError, ObjId, ObjType, SlotRef};
+use crate::error::{CapId, KError, ObjId, ObjType, SlotRef};
 use crate::machine::Machine;
 use crate::objstate::{
     waitaddr_bucket, AddrWord, WaitNode, MAX_ADDR_WORDS, MAX_WAIT_NODES, NODE_NONE,
@@ -249,6 +249,149 @@ impl Machine {
     /// SC bound với Notification.
     pub fn notification_bound_sc(&self, ntfn: ObjId) -> Result<Option<ObjId>, KError> {
         Ok(self.notification_data(ntfn)?.bound_sc)
+    }
+
+    // ------------------------------------------------------------- SchedContext.Bind (KT-64)
+
+    /// `SchedContext.Bind(sched, target)` — port `sched_context_bind` của sim (KT-27/KT-64):
+    /// chỉ **gắn/kiểm** quan hệ cấu trúc, **không** tạo/xoá donation, **không** đổi ngân sách.
+    ///
+    /// - `target` phải là cap **Reply** hoặc **Notification** (spec `[method_signature.
+    ///   "SchedContext.Bind"]`); loại khác ⇒ `WrongObjectType`; cap chết ⇒ `InvalidCapability`.
+    /// - **1:1 phía Notification**: notification đã bind **SC khác** ⇒ `IllegalOperation` và
+    ///   **không** đổi gì (kiểm trước mọi mutation).
+    /// - SC đổi target ⇒ binding cũ trên notification được **gỡ** (không để `bound_sc` mồ côi).
+    pub fn sched_context_bind(&mut self, sched: SlotRef, target: SlotRef) -> Result<(), KError> {
+        let sched_obj = self.require_type(sched, ObjType::SchedContext)?;
+        let target_cap = self.cap_at(target.cnode, target.slot)?;
+        let target_ty = {
+            let c = self.cap(target_cap)?;
+            if !c.alive {
+                return Err(KError::InvalidCapability);
+            }
+            c.ty
+        };
+        if !matches!(target_ty, ObjType::Reply | ObjType::Notification) {
+            return Err(KError::WrongObjectType);
+        }
+        // Kiểm 1:1 phía Notification **trước** khi đổi bất cứ trạng thái nào.
+        if target_ty == ObjType::Notification {
+            let ntfn_obj = self.cap(target_cap)?.obj;
+            if let Some(other) = self.notification_bound_sc(ntfn_obj)? {
+                if other != sched_obj {
+                    return Err(KError::IllegalOperation);
+                }
+            }
+        }
+        // Gỡ binding cũ của SC (nếu đang trỏ Notification khác) — giữ 1:1 hai chiều.
+        let old_bound = self.sc_data(sched_obj)?.bound;
+        if let Some(old_cap) = old_bound {
+            if old_cap != target_cap {
+                let old = self
+                    .cap(old_cap)
+                    .ok()
+                    .map(|c| (c.obj, c.ty, c.alive, c.badge));
+                if let Some((old_obj, ObjType::Notification, true, _)) = old {
+                    let n = self.notification_data_mut(old_obj)?;
+                    if n.bound_sc == Some(sched_obj) {
+                        n.bound_sc = None;
+                    }
+                }
+            }
+        }
+        self.sc_data_mut(sched_obj)?.bound = Some(target_cap);
+        if target_ty == ObjType::Notification {
+            let ntfn_obj = self.cap(target_cap)?.obj;
+            self.notification_data_mut(ntfn_obj)?.bound_sc = Some(sched_obj);
+        }
+        self.sched_after_op(false);
+        Ok(())
+    }
+
+    /// `SchedContext.Unbind` — gỡ binding của SC (cả hai chiều), **idempotent**.
+    ///
+    /// Sim K1–K2 **không** mô hình hoá method này (chỉ có `Bind`); core cài theo
+    /// `spec/abi.toml` (method 1 của `SchedContext`) và pin bằng test core-only. `Unbind` trên
+    /// SC chưa bind ⇒ `Ok` (không lỗi).
+    pub fn sched_context_unbind(&mut self, sched: SlotRef) -> Result<(), KError> {
+        let sched_obj = self.require_type(sched, ObjType::SchedContext)?;
+        let bound = self.sc_data(sched_obj)?.bound;
+        if let Some(cap) = bound {
+            let target = self.cap(cap).ok().map(|c| (c.obj, c.ty, c.alive));
+            if let Some((obj, ObjType::Notification, true)) = target {
+                let n = self.notification_data_mut(obj)?;
+                if n.bound_sc == Some(sched_obj) {
+                    n.bound_sc = None;
+                }
+            }
+        }
+        self.sc_data_mut(sched_obj)?.bound = None;
+        self.sched_after_op(false);
+        Ok(())
+    }
+
+    /// Cap mà `SchedContext` đang bind (`None` = chưa bind) — ảnh chụp cho test/parity.
+    pub fn sched_context_bound(&self, sc: ObjId) -> Result<Option<CapId>, KError> {
+        Ok(self.sc_data(sc)?.bound)
+    }
+
+    /// **KT-64** — cap Notification `cap` (trỏ `obj`) bị xoá: gỡ `SchedContext.bound` đang trỏ
+    /// cap đó + `Notification.bound_sc` phía đối diện (1:1 hai chiều). Gọi từ `Machine::delete`.
+    pub(crate) fn drop_sched_binding_to_cap(&mut self, cap: CapId, obj: ObjId) {
+        let mut idx = 0usize;
+        while idx < self.n_objects {
+            let (alive, ty, body) = {
+                let m = &self.objects[idx];
+                (m.alive, m.ty, m.body)
+            };
+            if alive && ty == ObjType::SchedContext && body.alive {
+                let sc = idx as u32 + 1;
+                let mut clear = false;
+                if let Some(d) = self.scs.get(body.idx as usize) {
+                    clear = d.bound == Some(cap);
+                }
+                if clear {
+                    if let Some(d) = self.scs.get_mut(body.idx as usize) {
+                        d.bound = None;
+                    }
+                    if let Ok(n) = self.notification_data_mut(obj) {
+                        if n.bound_sc == Some(sc) {
+                            n.bound_sc = None;
+                        }
+                    }
+                }
+            }
+            idx += 1;
+        }
+    }
+
+    /// **KT-64** — object `obj` (Notification) bị finalise: gỡ mọi `SchedContext.bound` trỏ nó
+    /// (không để `bound` trỏ object chết). Gọi từ `Machine::revoke_children`.
+    pub(crate) fn drop_sched_binding_to_obj(&mut self, obj: ObjId) {
+        let mut idx = 0usize;
+        while idx < self.n_objects {
+            let (alive, ty, body) = {
+                let m = &self.objects[idx];
+                (m.alive, m.ty, m.body)
+            };
+            if alive && ty == ObjType::SchedContext && body.alive {
+                let mut clear = false;
+                if let Some(cap) = self.scs.get(body.idx as usize).and_then(|d| d.bound) {
+                    if let Ok(c) = self.cap(cap) {
+                        clear = c.obj == obj || !c.alive;
+                    }
+                }
+                if clear {
+                    if let Some(d) = self.scs.get_mut(body.idx as usize) {
+                        d.bound = None;
+                    }
+                }
+            }
+            idx += 1;
+        }
+        if let Ok(n) = self.notification_data_mut(obj) {
+            n.bound_sc = None;
+        }
     }
 
     // ---------------------------------------------------------------- WaitAddr

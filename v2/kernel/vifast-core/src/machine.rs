@@ -29,12 +29,14 @@ use crate::objstate::{
     MAX_WAIT_NODES, NODE_NONE, WAITADDR_BUCKETS,
 };
 use crate::sched::{HartSched, Published};
-use crate::slotpool::SlotPool;
+use crate::slotmem::{arena_slot_base, harness_slot_base, SlotMem, HARNESS_SLOT_WORDS};
 use crate::spec::{
     ARENA_ALIGN, CNODE_BASE_BYTES, DEFAULT_ALIGN_BYTES, FLAG_GUEST, RIGHTS_ALL, RIGHT_WRITE,
+    SLOT_BYTES,
 };
 use crate::tcb::{TcbState, TCB_STATE_COUNT};
 use crate::tcbdata::{ScData, TcbData};
+use crate::tlb::TlbPending;
 
 /// Số object tối đa trong bảng tĩnh (id **không tái dùng**, kể cả object đã chết).
 pub const MAX_OBJECTS: usize = 256;
@@ -186,7 +188,11 @@ pub struct Machine {
     pub(crate) n_objects: usize,
     pub(crate) caps: [Cap; MAX_CAPS],
     pub(crate) n_caps: usize,
-    pub(crate) slots: SlotPool,
+    /// Cửa sổ backing của **byte slot trong arena** (KT-64) — không còn pool riêng.
+    pub(crate) slots: SlotMem,
+    /// Arena logic cho CNode **harness** (kernel cấp, không có byte Untyped) — như body heap
+    /// của `add_cnode` trong sim; byte slot của nó dùng vùng B của [`SlotMem`].
+    pub(crate) harness: Region,
     /// Body TCB (KT-59) + free-list chỉ số.
     pub(crate) tcbs: [TcbData; MAX_TCBS],
     pub(crate) n_tcbs: usize,
@@ -263,6 +269,16 @@ pub struct Machine {
     pub(crate) preempt_every_step: bool,
     /// Thời gian ảo (tick) — **không** đọc wall clock (D2-49(h)).
     pub(crate) now: u64,
+    /// **KT-64** — shootdown TLB đang chờ của mỗi hart (`TlbFlush` thật, chống trang cũ).
+    pub(crate) tlb_pending: [TlbPending; MAX_HARTS],
+    /// Số hiệu shootdown toàn cục (1-based, tăng đơn điệu).
+    pub(crate) tlb_seq: u64,
+    /// Số lần flush **cục bộ** đã thực thi qua hook (mọi hart).
+    pub(crate) tlb_local_flushes: u64,
+    /// Số `TlbFlush` đã post remote.
+    pub(crate) tlb_remote_posts: u64,
+    /// Số lần hart đích đã phục vụ + ack.
+    pub(crate) tlb_serviced: u64,
 }
 
 impl Default for Machine {
@@ -293,7 +309,8 @@ impl Machine {
             n_objects: 0,
             caps: [Cap::EMPTY; MAX_CAPS],
             n_caps: 0,
-            slots: SlotPool::EMPTY,
+            slots: SlotMem::EMPTY,
+            harness: Region::new(0, HARNESS_SLOT_WORDS * SLOT_BYTES),
             tcbs: [TcbData::EMPTY; MAX_TCBS],
             n_tcbs: 0,
             tcb_free: [0; MAX_TCBS],
@@ -361,6 +378,11 @@ impl Machine {
             migrate_count: 0,
             preempt_every_step: false,
             now: 0,
+            tlb_pending: [TlbPending::EMPTY; MAX_HARTS],
+            tlb_seq: 0,
+            tlb_local_flushes: 0,
+            tlb_remote_posts: 0,
+            tlb_serviced: 0,
         }
     }
 
@@ -372,6 +394,9 @@ impl Machine {
             "vifast-core: số hart phải trong 1..=MAX_HARTS"
         );
         self.n_harts = harts as usize;
+        // **KT-64**: arena harness + cửa sổ slot có **cận khác 0** nên zero `.bss` không đủ —
+        // đặt lại tại chỗ (cùng lý do `wait_buckets`/`sched`/`mail`).
+        self.harness = Region::new(0, HARNESS_SLOT_WORDS * SLOT_BYTES);
         self.wait_buckets = [NODE_NONE; WAITADDR_BUCKETS];
         self.wait_buckets_tail = [NODE_NONE; WAITADDR_BUCKETS];
         // `HartSched`/`HartMailbox` có trường **không zero** (`idle = true`; 8 ô
@@ -426,10 +451,17 @@ impl Machine {
     /// `slots == 0` hoặc pool slot/bảng đầy (lỗi init).
     pub fn add_cnode(&mut self, slots: usize) -> ObjId {
         assert!(slots > 0, "CNode phải có ít nhất một slot");
-        let base = self
-            .slots
-            .alloc(slots)
-            .expect("vifast-core: pool slot hết chỗ (tăng MAX_SLOT_WORDS)");
+        let offset = self
+            .harness
+            .probe(ObjType::cnode_bytes(slots), CNODE_BASE_BYTES)
+            .expect("vifast-core: arena harness hết chỗ (HARNESS_SLOT_WORDS)");
+        let base = harness_slot_base(offset, slots)
+            .expect("vifast-core: vùng B slot hết chỗ (HARNESS_SLOT_WORDS)");
+        let _ = self
+            .harness
+            .alloc(ObjType::cnode_bytes(slots), CNODE_BASE_BYTES)
+            .expect("arena harness đã probe");
+        self.slots.fill_zero(base, slots);
         self.push_meta(
             ObjType::CNode,
             None,
@@ -452,10 +484,17 @@ impl Machine {
         // Sim: `fresh_kind(CNode, 0)` cho body 1 slot dù metadata `slots = None`; giữ đúng
         // hành vi đó để `cnode_slot_count` của CNode harness-cấp là 1 (không dùng trong test).
         let (slot_base, slot_len, slots_meta) = if ty == ObjType::CNode {
-            let base = self
-                .slots
-                .alloc(1)
-                .expect("vifast-core: pool slot hết chỗ (CNode harness)");
+            let offset = self
+                .harness
+                .probe(ObjType::cnode_bytes(1), CNODE_BASE_BYTES)
+                .expect("vifast-core: arena harness hết chỗ (CNode harness)");
+            let base = harness_slot_base(offset, 1)
+                .expect("vifast-core: vùng B slot hết chỗ (CNode harness)");
+            let _ = self
+                .harness
+                .alloc(ObjType::cnode_bytes(1), CNODE_BASE_BYTES)
+                .expect("arena harness đã probe");
+            self.slots.fill_zero(base, 1);
             (base, 1, None)
         } else {
             (0, 0, None)
@@ -579,18 +618,6 @@ impl Machine {
             parent: cap,
             idx: 0,
         })
-    }
-
-    /// Số slot của CNode (đọc được cả sau khi CNode chết — như `Meta::slots` của sim).
-    pub fn cnode_slot_count(&self, cnode: ObjId) -> Result<usize, KError> {
-        let m = self.meta(cnode)?;
-        if !m.alive {
-            return m.slots_meta.ok_or(KError::WrongObjectType);
-        }
-        if m.ty != ObjType::CNode {
-            return Err(KError::WrongObjectType);
-        }
-        Ok(m.slot_len)
     }
 
     /// Object còn sống?
@@ -797,10 +824,16 @@ impl Machine {
         {
             return Err(KError::NotEnoughMemory);
         }
-        if ty == ObjType::CNode && !self.slots.can_alloc(child_slots) {
-            return Err(KError::NotEnoughMemory);
-        }
-
+        // **KT-64** — cửa sổ byte slot phải nằm trong arena (vùng A) **trước** khi cấp: kiểm
+        // bằng `Region::probe` (không đổi watermark) ⇒ lỗi nguyên tử, không đọc ngoài mảng.
+        let slot_win = if ty == ObjType::CNode {
+            let probe = self.regions[u_region]
+                .probe(len, align)
+                .ok_or(KError::NotEnoughMemory)?;
+            Some(arena_slot_base(u_region, probe, child_slots).ok_or(KError::NotEnoughMemory)?)
+        } else {
+            None
+        };
         let offset = self.regions[u_region]
             .alloc(len, align)
             .ok_or(KError::NotEnoughMemory)?;
@@ -816,14 +849,13 @@ impl Machine {
         } else {
             None
         };
-        let (slot_base, slot_len) = if ty == ObjType::CNode {
-            let base = self.slots.alloc(child_slots).ok_or_else(|| {
-                debug_assert!(false, "Retype: can_alloc đã xác nhận trước đó");
-                KError::NotEnoughMemory
-            })?;
-            (base, child_slots)
-        } else {
-            (0, 0)
+        let (slot_base, slot_len) = match slot_win {
+            Some(base) => {
+                // Cửa sổ mới (hoặc tái dùng sau `Revoke`) phải **trắng** — như CNode mới của sim.
+                self.slots.fill_zero(base, child_slots);
+                (base, child_slots)
+            }
+            None => (0, 0),
         };
         // Đã kiểm sức chứa body ở trên ⇒ chỉ có thể thành công; lỗi nội bộ là bất biến vỡ.
         let body = match ty {
@@ -973,6 +1005,11 @@ impl Machine {
         if cap_ty == ObjType::Reply {
             self.clear_dead_reply_in_waiters();
         }
+        // **KT-64** — cap Notification bị xoá ⇒ gỡ binding `SchedContext.bound` đang trỏ **cap
+        // này** (không để `bound` trỏ cap chết, `bound_sc` mồ côi) — như sim `delete`.
+        if cap_ty == ObjType::Notification && self.object_alive(cap_obj) {
+            self.drop_sched_binding_to_cap(cap, cap_obj);
+        }
         Ok(())
     }
 
@@ -1100,7 +1137,11 @@ impl Machine {
                         self.cancel_reply_object(id);
                     }
                     ObjType::Endpoint => self.finalise_endpoint_body(id),
-                    ObjType::Notification => self.finalise_notification_body(id),
+                    ObjType::Notification => {
+                        // **KT-64** — gỡ `SchedContext.bound` trỏ notification sắp chết.
+                        self.drop_sched_binding_to_obj(id);
+                        self.finalise_notification_body(id);
+                    }
                     _ => {}
                 }
             }
@@ -1123,7 +1164,9 @@ impl Machine {
                 }
                 let (base, len) = (self.objects[idx].slot_base, self.objects[idx].slot_len);
                 if len > 0 {
-                    self.slots.free(base, len);
+                    // Không còn free-list: byte slot trả lại **cùng** byte arena (`Region::reset`
+                    // ngay dưới); chỉ xoá cửa sổ để không ai đọc rác.
+                    self.slots.fill_zero(base, len);
                 }
             }
             // Reset arena của **mọi** Untyped trong cây + Untyped gốc.
@@ -1396,83 +1439,5 @@ impl Machine {
             return Err(KError::InvalidCapability);
         }
         Ok(obj as usize - 1)
-    }
-
-    pub(crate) fn meta(&self, obj: ObjId) -> Result<&Meta, KError> {
-        Ok(&self.objects[self.object_index(obj)?])
-    }
-
-    pub(crate) fn cap(&self, cap: CapId) -> Result<&Cap, KError> {
-        if cap == 0 || cap as usize > self.n_caps {
-            return Err(KError::InvalidCapability);
-        }
-        Ok(&self.caps[cap as usize - 1])
-    }
-
-    pub(crate) fn cnode_slot(&self, cnode: ObjId, slot: usize) -> Result<Option<CapId>, KError> {
-        let m = self.meta(cnode)?;
-        if !m.alive {
-            let n = m.slots_meta.ok_or(KError::WrongObjectType)?;
-            return if slot < n {
-                Ok(None)
-            } else {
-                Err(KError::RangeError)
-            };
-        }
-        if m.ty != ObjType::CNode {
-            return Err(KError::WrongObjectType);
-        }
-        if slot >= m.slot_len {
-            return Err(KError::RangeError);
-        }
-        let word = self.slots.get(m.slot_base, slot);
-        Ok(if word == 0 { None } else { Some(word) })
-    }
-
-    pub(crate) fn cnode_set_slot(
-        &mut self,
-        cnode: ObjId,
-        slot: usize,
-        cap: Option<CapId>,
-    ) -> Result<(), KError> {
-        let (base, len) = {
-            let m = self.meta(cnode)?;
-            // Như sim `cnode_set_slot` → `body_mut`: object đã finalise ⇒ `Dead` ⇒
-            // `InvalidCapability`; object sống sai kiểu ⇒ `WrongObjectType`.
-            if !m.alive {
-                return Err(KError::InvalidCapability);
-            }
-            if m.ty != ObjType::CNode {
-                return Err(KError::WrongObjectType);
-            }
-            (m.slot_base, m.slot_len)
-        };
-        if slot >= len {
-            return Err(KError::RangeError);
-        }
-        self.slots.set(base, slot, cap.unwrap_or(0));
-        Ok(())
-    }
-
-    pub(crate) fn check_cnode_slot(&self, cnode: ObjId, slot: usize) -> Result<(), KError> {
-        let n = self.cnode_slot_count(cnode)?;
-        if slot >= n {
-            return Err(KError::RangeError);
-        }
-        Ok(())
-    }
-
-    fn clear_slot_of(&mut self, cap: CapId) {
-        let slot = self
-            .caps
-            .get_mut(cap as usize - 1)
-            .and_then(|c| c.slot.take());
-        if let Some(SlotRef { cnode, slot: s }) = slot {
-            if let Ok(Some(cur)) = self.cnode_slot(cnode, s) {
-                if cur == cap {
-                    let _ = self.cnode_set_slot(cnode, s, None);
-                }
-            }
-        }
     }
 }

@@ -27,10 +27,10 @@
 //!
 //! Core chạy được **cả host test lẫn bare-metal riscv64**: `#![no_std]`,
 //! `#![forbid(unsafe_code)]` (D2-17), **không** `alloc`/`Vec`/`String`. `Vec<Meta>`/`Vec<Cap>`
-//! của sim thành bảng tĩnh `.bss` (`MAX_OBJECTS`, `MAX_CAPS`, `MAX_SLOT_WORDS`), body CNode
-//! thành pool slot 48 B/slot (vì `CNode` tiêu đúng `cnode_base + slots*48` byte arena); byte
-//! Untyped do [`arena::Region`] kế toán. Mọi truy vấn trả iterator/`Copy` thay `Vec`:
-//! `cap_table`, `cap_children`.
+//! của sim thành bảng tĩnh `.bss` (`MAX_OBJECTS`, `MAX_CAPS`, `MAX_SLOT_WORDS`); byte
+//! Untyped do [`arena::Region`] kế toán **và** là nguồn duy nhất của byte slot CNode (KT-64: slot
+//! lấy từ arena tại `offset + cnode_base`, không còn pool riêng — [`slotmem`]). Mọi truy vấn trả
+//! iterator/`Copy` thay `Vec`: `cap_table`, `cap_children`.
 //!
 //! # Hợp đồng ABI (D2-11)
 //!
@@ -41,8 +41,8 @@
 //! # Không `unsafe`
 //!
 //! Không con trỏ thô, không `transmute`, không trait `PhysMem`: mọi thứ là chỉ số + mảng tĩnh.
-//! Kernel QEMU dùng cùng mã qua `vifast-core` (KT-61) — nợ duy nhất là slot nằm trong `.bss`
-//! thay vì arena vật lý, đã ghi trong `docs/k3b-core.md`.
+//! Kernel QEMU dùng cùng mã qua `vifast-core` (KT-61). KT-64 nối `TlbFlush` thật qua hook
+//! [`TlbEnv`] (arch cài `sfence.vma` — `unsafe` chỉ ở `kernel/vifast-plat-*`, D2-17).
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -61,16 +61,18 @@ mod error;
 mod footprint;
 pub mod ipc;
 mod machine;
+mod machine_slot;
 pub mod mailbox;
 pub mod mcs;
 mod mdb;
 mod objstate;
 pub mod sched;
-mod slotpool;
+mod slotmem;
 pub mod spec;
 pub mod syscall;
 pub mod tcb;
 mod tcbdata;
+mod tlb;
 
 pub use arena::Region;
 pub use captable::{CapChildren, CapTable};
@@ -96,15 +98,14 @@ pub use objstate::{
     waitaddr_bucket, ENDPOINT_QUEUE_CAP, MAX_ADDR_WORDS, MAX_WAIT_NODES, WAITADDR_BUCKETS,
 };
 pub use sched::{HartSched, Published, BITMAP_WORDS, MAX_PRIORITY};
+pub use slotmem::{ARENA_SLOT_WORDS, HARNESS_SLOT_WORDS};
+pub use spec::{
+    ARENA_ALIGN, CNODE_BASE_BYTES, DEFAULT_ALIGN_BYTES, FLAG_GUEST, PAGE_BYTES, RIGHTS_ALL,
+    RIGHT_GRANT, RIGHT_GRANT_REPLY, RIGHT_READ, RIGHT_WRITE, SLOT_BYTES, UNTYPED_MIN_BYTES,
+};
 pub use tcb::{
     allowed, allowed_count, coverage, coverage_design, forbidden_count, reserved_count,
     BlockedOnKind, FaultAccess, FaultKind, SleepReason, SuspendMode, TcbInfo, TcbSnapshot,
     TcbState, VmFaultReason, ALLOWED, TCB_STATE_COUNT,
 };
-
-/// Số hole tự do tối đa của pool slot CNode (`slotpool`).
-pub(crate) const MAX_HOLES: usize = 16;
-pub use spec::{
-    ARENA_ALIGN, CNODE_BASE_BYTES, DEFAULT_ALIGN_BYTES, FLAG_GUEST, PAGE_BYTES, RIGHTS_ALL,
-    RIGHT_GRANT, RIGHT_GRANT_REPLY, RIGHT_READ, RIGHT_WRITE, SLOT_BYTES, UNTYPED_MIN_BYTES,
-};
+pub use tlb::{TlbEnv, TlbFlushReport, TlbScope, TlbShootdownReport};
