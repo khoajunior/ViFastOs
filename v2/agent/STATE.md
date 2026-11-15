@@ -4,56 +4,51 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `ce943707` ([KT-57] cổng K3: soak 0/1000, matrix 9/9, 100k L1, perf, K3-DOD) +
-                `[KT-57b]` — **đã push**, `HEAD..origin/main = 0`. HEAD vào task `d543352d`
-                ([KT-00] lật KT-56 DONE + mở KT-57; parent code KT-56 `25251719`); reviewer-kt57
-                DRIFT thấp → vá tài liệu F1..F7 + T-INFRA trước commit. Worktree có `viscript/` +
-                `review/` của tab khác — **không chạm**; commit KT-57 = `v2/**` (không `spec/`).
-BUILD_ID      : ảnh **đổi nhẹ** so KT-56 (chỉ ảnh sản phẩm +4 dòng evidence-only D2-80; 3 ảnh
-                test **không đổi byte** — BUILD_ID ktest vẫn `3e6ae37a278300df`):
-                product 90.696 B / data+bss **11.248** (không đổi), ktest 332.176 / 17.344,
-                guard 53.800 / 2.680, user 152.048 / 11.752 (budget 262.144 PASS,
-                `JOURNAL/kt57-budget.log`); BUILD_ID (FNV-1a 64 `.text`, D2-80):
-                product `e09ec255c17715ae` (sha256 `509d5adc…`), ktest `3e6ae37a278300df`
-                (khớp `trace_compare --image`), guard/user đổi theo ảnh.
-Task          : **KT-57 (cổng K3: soak 0/1000 + matrix + 100k L1 + perf `[ĐO]` + `K3-DOD.md`)** —
-                **DONE (đề xuất, chờ reviewer-kt57 + Agent 0 lật QUEUE)**: `soak.sh` mới (D2-24:
-                N = 1.000, 3 luồng, timeout 20 s/boot, **không** icount, không retry; D2-80: mỗi
-                boot đòi `# conf image:` do kernel tự in, băm lại ELF, thiếu/lệch ⇒ đỏ; `N <
-                n ≥ 3/p = 1000` ⇒ exit 2); 1 dòng evidence-only `report_image_digest()` (hàm có
-                sẵn KT-55) đầu `rust_main` ảnh sản phẩm + số budget trước/sau; `k3-riscv64.md`
-                **§20** (soak/perf/giới hạn) + sửa số TAP cũ 38/5 → **43/7**; `K3-DOD.md` D1..D11
-                + nợ K3b; STATE.
-Bước          : 9/9 xong: baseline gate 574 → đỏ trước `soak.sh 999` (exit 2) + `--smoke 3`
-                đỏ 3/3 thiếu hash → vá 1 dòng evidence → **soak 1000/1000** (wall 219 s) → matrix
-                **9/9** (43/3/7) + selftest **17/17** → **100k L1 400.000 lượt, 0 vi phạm**
-                (1.299 s) → mutation **4/4** (chạy lại 2 ca kernel: X bỏ flush cục bộ, Y bỏ
-                drain hộp thư; khôi phục sha khớp) → perf (build 3,35+5,51+2,75 s; boot→halt
-                median 389.084.167 ns; drift 9.999.900–10.020.100 ns; late 20,0–20,1 µs) →
-                budget 4 ảnh → conformance 5/5 (61/61) → **gate 574** → reviewer-kt57 **DRIFT
-                mức THẤP** (cổng đạt thật, tự kiểm cả 1.000 log; patch sha 71318083 khớp) → vá
-                tài liệu F1..F7 + T-INFRA (không chạy lại soak/L1) → gate lại **574** → commit
-                `ce943707` + `[KT-57b]` + push.
+HEAD          : `95021ca4` ([KT-00] K3 DONE (D2-82) + mở K3b KT-58) → commit `[KT-58]` +
+                `[KT-58b]` — **đã push**, `HEAD..origin/main = 0` (kiểm trước push). Nhánh `main`;
+                worktree có `.agents/`, `review/…`, `out-b.log`, `ViFastOs-dossier.md` của tab
+                khác — **không chạm**; commit KT-58 = `v2/**` (không `spec/`, không `viscript/`).
+BUILD_ID      : ảnh kernel **không đổi** so KT-57 (task không nối core vào kernel, không sửa
+                kernel): product 90.696 B / data+bss **11.248** (`kt58-product-run.log`, 0 chuỗi
+                ktest), ktest 332.176 / 17.344, guard 53.800 / 2.680, user 152.048 / 11.752
+                (trần **262.144**, `kt58-ktest-matrix.log`); BUILD_ID product `e09ec255c17715ae`
+                (KT-57). Core tĩnh: `size_of::<Machine>() = 68.264 B` `[ĐO]` — **chưa link**, nên
+                ngân sách ảnh không đổi.
+Task          : **KT-58 (K3b tầng 1: port core `no_std` — Untyped + CNode + MDB + capability)** —
+                **DONE (đề xuất; chờ review độc lập + Agent 0 lật QUEUE)**: crate mới
+                `v2/kernel/vifast-core` (`no_std`, `forbid(unsafe_code)`, **không** `alloc`; 7 tệp
+                1.907 dòng); hằng `[object_size]` sinh từ `spec/abi.toml` (`vifast-gen` +
+                `vifast-abi` no_std) — **không hardcode** 48/64/4096; parity host với sim
+                (11 kịch bản KT-09/10/11 + differential 32×48 op): kết quả + digest cap/MDB/byte
+                + `check_caps`/`check_bytes` khớp **sau từng bước**; `docs/k3b-core.md`;
+                `JOURNAL/kt58-*`.
+Bước          : 9/9: baseline gate **574/75** → parity **đỏ trước** (core trả `object_type` cho
+                ô `Meta` rỗng) → core + parity xanh → clippy đỏ lần đầu (`type_complexity`) →
+                sửa alias, không nới `-D warnings` → gate **578** → `ktest.sh 1 matrix` **9/9**
+                (TAP **43/3/7**) + product PASS → reviewer-kt58 **DRIFT thấp** → vá **7 mục**
+                (mã lỗi CNode đã finalise `InvalidCapability` cho `Revoke`/`put_cap`; D2-83
+                nhãn PA + biên giới VM + test pin; thêm 3 kịch bản parity nhánh còn thiếu; M1
+                độc lập = `Mint(Some(0))` giữ badge; ghi T-INFRA L1) → gate lại **579 test/76
+                suite**, L1 **830 ms**, wall **4 m 41,3 s** → commit `[KT-58]` + `[KT-58b]` +
+                push.
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 574 test/75 suite, 0 failed**, L1 1.000 seed
-                **824 ms** (`JOURNAL/kt57-gate.log`, lần cuối; trước đó 743 ms); baseline **574**. Kernel **không** trong
-                gate (`exclude=["kernel"]`): `ktest.sh 1 matrix` **9/9** boot 43/3/7 TAP
-                (`kt57-ktest-matrix.log`), `selftest.sh` **17/17**, sim↔QEMU **61/61** 5/5
-                (`kt57-trace-compare.log`), soak **1000/1000** (`kt57-soak.log`), L1 100k
-                **400.000 lượt 0 vi phạm** (`kt57-l1-100k.log`), budget 4 ảnh
-                (`kt57-budget.log`), perf `[ĐO]` (`kt57-perf*.log`).
-Miri          : KT-57 — **không chạy Miri** (D2-72 Q12): task chỉ thêm `soak.sh` (bash) + 1 dòng
-                evidence gọi hàm `report_image_digest()` **đã có** (KT-55, thuần `no_std`, không
-                `unsafe` mới) + tài liệu/log; không đổi `lib/`/sim nên không có gì mới để Miri phủ.
-Việc dở       : **KT-57 xong phần cổng**; còn **review độc lập** (verdict ghi `K3-DOD.md` §13
-                trước commit) và commit/push. **K3 DONE (đề xuất)** — 9/9 điều kiện §5.2 ĐẠT.
-                Kế tiếp **K3b** (KT-58..KT-61: port core `no_std` CNode/TCB/IPC/sched, D2-72 Q13)
-                — K3 **chưa có core**, không phải ABI đầy đủ trên QEMU. **Nợ K3b** (`K3-DOD.md`
-                §12): core model-only; `Busy`/`FaultKind::Vm` model-only; pager/COW/shared thật;
-                U-mode đa hart/procsrv/shell (K3.5); perf chưa ngưỡng + đo jitter thật không icount
-                (task riêng D2-74(d)); Miri không áp kernel `no_std`; AIA/MSI/Sstc/hotplug;
-                soak SMP sản phẩm đầy đủ. Không đụng `spec/`, sim semantics, `.scn` 22..26,
-                QUEUE/DECISIONS/AGENTS/`viscript/`; không dependency/`unsafe` mới.
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 579 test/76 suite, 0 failed**, L1 1.000 seed
+                **830 ms**, wall **4 m 41,3 s** (`JOURNAL/kt58-gate.log`; baseline 574 + 4 parity
+                + 1 ABI); kernel (ngoài gate):
+                `ktest.sh 1 matrix` **9/9** boot, TAP **43/43 + 3/3 + 7/7**
+                (`kt58-ktest-matrix.log`); product `run.sh 1 1` PASS (`kt58-product-run.log`);
+                core bare-metal `cargo build --target riscv64gc-unknown-none-elf` + clippy
+                `-D warnings` xanh (không nằm trong gate host).
+Miri          : **không chạy Miri** — D2-72 Q12 (kernel `no_std`/asm/MMIO); logic core chạy trên
+                host trong parity test; không có `unsafe` mới (core `forbid(unsafe_code)`).
+Việc dở       : **KT-58 xong mã + cổng**; còn **review độc lập** (verdict ghi
+                `docs/k3b-core.md`/journal trước commit) + commit/push. Kế tiếp **KT-59**
+                (TCB/transition/sched + hộp thư) → **KT-60** (IPC/Reply/Notification/WaitAddr) →
+                **KT-61** (nối core vào kernel: `.data+.bss` + `SlotPool` → slot trong arena,
+                TAP/soak/conformance trên nhân thật). Nợ KT-58: `docs/k3b-core.md` §6 (bảng tĩnh
+                có biên, slot `.bss` chưa vào arena, chưa có body TCB/IPC, reserved
+                `Frame`/`PageTable` chưa port, `Machine` 68.264 B). Không đụng `spec/`, sim
+                semantics, `.scn`/`expected.txt`, QUEUE/DECISIONS/AGENTS/`viscript/`.
 ```
 
 
@@ -2570,6 +2565,7 @@ ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |
 |---|---|---|---|---|---|---|
+| 2026-11-15 | **KT-58** | 9/9 | `95021ca4` + `[KT-58]` | — | `gate --fast` PASS (**579 test/76 suite**, L1 1.000 seed **830 ms**, wall 4 m 41,3 s) + `ktest.sh 1 matrix` **9/9** (TAP **43/3/7**, `expected.txt` không đổi) + product `run.sh 1 1` PASS + core bare-metal build/clippy xanh | **K3b tầng 1 — commit `[KT-58]` + `[KT-58b]` pushed**; crate mới `v2/kernel/vifast-core` (`no_std`, `forbid(unsafe_code)`, không alloc; Untyped/CNode/MDB/cap, 1.919 dòng); gen sinh hằng `[object_size]` từ `spec/abi.toml` (không hardcode 48/64/4096) + `vifast-abi` no_std; parity host với sim: 14 kịch bản KT-09/10/11 + D2-83, differential **32 seed × 48 op** (2.016 bước, 877 ok/1.139 lỗi, 57 Retype/71 Copy/13 Mint/37 Delete/79 cap revoke) khớp kết quả + digest + `check_caps`/`check_bytes` **sau từng bước**; reviewer DRIFT thấp → vá 7 mục (mã lỗi CNode đã finalise `InvalidCapability`, D2-83 nhãn PA + biên giới VM + test pin, 3 kịch bản nhánh còn thiếu, M1 độc lập); đỏ trước + mutation M1/M2/M3 độc lập (sha `acde4970…`); `docs/k3b-core.md` (bản đồ sim→core, khác biệt/nợ); kernel **không đổi** (TAP 43/3/7, budget 11.248/17.344/2.680/11.752 B ≤ 262.144), core tĩnh `68.264 B` chưa link |
 | 2026-11-15 | **KT-56** | 9/9 | `25251719` | — | `gate --fast` PASS (**574 test/75 suite**, L1 1.000 seed) + `ktest.sh 50 matrix` **450/450** boot (43/3/7 TAP) + trace **61/61** + `selftest.sh` **17/17** + product `run.sh 1` PASS | **commit `25251719` + `[KT-56b]` pushed**; `FaultKind` ABI **khớp K2** (Exit/Vm/UnknownSyscall/UserException, `Vm{access,reason}`, `va=stval`) từ **trap phần cứng thật** (`probe` load/store/insn; `.scn` 25/26 `fault` không còn phân loại PTE; ca 26 scratch-map đúng PA/cờ tại đúng VA, `reason` đọc leaf thật `mmu::walk_sw`); `spec/abi.toml` **đúng 1 hunk** + `vifast-gen` sinh `FAULT_KINDS` (D2-81, 2 lần cùng sha256); W^X: map `W\|X` ⇒ `WxViolation`+ABI 4 atomic, U-mode thực thi trang RW NX ⇒ `Vm{Execute,Wx}`+PANIC, `Frame.mapped_device` chặn Device↔exec **toàn cục** (giải nợ L3 KT-52); TAP 38..42 (ktest 43, trap lồng 43) + user 5..7; reviewer-kt56 **APPROVE → vá 4/4** (M1 reason từ leaf thật, M2 450 boot thật, L2 nhánh non-ktest, L1/L3 ghi nợ) |
 | 2026-11-15 | **KT-55** | 8/8 | `b3b8ed01` | — | `gate --fast` PASS (**573 test/75 suite**, L1 1.000 seed) + `ktest.sh 1 matrix` **9/9** boot (38 TAP, 65 evidence) + `selftest.sh` **17/17** | **commit `b3b8ed01` + `[KT-55b]` pushed**; conformance 5 `.scn` nền tảng (22..26) chạy **cùng chương trình bước** ở sim host + kernel QEMU, `# trace:` chuẩn hoá **61/61 dòng khớp 5/5 ca** (smp2/4); IR `vifast-scenario` loại bước **có lý do** (Frame 1 GiB, TLB per-hart model, TCB/procsrv Q13); `fault` kernel = phân loại **PTE** (không phải trap/KT-56); ca 24 shootdown **thật** `-smp≥2`, `-smp1` `skipped`; TAP **37** (`5/5` / `4/5 + 1 skipped`), trap lồng dời 38; **D2-80** `# conf image: build=…` (FNV `.text`) — runner + `trace_compare --image` **từ chối** log thiếu/lệch, chứng minh chép trace sim vào log khác bị **đỏ**; **conformance bắt lỗi platform thật**: `map`/`protect` cho phép **một** mapping `W|X` (tự phá D2-67, K2 từ chối) → sửa atomic + test host đỏ→xanh (KT-52 không bắt vì khoảng trống phủ); ngân sách không đổi; docs §18 + `check_scn --trace` kiểm **chiều sim**; reviewer-kt55 **DRIFT → vá 7/7** |
 | 2026-11-15 | **KT-50** | 8/8 | `74c22d4b` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed) + **300/300 boot** (matrix 1/2/4 × 50, 0 `not ok`) | **commit `74c22d4b` đã push**; SBI IPI EID `0x735049` + `Event::Ipi` (tách 1/5/9), hộp thư per-hart coalesce 3 kind, `sent/delivered/coalesced/spurious`, **không self-target** (D2-68), **drain trước mỗi bước** + timeout luôn hết; **D2-76** `sip.SSIP` thay ACLINT MSWI (PMP chặn, log `-d int`); **D2-77** post hart offline ⇒ `Invalid` + gỡ bit khi SBI lỗi; TAP 20..24 (`100 ipi delivered` / `100 ipi traps (self)`), nested dời 25 (25/25 + guard 3/3); host **67/67**; **reviewer-kt50 DRIFT nhẹ, 6/6 mục vá**; budget 2840/4304/2688 B ≤ 262.144; product `run.sh 1 2` PASS |
