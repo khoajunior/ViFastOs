@@ -3,10 +3,11 @@
 #
 # KT-49: ảnh test chính 20 TAP (1..14 = KT-45/46/47/48; 15..19 = SMP KT-49; 20 = trap lồng
 # fatal có chủ đích). KT-50: thêm 5 TAP IPI (20..24). KT-51: thêm 5 TAP TLB/ASID/shootdown
-# (25..29) ⇒ trap lồng dời sang 30 (tổng 30 TAP); ảnh test guard 3 TAP (guard page fault thật
-# của KT-46) không đổi.
+# (25..29); KT-52: thêm **7 TAP object layer** (30..36: retype vspace, byte invariant, frame 3
+# cỡ, W^X 2 ca, map/unmap 4 KiB phần cứng, 0 rò) ⇒ trap lồng dời sang **37** (tổng 37 TAP); ảnh
+# test guard 3 TAP (guard page fault thật của KT-46) không đổi.
 #
 # Cú pháp: <nhãn> <kế hoạch TAP> <số dòng `ok` kỳ vọng>
 # Thêm ảnh test mới ⇒ thêm dòng ở đây; runner **fail** nếu số `ok`/kế hoạch không khớp.
-ktest 30 30
+ktest 37 37
 ktest-guard 3 3

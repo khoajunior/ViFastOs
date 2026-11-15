@@ -54,12 +54,30 @@ pub extern "C" fn rust_main() -> ! {
     // thứ cấp `adopt_satp` nhận đúng `satp.ASID`; ảnh sản phẩm không có shootdown/TAP nhưng dùng
     // đúng đường ASID của kernel.
     let tlb = vifast_plat_riscv64::tlb::init();
+    // KT-52: object layer nội bộ trên Untyped boot (arena RAM sau `__kernel_end` + cửa sổ PA).
+    // `init` tự kiểm physmap + `check_objmem`; sai ⇒ PANIC (runner đỏ), không chạy với object
+    // layer dở. Ảnh sản phẩm **không** dùng Retype (đó là ảnh test TAP 30..36) nhưng vẫn dựng
+    // và tự kiểm để KT-53 (U-mode) dùng lại.
+    let obj = vifast_plat_riscv64::obj::init();
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
             w,
             "# tlb: asid={} generation={} satp_asid={} active_on=0x{:x}",
             tlb.asid, tlb.generation, tlb.satp_asid, tlb.active_on
+        );
+        let _ = writeln!(
+            w,
+            "# obj: arena=0x{:x}-0x{:x} bytes={} untyped={} window=0x{:x} pa0=0x{:x} pa1=0x{:x} physmap={} healthy={}",
+            obj.arena_base,
+            obj.arena_end,
+            obj.arena_bytes,
+            obj.untypeds,
+            obj.window,
+            obj.pa0,
+            obj.pa1,
+            obj.physmap_ok as u8,
+            vifast_plat_riscv64::obj::healthy() as u8
         );
         let _ = writeln!(
             w,

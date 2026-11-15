@@ -62,6 +62,7 @@
 
 pub mod ipi;
 pub mod mmu;
+pub mod obj;
 pub mod plic;
 pub mod smp;
 pub mod timer;

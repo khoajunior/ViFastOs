@@ -4,7 +4,7 @@
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng.
 # KT-49/50: **hai** ảnh test (mỗi boot chỉ kết thúc được một lần bằng PANIC có chủ đích):
-#   - `vifast-kbin-ktest`       : 30 TAP — KT-45 (image + 3 trap) + KT-46 (mmu on, map layout,
+#   - `vifast-kbin-ktest`       : 37 TAP — KT-45 (image + 3 trap) + KT-46 (mmu on, map layout,
 #                                 walk khop) + KT-48 (3 TAP PLIC + UART IRQ thật) + KT-47 (4 TAP
 #                                 timer SBI: 100 tick đơn điệu, 1.000 tick không mất, irq thật,
 #                                 drift Δ ∈ [9,11] ms) + **KT-49 SMP** (5 TAP: N harts alive qua
@@ -14,7 +14,9 @@
 #                                 self-target, coalesce không mất kind, không nhầm timer/external)
 #                                 + **KT-51 TLB/ASID** (5 TAP: 100 vòng shootdown Ok, stale mapping
 #                                 dương tính, hart ngoài `active_on` không bị chờ, rollover flush,
-#                                 timeout không treo) + trap lồng fatal (TAP 30).
+#                                 timeout không treo) + **KT-52 object layer** (7 TAP: Retype
+#                                 VSpace, bất biến byte Untyped, Frame 3 cỡ, W^X 2 ca, map/unmap
+#                                 4 KiB phần cứng, 0 rò) + trap lồng fatal (TAP 37).
 #   - `vifast-kbin-ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume)
 #                                 rồi store `scause=15` fatal `PANIC: guard page fault`.
 # Số TAP kỳ vọng đọc từ `expected.txt` (không hardcode hai nơi).
@@ -202,7 +204,7 @@ for SMP in $SMP_LIST; do
     i=1
     while [ "$i" -le "$N_BOOT" ]; do
         total_boots=$((total_boots + 1))
-        # ------------------------------------------- ảnh chính: 30 TAP (KT-49 SMP + KT-50 IPI + KT-51 TLB)
+        # ------------------------------------------- ảnh chính: 37 TAP (KT-49 SMP + KT-50 IPI + KT-51 TLB + KT-52 object)
         if out="$(boot_once main "$IMG_MAIN" "$SMP" "$i")"; then :; else
             echo "not ok - ktest smp=$SMP boot $i: quá $((TIMEOUT_DS / 10)) s (treo), log $out"
             fails=$((fails + 1))
@@ -211,8 +213,8 @@ for SMP in $SMP_LIST; do
             continue
         fi
         missing="$(common_tap_ok "$out" "$PLAN_MAIN" "$OK_MAIN" '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$')"
-        # 1..30: KT-45 (1..4), KT-46 (5..7), KT-48 (8..10), KT-47 (11..14), KT-49 (15..19),
-        # KT-50 IPI (20..24), KT-51 TLB/ASID (25..29), trap lồng (30).
+        # 1..37: KT-45 (1..4), KT-46 (5..7), KT-48 (8..10), KT-47 (11..14), KT-49 (15..19),
+        # KT-50 IPI (20..24), KT-51 TLB/ASID (25..29), KT-52 object (30..36), trap lồng (37).
         grep -q '^ok 1 - ktest image$' "$out" || missing="$missing ok1-image"
         grep -q '^ok 2 - trap breakpoint$' "$out" || missing="$missing ok2-breakpoint"
         grep -q '^ok 3 - trap ecall sbi$' "$out" || missing="$missing ok3-ecall-sbi"
@@ -242,7 +244,29 @@ for SMP in $SMP_LIST; do
         grep -q '^ok 27 - hart ngoai active_on$' "$out" || missing="$missing ok27-outside"
         grep -q '^ok 28 - rollover flush$' "$out" || missing="$missing ok28-rollover"
         grep -q '^ok 29 - timeout khong treo$' "$out" || missing="$missing ok29-timeout"
-        grep -q '^ok 30 - trap nested panic$' "$out" || missing="$missing ok30-nested"
+        # --- KT-52: object layer `no_std` (Retype nội bộ) — VSpace/PageTable/Frame/Untyped.
+        grep -q '^ok 30 - retype vspace$' "$out" || missing="$missing ok30-object-vspace"
+        grep -q '^ok 31 - untyped byte invariant$' "$out" || missing="$missing ok31-object-bytes"
+        grep -q '^ok 32 - frame 3 sizes$' "$out" || missing="$missing ok32-object-frames"
+        grep -q '^ok 33 - wx violation x-then-w$' "$out" || missing="$missing ok33-wx-xw"
+        grep -q '^ok 34 - wx violation device+exec$' "$out" || missing="$missing ok34-wx-device"
+        grep -q '^ok 35 - map/unmap 4 KiB$' "$out" || missing="$missing ok35-map-unmap"
+        grep -q '^ok 36 - 0 ro$' "$out" || missing="$missing ok36-0-ro"
+        grep -Eq '^# obj init: arena=0x[0-9a-f]+-0x[0-9a-f]+ bytes=[0-9]+ untyped=2 window=0x40000000 pa0=0x[0-9a-f]+ pa1=0x80000000 physmap=1$' "$out" ||
+            missing="$missing obj-init-evidence"
+        grep -Eq '^# retype: vspace=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* pt=3 frame=1 cap_ok=1 walk_empty=1$' "$out" ||
+            missing="$missing obj-retype-evidence"
+        grep -Eq '^# untyped bytes: cap=[0-9]+ used0=[0-9]+ after_retype=[0-9]+ after_revoke=[0-9]+ free0=[0-9]+ free1=[0-9]+ invariant=1 atomic=1 oom=1$' "$out" ||
+            missing="$missing obj-bytes-evidence"
+        grep -Eq '^# frame: s12=1 s21=1 s30=1 pa4=0x[0-9a-f]+ pa2=0x[0-9a-f]+ pa1g=0x80000000 aligned=1 real4=1 real2=1 window=1 bad13=InvalidArgument atomic=1$' "$out" ||
+            missing="$missing obj-frame-evidence"
+        grep -Eq '^# wx: x_then_w=WxViolation device_exec=WxViolation atomic=1 maps=1 w=0 x=1$' "$out" ||
+            missing="$missing obj-wx-evidence"
+        grep -Eq '^# map: va=0x40000000 level=0 pa=0x[0-9a-f]+ satp=1 asid=[1-9][0-9]* sum=1 write=1 read=1 protect=1 unmapped=1 flush=[1-9][0-9]* walk_after=0 kernel=1$' "$out" ||
+            missing="$missing obj-map-evidence"
+        grep -Eq '^# leak: cap=[0-9]+ used=0 free=[0-9]+ holes=0 frames=0 pts=0 vspaces=0 maps=0 orphans=0 check=1$' "$out" ||
+            missing="$missing obj-leak-evidence"
+        grep -q '^ok 37 - trap nested panic$' "$out" || missing="$missing ok37-nested"
         # --- bằng chứng KT-45..KT-49 (số đo do chính boot in ra, không viết tay)
         grep -q '^# mmu: .*mode=8' "$out" || missing="$missing mmu-evidence"
         grep -q '^# mmu on: .*alias=1 .*kernel_low=1 kernel_high=1' "$out" ||
@@ -371,7 +395,7 @@ for SMP in $SMP_LIST; do
         # Bằng chứng độc lập từ OpenSBI: máy ảo thật sự có N hart (không chỉ kernel tự khai).
         grep -q "^Platform HART Count *: *$SMP" "$out" || missing="$missing opensbi-hart-count"
         if [ -z "$missing" ]; then
-            echo "ok - ktest smp=$SMP boot $i (30 TAP: trap+mmu+plic+timer+smp+ipi+tlb)"
+            echo "ok - ktest smp=$SMP boot $i (37 TAP: trap+mmu+plic+timer+smp+ipi+tlb+object)"
             clean_boots=$((clean_boots + 1))
         else
             echo "not ok - ktest smp=$SMP boot $i: thiếu$missing, log $out"

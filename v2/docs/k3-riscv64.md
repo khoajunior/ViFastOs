@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 # K3 — kernel riscv64 thật trên QEMU `virt` (mốc mở bằng KT-44)
 
-Trạng thái: **KT-51** — **ASID thật + `sfence.vma` + shootdown ack**: `satp.ASID` 8 bit + thế hệ
-(cạn ⇒ `generation += 1` + một flush toàn bộ), `sfence.vma` ba dạng `(asid,va)`/`(asid,*)`/`(*,*)`,
-`TlbFlush` thật qua IPI KT-50 với slot yêu cầu/hart, ack `fetch_max` và bất biến
-`Ok ⇒ ack_mask == active_on`, **hart gọi local flush + ack ngầm, không self-target** (D2-68), hart
-ngoài `active_on` không bị chờ, timeout bằng `rdtime`; trên nền trap KT-45 + MMU Sv39 KT-46 +
-timer SBI KT-47 + PLIC/UART IRQ KT-48 + SMP KT-49 + IPI KT-50. Tài liệu hằng số nền tảng + quy
-trình build/boot/trap/MMU/timer/PLIC/SMP/IPI/TLB của K3.
+Trạng thái: **KT-52** — **object layer `no_std` + Retype nội bộ**: Untyped boot (arena RAM sau
+`__kernel_end` + cửa sổ PA 1 GiB), object `Untyped`/`Frame`/`PageTable`/`VSpace`, cap/key tối
+thiểu, `Retype`/`Revoke` **nội bộ** (không ABI, không `spec/`), Frame 4 KiB/2 MiB/1 GiB, PageTable
+3 cấp Sv39 (`vifast-pte`), VSpace map/unmap/protect qua PTE + `sfence.vma` KT-51 + **W^X toàn cục**
+(D2-67), bất biến byte Untyped và `check_objmem` tương đương `check_vm` chạy `no_std` (§15). Trên
+nền trap KT-45 + MMU Sv39 KT-46 + timer SBI KT-47 + PLIC/UART IRQ KT-48 + SMP KT-49 + IPI KT-50 +
+ASID/`sfence`/shootdown KT-51. Tài liệu hằng số nền tảng + quy trình build/boot/trap/MMU/timer/
+PLIC/SMP/IPI/TLB/object của K3.
 Nguồn quyết định: **D2-72** (`v2/agent/DECISIONS.md`) chốt Q1..Q13 của
 [`review/agent0/K3-PLAN.md`](../../review/agent0/K3-PLAN.md) §3; chi tiết task ở §4/§4.1 cùng tệp.
 Nhãn số liệu theo QD §2.2: `[TK]` thiết kế mới, `[GT]` giả thuyết nền tảng, `[ĐO]` chỉ trong log
@@ -58,6 +59,12 @@ do lệnh sinh ra. **Tài liệu này không chứa số đo viết tay** (QD §
 | ASID | **8 bit** (`vifast_pte::ASID_BITS`) ⇒ **256** ASID/thế hệ, cấp từ free-list **không tái dùng trong cùng thế hệ**, `free` = về hưu; cạn ⇒ `generation += 1` + **một** `FlushScope::All`; `satp.ASID` bit 59..44 (kernel dùng 8 bit); đổi ASID **không** `sfence` | `[TK]` | D2-65 Q4, KT-51 §14.1 |
 | `sfence.vma` | ba dạng: `va, asid` (một trang) / `zero, asid` (một ASID) / `zero, zero` (toàn bộ); `rs1` = VA, `rs2` = ASID; chỉ TLB hart hiện tại | `[TK]` | privileged spec, KT-51 §14.2 |
 | Shootdown | slot yêu cầu/hart `{seq, asid, scope, va}` (4 `AtomicU64`) + kind `TlbFlush` (IPI KT-50); ack `fetch_max` theo `seq`; hart gọi **local flush + ack ngầm**, **không** self-target (D2-68); chờ `ack_mask == active_on`, drain mỗi bước, deadline `rdtime`; **một** shootdown tại một thời điểm (`IN_FLIGHT`) | `[TK]` | D2-65 Q5, D2-68, KT-51 §14.3 |
+
+| Object layer | Untyped boot = arena RAM **64 KiB** sau arena page table KT-46 (không section ELF) + cửa sổ PA `UNTYPED_PA_WINDOW = 1 GiB`; 2 Untyped (`U0` cửa sổ căn 2 MiB, `U1` cửa sổ căn 1 GiB cho Frame 1 GiB); object `Untyped`/`Frame`/`PageTable`/`VSpace`; `Retype` **nội bộ** (không ABI); cap/key tối thiểu trong `.bss` | `[TK]` | D2-66, KT-52 §15 |
+| Frame object | 4 KiB / 2 MiB / 1 GiB (`size_bits` 12/21/30 đọc từ `vifast-pte::FrameSize`); `pa = pa_base + offset` là **nhãn PA** trong cửa sổ, **0 byte arena**; `size_bits` khác ba giá trị ⇒ `InvalidArgument`; cấp **giảm dần** (không đệm căn lề ngầm); chồng PA toàn cục ⇒ `AlreadyMapped` | `[TK]` | D2-66, KT-52 §15.4 |
+| PageTable | 4 KiB = 512 PTE × 8 B trong arena Untyped, zeroed lúc Retype; hình 3 cấp + `walk_shape`/`PAGE_SIZE_BITS`/`PTE_LEVELS` từ `vifast-pte`; cờ PTE từ `vifast-plat-common::mmu` (không chép bit) | `[TK]` | KT-52 §15.5 |
+| VSpace | root PageTable 4 KiB (object nội bộ, không cap) + ASID nhãn 1..255; `map` tự cấp bảng trung gian từ Untyped của VSpace; `unmap`/`protect` đổi PTE rồi đẩy yêu cầu `sfence` cho arch chạy `sfence.vma` (KT-51); W^X **toàn cục** theo Frame (`maps/w/x`, D2-67) | `[TK]` | D2-67, KT-52 §15.5/§15.6 |
+| Bất biến object | `Σ byte object sống + Σ hole == watermark ≤ capacity` mỗi Untyped (mọi byte trong watermark là object hoặc hole — đệm căn lề cũng là hole, **không** có gap tự khai); `Σ cỡ Frame + Σ PA hole == pa_used`; không Frame mồ côi; walk PTE khớp mapping; W^X toàn cục — [`check_objmem`] tương đương `check_vm` K2, chạy `no_std` | `[TK]` | KT-52 §15.8 |
 
 Ghi chú kiểm chứng: `run.sh`/`ktest.sh` in `# qemu <version>` và `# opensbi <version>` **từ log
 boot thật**; QEMU dưới sàn **9.2** (so cả major.minor) ⇒ **FAIL**, không tự hạ (D2-72 Q2). OpenSBI banner
@@ -113,7 +120,7 @@ stack hart này đè guard hart khác).
 | Ảnh | Bin | Feature | TAP | Runner |
 |---|---|---|---|---|
 | **Sản phẩm** | `vifast-kbin-riscv64` | — (mặc định) | `ok 1 - k3 boot` + `# k3 halt`, kèm bằng chứng `# plic:`/`# uart irq:`/`# timer arm:`/`# timer:`/`# smp:` (PLIC + UART IRQ thật, timer 100 Hz + ≥1 tick, **SMP bring-up `N` hart**, đều **không icount**) | `v2/test/boot/run.sh` |
-| **Test chính** | `vifast-kbin-ktest` | `ktest` | **20** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** (harts alive, stack/guard per-hart, timer per-hart, PLIC ctx per-hart, barrier) + trap lồng fatal cuối | `v2/test/boot/ktest.sh` |
+| **Test chính** | `vifast-kbin-ktest` | `ktest` | **37** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** + **5 TAP IPI KT-50** + **5 TAP TLB/ASID KT-51** + **7 TAP object layer KT-52** (Retype VSpace, bất biến byte, Frame 3 cỡ, W^X 2 ca, map/unmap 4 KiB, 0 rò) + trap lồng fatal cuối (TAP 37) | `v2/test/boot/ktest.sh` |
 | **Test guard** | `vifast-kbin-ktest-guard` | `ktest` | **3** — guard image + load `scause=13` (resume probe) + store `scause=15` fatal | `v2/test/boot/ktest.sh` |
 
 - Cùng crate `v2/kernel/vifast-kbin-riscv64`, cùng `linker.ld`; các bin test khai
@@ -130,8 +137,8 @@ stack hart này đè guard hart khác).
   **luôn fatal** (`report_guard_fault` + halt).
 - `PanicHandler` + trait `Platform` + logic trap/MMU thuần nằm ở `vifast-plat-common` nên **các ảnh
   dùng chung một handler**, không chép đôi code.
-- KT-49/50/51: ảnh test chính **30 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24; KT-51 thêm 5 TAP
-  TLB/ASID 25..29, trap lồng dời sang 30) — `expected.txt`
+- KT-49/50/51/52: ảnh test chính **37 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24; KT-51 thêm 5
+  TAP TLB/ASID 25..29; KT-52 thêm 7 TAP object 30..36, trap lồng dời sang **37**) — `expected.txt`
   đọc kế hoạch/số `ok`; `ktest.sh` chạy
   **matrix `-smp 1|2|4`** (`bash ktest.sh 50 matrix`, log riêng từng N); harness TAP đầy đủ cho
   **toàn bộ** `.scn`/conformance vẫn là **KT-54/55**.
@@ -1116,3 +1123,216 @@ Object layer/Retype (KT-52), U-mode/3 syscall (KT-53), harness TAP đầy đủ 
 ảnh (KT-54), conformance 5 `.scn` (KT-55), `FaultKind`/W^X + `spec/abi.toml` (KT-56), soak 1.000 +
 K3-DOD (KT-57), port core `no_std` (K3b), pager/COW, hotplug/suspend, preemption/scheduler đa hart,
 nhiều VSpace thật, đo latency shootdown thật (không icount).
+
+
+## 15. Object layer `no_std` + Retype nội bộ (KT-52)
+
+### 15.1 Phạm vi: nội bộ, **không** ABI, **không** `spec/`
+
+- Code: [`vifast-plat-common::obj`](../kernel/vifast-plat-common/src/obj.rs) — toàn bộ ngữ nghĩa
+  object (Retype/Revoke/byte/PA/PTE/W^X/check), `#![no_std]`, **không `unsafe`**, chạy được trên
+  host (test `tests/obj.rs`); [`vifast-plat-riscv64::obj`](../kernel/vifast-plat-riscv64/src/obj.rs)
+  — `PhysMem` qua physmap + asm `satp`/`sfence`/`sstatus.SUM` (D2-17, `kernel/vifast-plat-*`).
+- **Không** mở `spec/`: `Retype`/`VSpace` ở đây là API **nội bộ kernel**, không phải
+  `Untyped.Retype` của ABI (`VSpace` vẫn `reserved`/`unsupported` trong `spec/abi.toml`). Task
+  KT-56 mới mở `spec/` **một lần** cho `FaultKind` (D2-72 Q1). `git diff spec/` của KT-52 **rỗng**.
+- **Không** CNode/MDB/TCB/IPC/scheduler (K3b KT-58..61), **không** U-mode (KT-53). Cap ở đây là
+  **handle + key tối thiểu**: bảng phẳng `[Cap; 160]` trong `.bss`, mỗi cap `{obj, kind, rights,
+  parent, id}`; `id` là key duy nhất tăng dần; quyền chỉ `R/W/X` và `Retype` cần `W`.
+- Object metadata (bảng `Object`/`Cap`/`Mapping`) nằm trong `.bss` có biên; **dữ liệu** object
+  (bảng PTE 4 KiB, PA nhãn của Frame) mới là thứ Untyped cấp. Nợ K3b: đưa header object vào
+  Untyped (KT-58).
+
+### 15.2 Hai Untyped boot + mô hình byte (D2-66)
+
+`obj::init` (gọi ở **cả** ảnh sản phẩm và ảnh test, sau `mmu::init`/`tlb::init`) lấy
+`mmu::arena_range()`, đặt arena object ở `align_up(arena_end, 4 KiB)`, dài **64 KiB** `[TK]` —
+vùng RAM **sau `__kernel_end`**, không phải section ELF nên **không** vào trần `.data+.bss`
+(D2-72 Q5). Sau đó dựng **2 Untyped**:
+
+| Untyped | Arena byte | Cửa sổ PA (`UNTYPED_PA_WINDOW` = 1 GiB, D2-66) | Dùng cho |
+|---|---|---|---|
+| `U0` | 64 KiB | `0x8200_0000` (32 MiB trong RAM, căn **2 MiB**) | PageTable/VSpace + Frame 4 KiB/2 MiB (PA thật) |
+| `U1` | 4 KiB | `0x8000_0000` (đáy RAM, căn **1 GiB**) | Frame 1 GiB (nhãn PA — xem §15.10) |
+
+Hai không gian **tách biệt** của một Untyped:
+
+1. **Arena byte** — `PageTable` tiêu **4096 B**, root của `VSpace` tiêu **4096 B**;
+   `VSpace` (metadata) và `Frame` tiêu **0 B**. Byte đệm căn lề được ghi thành **hole** (không
+   có bộ đếm "gap" tự khai) và hole do revoke để lại không đếm hai lần.
+2. **Cửa sổ PA** — `Frame` cấp `pa = pa_base + offset` theo watermark + free-list, **không** chồng
+   Frame sống khác (toàn cục, kể cả khác Untyped). Đây đúng D2-66: `pa` là **nhãn PA**, không tiêu
+   byte arena; nhờ vậy cỡ 1 GiB khả thi trên `-m 128M` (D2-72 Q2) — xem §15.10.
+
+Allocator là **bump + hole free-list** trong bảng tĩnh (`Hole[12]` mỗi không gian): cấp thử hole
+trước (first-fit có căn lề), hết mới bump; trả block thì chèn hole, gộp hole dính nhau và rewind
+watermark nếu hole cuối chạm watermark. Mọi lỗi (hết chỗ/căn lề/lỗi tham số/W^X) **atomic** —
+không đổi object/byte/cap/PTE nào.
+
+### 15.3 Retype/Revoke nội bộ + bất biến byte
+
+| Thao tác | `size_bits` | Tiêu | Trả |
+|---|---|---|---|
+| `retype(Untyped cap, PageTable)` | `0`/`12` | 4 KiB arena (zeroed) | cap con (`parent` = cap nguồn) |
+| `retype(Untyped cap, Frame)` | `12`/`21`/`30` (từ `vifast-pte::FrameSize`) | 0 byte arena; tiêu PA trong cửa sổ | cap con |
+| `retype(Untyped cap, VSpace)` | `0` | root PageTable 4 KiB (object **nội bộ**, không cap) | cap VSpace + ASID nhãn |
+| `retype(…, Untyped)` | — | — | `NotSupported` (K3b KT-58) |
+
+- `Revoke(Untyped)` finalise **mọi** object cấp từ nó (VSpace teardown trước, gỡ mapping; rồi trả
+  PageTable/Frame), reset watermark/hole/PA; cap nguồn **còn sống** và dùng lại được.
+- `Revoke(VSpace)` gỡ mapping (đếm Frame trả về), trả root + bảng trung gian, phát một
+  `sfence.vma (asid)`; **Frame không bị trả** (Frame có cap riêng, thuộc Untyped khác).
+- `Revoke(Frame)` khi còn mapping ⇒ `HasChildren`; `Revoke(PageTable)` khi còn gắn VSpace ⇒
+  `HasChildren`.
+- Bất biến byte mỗi Untyped (kiểm bởi `check_objmem` **và** TAP 31):
+  `Σ len object sống + Σ hole == watermark ≤ capacity` (phủ kín, không gap), và theo định nghĩa
+  `used = Σ len object sống`, `free = capacity − used`; Retype chuyển `free → used`, Revoke trả
+  ngược lại **đúng** mốc (TAP 31 in `used0/after_retype/after_revoke/free0/free1`).
+- Với Frame: `Σ cỡ Frame sống + Σ PA hole == pa_used ≤ 1 GiB` (cửa sổ), `pa` căn đúng cỡ.
+
+### 15.4 Frame 4 KiB / 2 MiB / 1 GiB
+
+- Cỡ đọc từ `vifast_pte::FrameSize::from_size_bits` (12/21/30); giá trị khác ⇒ `InvalidArgument`,
+  **atomic** (TAP 32 dùng `13`).
+- Cấp **giảm dần** trong một cửa sổ (K2 KT-36): watermark phải **đã** căn đúng cỡ, kernel **không**
+  tự đệm căn lề ngầm — lệch ⇒ `Alignment`; muốn trộn 4 KiB/2 MiB thì cấp 2 MiB **trước**.
+- Chồng PA với **bất kỳ** Frame sống nào ⇒ `AlreadyMapped` (atomic, trả PA vừa cấp).
+- **4 KiB/2 MiB là RAM thật**: TAP 32 ghi/đọc 8 B ngay tại `pa` qua physmap (`PhysMem`), rồi map
+  Frame 4 KiB vào VSpace thật ở TAP 35 và đọc/ghi qua VA user — chứng minh cả `pa` lẫn PTE trỏ
+  đúng nơi.
+- **1 GiB** trên `-m 128M` chỉ kiểm **nhãn**: `pa` căn 1 GiB, `pa + 1 GiB`, nằm trong cửa sổ
+  căn 1 GiB của `U1`; **không** đọc/ghi — và `map` Frame 1 GiB bị từ chối `NotSupported` cho tới
+  K4/K5 vì cửa sổ `0x8000_0000` trùm RAM thật (xem §15.10 L7).
+
+### 15.5 PageTable 3 cấp Sv39 + VSpace map/unmap/protect
+
+- `PageTable` = đúng 4096 B (512 PTE × 8 B) trong arena Untyped; hình 3 cấp, chỉ số 9/9/9/12 lấy
+  từ `vifast_pte::{walk_shape, PAGE_SIZE_BITS, PTE_LEVELS}` — **không** chép tay hằng số hình.
+- `map(vspace, va, frame, flags)`:
+  1. kiểm cap/loại, `va` canonical (`VA_BITS=39`), căn đúng cỡ Frame (`va % cỡ == 0`), cờ hợp lệ
+     (`W ⇒ R`), VA/Vùng chưa map, **W^X** (dưới);
+  2. đếm bảng trung gian còn thiếu **trước** mọi thay đổi, cấp slot object/mapping/flush;
+  3. cấp block 4 KiB từ Untyped của VSpace, zero, nối PTE bảng từ gốc xuống, ghi leaf;
+  4. commit mapping + đếm `maps/w/x` của Frame + đẩy yêu cầu `sfence.vma (asid, va)`.
+  Lỗi giữa chừng ⇒ rollback PTE đã nối + block + object slot (không để bảng mồ côi).
+- `unmap(vspace, va)` yêu cầu mapping tồn tại (`NotMapped` nếu không), xoá PTE, trả đếm Frame, đẩy
+  `sfence` trang. `protect(vspace, va, flags)` đổi cờ leaf, kiểm W^X **trên phần còn lại** của
+  Frame (trừ mapping đang sửa), đẩy `sfence` trang.
+- **`sfence.vma` do arch chạy**: object layer chỉ **đẩy yêu cầu** (`FlushRequest::{Page, Asid,
+  All}`); `vifast_plat_riscv64::obj::run_flush` gọi đúng ba dạng của KT-51 §14.2. TAP 35 drain
+  hàng đợi sau mỗi thao tác và đếm `flush` (≥ 3 yêu cầu trang).
+- **Chứng minh mapping thật trên phần cứng (TAP 35):** VSpace root mới được **chép 512 entry root
+  kernel** vào (giữ kernel identity/nửa cao/physmap/UART/PLIC sống khi đổi `satp`), `csrw satp`
+  với ASID nhãn + `sfence.vma`; leaf tại `0x4000_0000` map 4 KiB `U|R|W` (A|D đặt sẵn); S-mode
+  đọc/ghi **qua VA user** với `sstatus.SUM=1` (đúng privileged spec) ⇒ dữ liệu đúng; `protect`
+  sang `R|NX` ⇒ PTE **mất W** (walk khớp cờ); `unmap` + `sfence` ⇒ walk invalid; khôi phục `satp`
+  kernel + `sfence` ⇒ máy còn sống (`# map: … kernel=1`).
+
+### 15.6 W^X toàn cục (D2-67) — hai ca TAP
+
+- Mỗi Frame đếm `maps`/`mapped_w`/`mapped_x` **toàn cục** trên mọi VSpace. **Map/protect W** khi
+  `mapped_x > 0`, hoặc **map/protect X** khi `mapped_w > 0` ⇒ `WxViolation`, **atomic** (không PTE,
+  không đếm mới). Không miễn trừ PageTable thuần.
+- **`Device + EXEC`** ⇒ `WxViolation` từ lúc kiểm cờ: Sv39 **không có bit Device**, nên `device` là
+  **cờ chính sách** của mapping (cấm `X`, thường cũng cấm `W+X`); TAP 34 chứng minh ca này.
+- TAP 33 (ca `X` rồi `W`) in `# wx: x_then_w=WxViolation … maps/w/x`; TAP 34 (ca `Device+EXEC`) in
+  cùng dòng; `check_objmem` **recount** toàn bộ `mapped_w/mapped_x` từ mapping sống và từ chối
+  `w>0 ∧ x>0` (không tin bộ đếm).
+
+### 15.7 TAP 30..36 + bằng chứng
+
+| TAP | Tên | Bằng chứng (log, `ktest.sh` grep) |
+|---|---|---|
+| 30 | `retype vspace` | `# retype: vspace=1 root=0x… asid=… pt=3 frame=1 cap_ok=1 walk_empty=1` |
+| 31 | `untyped byte invariant` | `# untyped bytes: cap=… used0=… after_retype=… after_revoke=… free0=… free1=… invariant=1 atomic=1` |
+| 32 | `frame 3 sizes` | `# frame: s12=1 s21=1 s30=1 pa4=… pa2=… pa1g=… aligned=1 real4=1 real2=1 window=1 bad13=InvalidArgument atomic=1` |
+| 33 | `wx violation x-then-w` | chung dòng `# wx:` (TAP 34) + `maps=1 w=0 x=1` |
+| 34 | `wx violation device+exec` | `# wx: x_then_w=WxViolation device_exec=WxViolation atomic=1 …` |
+| 35 | `map/unmap 4 KiB` | `# map: va=0x40000000 level=0 pa=0x… satp=1 asid=… sum=1 write=1 read=1 protect=1 unmapped=1 flush=… walk_after=0 kernel=1` |
+| 36 | `0 ro` | `# leak: cap=… used=0 free=… holes=0 frames=0 pts=0 vspaces=0 maps=0 orphans=0 check=1` (`check=1` chỉ khi `check_objmem` trả `Ok` — không cờ tự khai) |
+
+Trap lồng fatal dời sang **TAP 37**; ảnh guard vẫn 3 TAP. Log đỏ trước, log TAP xanh, log 50
+boot × `smp 1/2/4`, log gate và log budget nằm ở `v2/agent/JOURNAL/kt52-*.log`.
+
+### 15.8 `check_objmem` — tương đương `check_vm` của K2, chạy `no_std`
+
+[`Machine::check_objmem`](../kernel/vifast-plat-common/src/obj.rs) kiểm **mọi** bất biến và trả
+`ObjStats` (counts/bytes/walked/orphans + `bytes_ok/wx_ok/walk_ok`):
+
+1. **Byte + arena** mỗi Untyped: hole sắp thứ tự/trong `[0, watermark)`/không chồng; block sống
+   căn lề, trong watermark, không chồng hole/block khác; `Σ live + Σ hole == watermark
+   ≤ capacity` (byte đệm căn lề là hole).
+2. **PA/Frame**: `pa` căn đúng cỡ, trong cửa sổ 1 GiB; **không** chồng Frame sống khác;
+   `Σ cỡ Frame + Σ PA hole == pa_used`; mọi Frame sống **có cap sống** (không frame mồ côi).
+3. **Bảng trang/VSpace**: VSpace sống có root PageTable sống, `owner` đúng; PageTable nội bộ có
+   chủ VSpace sống; object sống khác phải reachable từ cap (hoặc root nội bộ) — `orphans == 0`.
+4. **Mapping/Walk**: mỗi mapping đi lại bằng PTE thật qua `PhysMem`: valid/leaf, `level` khớp cỡ
+   Frame, `phys == pa + (va & (size−1))`, cờ `R|W|X|U` khớp `MapFlags`; cấp lá lấy từ
+   `PAGE_SIZE_BITS` (hình `walk_shape`).
+5. **W^X**: recount `mapped_w/mapped_x` từ mapping sống, so với bộ đếm Frame; từ chối
+   `w>0 ∧ x>0`; từ chối mapping `device ∧ exec`.
+6. **Cap**: mọi cap sống trỏ object sống đúng `kind`/`id`; parent (nếu có) còn sống.
+
+Checker chạy sau **mỗi** pha TAP quan trọng (Retype, byte invariant, W^X, map/unmap, sau revoke)
+và trong `init` của **cả hai** ảnh; sai ⇒ TAP đỏ/`PANIC`, không giả xanh.
+
+### 15.9 Ngân sách
+
+Object layer thêm bảng tĩnh `MACHINE` (`Machine<PhysmapMem>`) vào `.data/.bss` — **không** cấp
+phát động, **không** đụng trần 262.144 B; arena object/PA là RAM **ngoài** section ELF nên **không**
+tính vào budget (giống arena page table KT-46). `budget.sh` in số `data+bss` thật của cả ba ảnh
+trong log `kt52-budget*.log`; **không** chép số đo vào tài liệu (QD §9 Q12).
+
+### 15.10 Giới hạn phép đo (không giấu)
+
+1. **Frame 1 GiB là nhãn** trên `-m 128M`: 128 MiB RAM không thể backing 1 GiB. TAP chỉ kiểm
+   `size_bits/căn 1 GiB/cửa sổ`; 4 KiB/2 MiB được ghi/đọc thật. Đây đúng D2-66 (`Frame.pa` là nhãn
+   PA) — nếu K4/K5 mở nhiều RAM hơn thì cùng mã kiểm được backing thật.
+2. **Metadata object trong `.bss`**, không nằm trong Untyped (nợ K3b KT-58); Untyped hiện chỉ cấp
+   **dữ liệu** object (bảng PTE) và PA nhãn Frame.
+3. **Chưa có child Untyped** (`Retype(Untyped)` ⇒ `NotSupported`) và chưa có CNode/MDB/IPC — K3b.
+4. **Single-hart object op** ở KT-52 (BSP); chưa có khoá/MCS cho object layer — K3b.
+5. **Không thu hồi bảng trung gian rỗng** sau `unmap` (không cần cho KT-52; walker vẫn đúng).
+6. **`Device` không có bit PTE** (Sv39 không định nghĩa) — là cờ chính sách ở mapping.
+7. **Không đo pager/COW/shared read-only** — chưa thuộc K3 (D2-71/D2-72 Q13).
+8. **Root VSpace chép root kernel là đường test-only** (`#[cfg(feature = "ktest")]`):
+   `copy_kernel_root` cho phép đổi `satp` sang root VSpace để TAP 35 chứng minh chuyển dịch phần
+   cứng; TAP **chỉ** map ở nhánh root `0x4000_0000` (root index 1 — kernel không dùng), nên
+   **không** sửa bảng cấp dưới dùng chung với kernel. VSpace user thật (KT-53) dựng root riêng và
+   object layer chưa quản entry kernel chia sẻ; nếu map vào vùng kernel đã có leaf thì
+   `missing_tables`/`walk` từ chối `AlreadyMapped` (TAP không làm vậy).
+9. **Hai cửa sổ PA của `U0`/`U1` có thể chồng nhau** (đều là **nhãn** 1 GiB): ràng buộc không
+   chồng chỉ áp cho **Frame sống** (kiểm toàn cục trong `check_objmem`/`retype_frame`), đúng
+   D2-66; TAP 32 revoke Frame `U0` trước khi cấp Frame 1 GiB từ `U1`.
+10. **Bảng hole tĩnh `MAX_HOLES = 12`** (mỗi không gian): workload KT-52 (≤ 16 PageTable, cấp/revoke
+    LIFO) chưa chạm biên; nếu một lần tách hole cần thêm hole vượt biên, `alloc` trả `None`/lần
+    revoke trả `Corrupt` — **fail-closed** (không lần nào lọt qua với byte sai vì `check_objmem`
+    kiểm phủ kín watermark); K3b thay bằng free-list động.
+11. **L3 — `Device+EXEC` chưa có bộ đếm `mapped_device`** theo Frame (D2-67 "toàn cục"): hiện chặn
+    theo **cờ của một mapping**; nếu cần bất biến toàn cục "không Frame nào Device lẫn EXEC" thì
+    KT-56 làm rõ D2 + thêm đếm (cùng W^X fault).
+12. **L4 — hai nguồn ASID**: VSpace của object layer mang ASID **nhãn** nội bộ (1..255), còn
+    `tlb::AsidAllocator` (KT-51) cấp lease cho kernel VSpace — hai bộ đếm chưa hợp nhất; KT-53/K3b
+    hợp nhất (lease thật cho mỗi VSpace).
+13. **L5 — panic không khôi phục `satp`**: nếu panic xảy ra **trong** cửa sổ TAP 35 (đã đổi
+    `satp`), handler chạy với root VSpace đã chép đủ mapping kernel (in/halt được) nhưng **không**
+    khôi phục root kernel — chấp nhận vì panic = fatal halt, không resume; không dùng object op
+    sau panic.
+14. **L6 — `copy_kernel_root` (test-only) chép 512 PTE không tracked** và `map` không giới hạn
+    dải VA user: map vào VA đã có **leaf** kernel ⇒ `AlreadyMapped`; map vào **bảng** kernel dùng
+    chung có thể ghi PTE của kernel. KT-52 chỉ map nhánh root index 1 (`0x4000_0000`); K3b phải
+    theo dõi entry kernel chia sẻ hoặc dựng root riêng hoàn toàn.
+15. **L7 — Frame 1 GiB chưa map được**: `map` từ chối `NotSupported` (cửa sổ PA `0x8000_0000` là
+    **nhãn** trùm RAM thật trên `-m 128M`); chỉ kiểm nhãn/căn/cửa sổ ở TAP 32. Mở ở K4/K5 khi có
+    backing thật (nhiều RAM hơn) hoặc khi có vùng PA riêng ngoài RAM.
+16. **L8 — TAP 32 dùng hằng số arch `OBJ_PA_BASE_U1`** (không hardcode trong test) để kiểm đáy cửa
+    sổ; không còn phép "kiểm tràn" vô nghĩa.
+17. **L9 — nhánh "đệm căn lề thành hole" chưa có test riêng**: mọi cấp phát KT-52 đều 4 KiB/4 KiB
+    nên nhánh đó **chưa xảy ra**; giữ cho K3b khi có object cỡ nhỏ hơn/lệch căn (test sẽ thêm cùng
+    lúc).
+
+### 15.11 Không thuộc KT-52
+
+CNode/TCB/IPC/scheduler (K3b KT-58..61), U-mode + 3 syscall (KT-53), harness TAP đầy đủ + `expected.txt`
+cho mọi ảnh (KT-54), conformance 5 `.scn` (KT-55), `FaultKind`/W^X **fault** + `spec/abi.toml`
+(KT-56), soak 1.000 + K3-DOD (KT-57), pager/COW, nhiều VSpace thật cho user, migration/hotplug.

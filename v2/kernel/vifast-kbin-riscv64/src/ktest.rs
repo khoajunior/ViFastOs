@@ -3,8 +3,8 @@
 //! **không** nằm trong ảnh sản phẩm.
 //!
 //! KT-49 mở rộng ảnh này lên **20 TAP**; KT-50 thêm **5 TAP IPI** (20..24); KT-51 thêm **5 TAP
-//! TLB/ASID/shootdown** (25..29) và dời trap lồng sang **30** — tổng **30 TAP** (ảnh guard vẫn 3
-//! TAP):
+//! TLB/ASID/shootdown** (25..29); KT-52 thêm **7 TAP object layer** (30..36) và dời trap lồng
+//! sang **37** — tổng **37 TAP** (ảnh guard vẫn 3 TAP):
 //!
 //! 1. `ok 1 - ktest image` — marker tách ảnh của KT-44.
 //! 2. `ok 2 - trap breakpoint` — **trap phần cứng thật** (`ebreak` → `scause=3`, resume đúng
@@ -50,7 +50,16 @@
 //! 27. `ok 27 - hart ngoai active_on` — hart gọi/online **ngoài** `active_on` không bị chờ.
 //! 28. `ok 28 - rollover flush` — cạn 256 ASID ⇒ `generation+1` + một flush toàn bộ.
 //! 29. `ok 29 - timeout khong treo` — hart offline trong `active_on` ⇒ `Timeout`, máy vẫn dùng được.
-//! 30. `ok 30 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//! 30. `ok 30 - retype vspace` — **KT-52**: Retype nội bộ `VSpace` (root PageTable + ASID nhãn
+//!    + cap/key), 3 `PageTable`, 1 `Frame`; walk rỗng + `check_objmem`.
+//! 31. `ok 31 - untyped byte invariant` — byte Untyped bảo toàn qua Retype/Revoke, lỗi atomic.
+//! 32. `ok 32 - frame 3 sizes` — Frame 4 KiB/2 MiB/1 GiB; 4 KiB/2 MiB ghi/đọc thật tại `pa`.
+//! 33. `ok 33 - wx violation x-then-w` — W^X ca 1: `X` rồi `W` ⇒ `WxViolation` atomic.
+//! 34. `ok 34 - wx violation device+exec` — W^X ca 2: `Device+EXEC` ⇒ `WxViolation`.
+//! 35. `ok 35 - map/unmap 4 KiB` — VSpace thật: `satp` + `sfence.vma`, map 4 KiB `U|R|W`,
+//!    ghi/đọc qua VA user (SUM), protect R|NX, unmap, khôi phục `satp` kernel.
+//! 36. `ok 36 - 0 ro` — 0 rò byte/object/mapping sau revoke; `check_objmem` ĐẠT.
+//! 37. `ok 37 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -59,6 +68,7 @@
 #![no_main]
 
 mod ktest_ipi;
+mod ktest_obj;
 mod ktest_smp;
 mod ktest_tlb;
 
@@ -115,7 +125,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..30\n");
+    PLATFORM.put_str("TAP version 13\n1..37\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -884,6 +894,8 @@ pub extern "C" fn rust_main() -> ! {
     fails += ktest_ipi::ipi_phase();
     // -------------------------------------------------- 25..29) ASID/sfence/shootdown (KT-51)
     fails += ktest_tlb::tlb_phase();
+    // ---------------------------------------- 30..36) object layer nội bộ (KT-52)
+    fails += ktest_obj::obj_phase();
 
     {
         let mut w = PlatformWriter(&PLATFORM);
@@ -902,10 +914,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 30) trap LỒNG (fatal, có chủ đích)
-    // In `ok 30` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 37) trap LỒNG (fatal, có chủ đích)
+    // In `ok 37` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 30 - trap nested panic\n");
+    PLATFORM.put_str("ok 37 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
