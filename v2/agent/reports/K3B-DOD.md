@@ -237,8 +237,9 @@ hoàn thành.
 
 ### 12.1 Hash
 
-- Commit `[KT-61]` + `[KT-61b]`: hash ghi ở `STATE.md` và bảng lịch sử sau khi commit (tệp này
-  không chứa hash trước khi commit).
+- Commit **`[KT-61]` = `1e2455c8`** (kernel + harness + docs + log, 45 tệp, `v2/**`), rồi
+  **`[KT-61b]`** = `v2/agent/{JOURNAL/kt61-nhat-ky.md,STATE.md}` (hash b không nhúng được vào chính
+  nó; ghi ở bảng lịch sử `STATE.md`). Push `origin main` sau khi xanh.
 - Ảnh product **đã rebuild sau soak** (thay đổi chỉ là doc/comment/`#[allow]` ⇒ `BUILD_ID` `.text`
   vẫn `34dc594e0f651ed3`; sha toàn ảnh **đã soak** `c7cc50b1…` ở `kt61-soak.log:1017`, sha bản
   rebuild cuối `fb68981d8c2f2bdf03338ae3bd4ddf5265dc9c147faeec2b9d61ec1d18487ff5`). Vì vậy mọi neo
