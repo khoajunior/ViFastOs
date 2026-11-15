@@ -4,9 +4,10 @@
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng. Mỗi boot chỉ
 # kết thúc được một lần bằng PANIC có chủ đích ⇒ **ba** ảnh test:
-#   - `ktest`       : 37 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
+#   - `ktest`       : 38 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
 #                     + KT-47 (timer SBI) + KT-49 (SMP 15..19) + KT-50 (IPI 20..24) + KT-51 (TLB/ASID
-#                     25..29) + KT-52 (object layer 30..36) + trap lồng fatal (37).
+#                     25..29) + KT-52 (object layer 30..36) + KT-55 (conformance 5 `.scn` 37:
+#                     `# trace:` chuẩn hoá) + trap lồng fatal (38).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
 #   - `ktest-user`  : 5 TAP — U-mode: nạp `init` ELF (parse + map W^X), `sret`, 3 syscall (DebugPutStr
@@ -22,7 +23,9 @@
 #   4. **đúng 1 dòng `PANIC`, đúng mẫu cho phép của ảnh** (ảnh chính: trap lồng; guard: guard page
 #      fault; user: u-mode fault) — PANIC khác mẫu hoặc PANIC thứ hai ⇒ đỏ;
 #   5. mỗi TAP N có **đúng một** dòng `ok N - <tên>` khớp tên trong manifest của runner;
-#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **51** mục, guard **5**, user **13**);
+#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **65** mục, guard **5**, user **13**);
+#   8. **KT-55**: mỗi ca conformance in `# conf: scn=N name=… steps=K` và đúng **K** dòng
+#      `# trace: N …` đúng định dạng; ca 24 (2 hart) in `skipped=smp1` trên `-smp 1`;
 #   7. `Platform HART Count` của OpenSBI khớp `-smp` (số hart là **máy ảo** nói, không chỉ kernel tự khai).
 #
 # D2-72 Q2/Q4/Q5/Q10: `-machine virt,aia=none,aclint=on -cpu rv64 -m 128M -smp N`, matrix **1/2/4**
@@ -173,6 +176,13 @@ check_manifests() {
     return 0
 }
 
+# D2-80: BUILD_ID ảnh = FNV-1a 64 trên section `.text` (cùng hàm băm với kernel).
+image_build() {
+    local img="$1" out=""
+    out="$(python3.12 "$V2_ROOT/test/conformance/image_digest.py" "$img" 2>/dev/null)" || return 1
+    printf '%s' "${out%% *}"
+}
+
 now_s() { date +%s; }
 
 # --------------------------------------------------- manifest TAP (tên từng TAP)
@@ -220,6 +230,7 @@ wx violation x-then-w
 wx violation device+exec
 map/unmap 4 KiB
 0 ro
+__CONF37__
 trap nested panic
 EOF
 }
@@ -242,6 +253,11 @@ u-mode kernel read fault
 EOF
 }
 
+# Tên TAP 37 của KT-55 phụ thuộc smp: `-smp 1` không chạy ca 24 (cần 2 hart thật).
+conf37_name() {
+    if [ "${1:-1}" -ge 2 ]; then printf 'conformance 5/5'; else printf 'conformance 4/5 + 1 skipped'; fi
+}
+
 # `manifest_for <ảnh> <smp>`: danh sách tên TAP theo thứ tự 1..N (đã thay phần phụ thuộc cấu hình).
 manifest_for() {
     case "$1" in
@@ -249,7 +265,8 @@ manifest_for() {
         ktest-guard) manifest_guard ;;
         ktest-user) manifest_user ;;
         *) return 1 ;;
-    esac | sed -e "s|__SMP__|$2|g" -e "s|__IPI20__|$(ipi_name "$2")|g"
+    esac | sed -e "s|__SMP__|$2|g" -e "s|__IPI20__|$(ipi_name "$2")|g" \
+        -e "s|__CONF37__|$(conf37_name "$2")|g"
 }
 
 # ------------------------------------------------------ bằng chứng `# …` bắt buộc
@@ -258,6 +275,11 @@ manifest_for() {
 evidence_for() {
     local label="$1" smp="$2" hart="${3:-}" mask tlb_removed tlb_sent ipi_del ipi_drain ipi_coal tlb_mode tlb_peer
     mask="$(printf '%x' $(((1 << smp) - 1)))"
+    if [ "$smp" -ge 2 ]; then
+        evid24='^# trace: 24 [0-9]+ shootdown va=0x[0-9a-f]+ targets=0x[0-9a-f]+ acked=0x[0-9a-f]+ completed=1 => ok$'
+    else
+        evid24='^# conf: scn=24 name=vm-tlb steps=0 skipped=smp1$'
+    fi
     if [ "$smp" -ge 2 ]; then
         ipi_mode=cross
         ipi_del="sent=100 delivered=100 traps=100 coalesced=0 spurious=0 kinds=34/33/33 timeout=0"
@@ -329,6 +351,20 @@ evidence_for() {
 ^# rollover: generation=1 exhaustions=1 rollover=1 flush=Ok asid=0 satp_asid=0 stale_seen=1 fresh_ok=1 free=255 issued=1 asid_ok=0x__MASK__ online=0x__MASK__ primed=0x4b51c000000000c2 wrong=0$
 ^# timeout: outcome=Timeout narrowed=0x[0-9a-f]+ targets=0x[0-9a-f]+ acked=0x[0-9a-f]+ missing=0x[0-9a-f]+ waited=[0-9]+ probe=1000000 timeouts=[1-9][0-9]* mailbox_empty=1 recovered=1 wrong=0$
 ^# tlb asid: ok=0x__MASK__ online=0x__MASK__ phase=0x[0-9a-f]+ arrived=0x__MASK__ timeout=0 satp_asid_boot=0 lease_asid=0 generation=1$
+^# conf image: build=[0-9a-f]{16} text=[0-9]+$
+^# conf: scn=22 name=vm-map steps=[0-9]+ ok=1$
+^# conf: scn=23 name=vm-wx steps=[0-9]+ ok=1$
+^# conf: scn=24 name=vm-tlb .*$
+^# conf: scn=25 name=vm-fault steps=[0-9]+ ok=1$
+^# conf: scn=26 name=vm-shared steps=[0-9]+ ok=1$
+^# trace: 22 1 map va=0x[0-9a-f]+ frame=f4 rights=READ\|WRITE attrs=WB => ok$
+^# trace: 22 [0-9]+ walk va=0x[0-9a-f]+ => NotMapped$
+^# trace: 23 [0-9]+ map .* => WxViolation$
+^# trace: 23 [0-9]+ check => ok$
+__EVID24__
+^# trace: 25 [0-9]+ fault va=0x[0-9a-f]+ access=Write reason=NotMapped => ok$
+^# trace: 26 [0-9]+ fault va=0x[0-9a-f]+ access=Write reason=Permission => ok$
+^# trace: 26 [0-9]+ check => ok$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -370,7 +406,8 @@ EOF
             -e "s|__TLB_SENT__|$tlb_sent|g" \
             -e "s|__TLB_PEER__|$tlb_peer|g" \
             -e "s|__TLB_REMOVED__|$tlb_removed|g" \
-            -e "s|__BOOT_HART__|$hart|g"
+            -e "s|__BOOT_HART__|$hart|g" \
+            -e "s|__EVID24__|$evid24|g"
 }
 
 # Mẫu PANIC **duy nhất** được phép của từng ảnh (đúng 1 dòng, không hơn).
@@ -446,6 +483,62 @@ check_hart_lines() {
     [ "$got_ids" = "$want_ids" ] || MISSING="$MISSING plic-hart-lines"
 }
 
+# KT-55: `# conf:` tự khai số bước trace của từng ca ⇒ số dòng `# trace: <scn> ` phải **bằng**
+# đúng số đó (bắt mất/đội dòng mà không cần hardcode số ở runner), và mọi dòng phải đúng định dạng
+# `# trace: <scn> <step> <op> [k=v …] => <kết quả>`.
+check_trace() {
+    local log="$1" smp="$2" scn="" steps="" n="" bad="" conf_count="" got="" want="" dup=""
+    # Đúng 5 dòng `# conf:` của 5 ca (không thừa/thiếu/trùng).
+    conf_count="$(grep -Ec '^# conf: scn=(22|23|24|25|26) name=' "$log" || true)"
+    [ "${conf_count:-0}" -eq 5 ] || MISSING="$MISSING conf-count=${conf_count:-0}/5"
+    for scn in 22 23 24 25 26; do
+        steps="$(sed -n "s/^# conf: scn=$scn name=[^ ]* steps=\([0-9]*\) .*/\1/p" "$log" | head -1)"
+        if [ -z "$steps" ]; then
+            MISSING="$MISSING conf$scn"
+            continue
+        fi
+        n="$(grep -c -E "^# trace: $scn " "$log" || true)"
+        [ "${n:-0}" -eq "$steps" ] || MISSING="$MISSING trace$scn=${n:-0}/$steps"
+        # Ca 24 được phép 0 bước **chỉ** khi smp=1 và conf ghi `skipped=smp1`; còn lại `steps>0`.
+        if [ "$steps" -eq 0 ]; then
+            if [ "$scn" = 24 ] && [ "$smp" -lt 2 ] &&
+                grep -Eq '^# conf: scn=24 name=vm-tlb steps=0 skipped=smp1$' "$log"; then
+                continue
+            fi
+            MISSING="$MISSING trace$scn-empty"
+            continue
+        fi
+        # Tập `step` phải đúng **tập bước conformance** của tệp `.scn` (nguồn độc lập:
+        # `check_scn.py --steps <scn>`), không trùng, không thiếu — không chỉ đếm dòng.
+        got="$(sed -n "s/^# trace: $scn \([0-9][0-9]*\) .*/\1/p" "$log" | sort -n | tr '\n' ' ')"
+        want="$(cd "$V2_ROOT/.." && python3.12 v2/test/scn/check_scn.py --steps "$scn" 2>/dev/null |
+            tr ' ' '\n' | sed '/^$/d' | sort -n | tr '\n' ' ')"
+        if [ -z "$want" ]; then
+            MISSING="$MISSING trace$scn-steps-tool"
+        else
+            [ "$got" = "$want" ] || MISSING="$MISSING trace$scn-steps"
+            [ "$(printf '%s' "$got" | wc -w | tr -d ' ')" -eq "$steps" ] ||
+                MISSING="$MISSING trace$scn-count"
+        fi
+        dup="$(sed -n "s/^# trace: $scn \([0-9][0-9]*\).*/\1/p" "$log" | sort -n | uniq -d | tr '\n' ' ')"
+        [ -z "$dup" ] || MISSING="$MISSING trace$scn-dup=$dup"
+        bad="$(grep -E "^# trace: $scn " "$log" |
+            grep -Evc '^# trace: [0-9]+ [0-9]+ [a-z_]+( [a-z_]+=[^ ]+)* => [^ ]+$' || true)"
+        [ "${bad:-0}" -eq 0 ] || MISSING="$MISSING tracefmt$scn=$bad"
+    done
+    # D2-80: đúng 1 dòng `# conf image:` và BUILD_ID phải khớp ảnh **đang chạy** (tính lại từ ELF).
+    local want_build="" got_build="" img=""
+    img="$(image_path ktest)"
+    want_build="$(image_build "$img")" || want_build=""
+    got_build="$(sed -n 's/^# conf image: build=\([0-9a-f][0-9a-f]*\) text=[0-9][0-9]*$/\1/p' "$log" | head -1)"
+    [ -n "$want_build" ] || MISSING="$MISSING image-build-tool"
+    [ -n "$got_build" ] || MISSING="$MISSING image-build-missing"
+    if [ -n "$want_build" ] && [ -n "$got_build" ] && [ "$got_build" != "${want_build#build=}" ]; then
+        MISSING="$MISSING image-build-mismatch"
+    fi
+    [ "$(grep -c '^# conf image: ' "$log" || true)" -eq 1 ] || MISSING="$MISSING image-line-count"
+}
+
 # Mọi dòng `# evidence` bắt buộc của ảnh. In chẩn đoán ra stderr khi thiếu (để sửa nhanh).
 check_evidence() {
     local log="$1" label="$2" smp="$3" hart="${4:-}" n=0 re=""
@@ -504,6 +597,7 @@ validate_norm() {
     case "$label" in
         ktest)
             check_hart_lines "$log" "$smp"
+            check_trace "$log" "$smp"
             check_evidence "$log" "$label" "$smp"
             ;;
         ktest-guard)

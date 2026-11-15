@@ -126,7 +126,7 @@ stack hart này đè guard hart khác).
 | Ảnh | Bin | Feature | TAP | Runner |
 |---|---|---|---|---|
 | **Sản phẩm** | `vifast-kbin-riscv64` | — (mặc định) | `ok 1 - k3 boot` + `# k3 halt`, kèm bằng chứng `# plic:`/`# uart irq:`/`# timer arm:`/`# timer:`/`# smp:` (PLIC + UART IRQ thật, timer 100 Hz + ≥1 tick, **SMP bring-up `N` hart**, đều **không icount**) | `v2/test/boot/run.sh` |
-| **Test chính** | `vifast-kbin-ktest` | `ktest` | **37** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** + **5 TAP IPI KT-50** + **5 TAP TLB/ASID KT-51** + **7 TAP object layer KT-52** (Retype VSpace, bất biến byte, Frame 3 cỡ, W^X 2 ca, map/unmap 4 KiB, 0 rò) + trap lồng fatal cuối (TAP 37) | `v2/test/boot/ktest.sh` |
+| **Test chính** | `vifast-kbin-ktest` | `ktest` | **38** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** + **5 TAP IPI KT-50** + **5 TAP TLB/ASID KT-51** + **7 TAP object layer KT-52** (Retype VSpace, bất biến byte, Frame 3 cỡ, W^X 2 ca, map/unmap 4 KiB, 0 rò) + **1 TAP conformance KT-55 (37, 5 `.scn` × sim/QEMU)** + trap lồng fatal cuối (TAP 38) | `v2/test/boot/ktest.sh` |
 | **Test guard** | `vifast-kbin-ktest-guard` | `ktest` | **3** — guard image + load `scause=13` (resume probe) + store `scause=15` fatal | `v2/test/boot/ktest.sh` |
 | **Test user** | `vifast-kbin-ktest-user` | `ktest,user` | **5** — **KT-53**: nạp `init` ELF W^X + U-mode (`sret`) + `DebugPutStr` (12) + `Exit` (42) + syscall lạ (mã 5) + U-mode đọc địa chỉ kernel ⇒ `scause=13` + `PANIC: u-mode fault` (boot kết thúc có chủ đích) | `v2/test/boot/ktest.sh` |
 
@@ -140,7 +140,7 @@ stack hart này đè guard hart khác).
 - **Vì sao ảnh user riêng (KT-53):** fault U-mode là **fatal** (log + halt), nên test cách ly (TAP 5)
   phải là lần kết thúc boot — cùng lý do guard; 4 TAP U-mode còn lại chạy trọn trong cùng boot
   trước đó. Module U-mode (`vifast-plat-riscv64::user`) nằm sau **feature `user`** (kéo `ktest`), nên
-  ảnh sản phẩm + ảnh test chính/guard **không** link nó; 37+3 TAP cũ và budget của chúng giữ nguyên.
+  ảnh sản phẩm + ảnh test chính/guard **không** link nó; TAP cũ và budget của chúng giữ nguyên.
   `ktest.sh` build ảnh chính/guard với `--features ktest`, ảnh user với `--features ktest,user`.
 - `run.sh` **fail** nếu ảnh sản phẩm còn **một** chuỗi `ktest`; `ktest.sh` **fail** nếu ảnh test
   **không** có chuỗi đó ⇒ chứng minh tách ảnh thật, không chỉ đổi tên.
@@ -153,7 +153,8 @@ stack hart này đè guard hart khác).
 - KT-53: ảnh test **user** thêm **5 TAP** (`expected.txt`: `ktest-user 5 5`), boot kết thúc bằng
   `PANIC: u-mode fault scause=0xd stval=0x80200000 …`; runner chỉ chấp nhận đúng dòng PANIC này.
 - KT-49/50/51/52: ảnh test chính **37 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24; KT-51 thêm 5
-  TAP TLB/ASID 25..29; KT-52 thêm 7 TAP object 30..36, trap lồng dời sang **37**) — `expected.txt`
+  TAP TLB/ASID 25..29; KT-52 thêm 7 TAP object 30..36, trap lồng dời sang **37**); **KT-55** thêm
+  TAP conformance **37** (5 `.scn` × sim/QEMU) ⇒ trap lồng dời sang **38** (**38 TAP**) — `expected.txt`
   đọc kế hoạch/số `ok`; `ktest.sh` chạy
   **matrix `-smp 1|2|4`** (`bash ktest.sh 50 matrix`, log riêng từng N); harness TAP đầy đủ cho
   **toàn bộ** `.scn`/conformance vẫn là **KT-54/55**.
@@ -173,7 +174,7 @@ stack hart này đè guard hart khác).
 ```bash
 bash v2/test/boot/run.sh 1        # ảnh sản phẩm, 1 boot, 1 hart (D2-72 Q2, KHÔNG icount)
 bash v2/test/boot/run.sh 50       # 50 boot 0 lỗi (DoD KT-46/47)
-bash v2/test/boot/ktest.sh 1 1    # 3 ảnh test: 37 TAP chính + 3 TAP guard + 5 TAP user (`-icount shift=6`)
+bash v2/test/boot/ktest.sh 1 1    # 3 ảnh test: 38 TAP chính + 3 TAP guard + 5 TAP user (`-icount shift=6`)
 bash v2/test/boot/ktest.sh 1 matrix  # matrix smp 1/2/4 (KT-49), log riêng từng (ảnh, N, boot)
 bash v2/test/boot/ktest.sh 50 matrix # 50 boot **mỗi** N (DoD KT-49); KT-54: 450 boot
 bash v2/test/boot/ktest.sh --check-log ktest /tmp/k3-ktest/ktest-smp2-1.log 2  # kiểm 1 log, không boot
@@ -1277,7 +1278,7 @@ không đổi object/byte/cap/PTE nào.
 | 35 | `map/unmap 4 KiB` | `# map: va=0x40000000 level=0 pa=0x… satp=1 asid=… sum=1 write=1 read=1 protect=1 unmapped=1 flush=… walk_after=0 kernel=1` |
 | 36 | `0 ro` | `# leak: cap=… used=0 free=… holes=0 frames=0 pts=0 vspaces=0 maps=0 orphans=0 check=1` (`check=1` chỉ khi `check_objmem` trả `Ok` — không cờ tự khai) |
 
-Trap lồng fatal dời sang **TAP 37**; ảnh guard vẫn 3 TAP. Log đỏ trước, log TAP xanh, log 50
+Trap lồng fatal dời sang **TAP 38** (KT-55 thêm TAP conformance 37); ảnh guard vẫn 3 TAP. Log đỏ trước, log TAP xanh, log 50
 boot × `smp 1/2/4`, log gate và log budget nằm ở `v2/agent/JOURNAL/kt52-*.log`.
 
 ### 15.8 `check_objmem` — tương đương `check_vm` của K2, chạy `no_std`
@@ -1376,7 +1377,7 @@ cho mọi ảnh (KT-54), conformance 5 `.scn` (KT-55), `FaultKind`/W^X **fault**
 - **Ảnh riêng** `vifast-kbin-ktest-user`: fault U-mode là **fatal** (log + halt) nên TAP cách ly
   phải kết thúc boot; ảnh chính đã dùng lần kết thúc đó cho trap lồng, ảnh guard cho store fault.
   Bốn TAP U-mode còn lại chạy trước đó trong cùng boot. Vì feature `user` **không** bật ở ảnh sản
-  phẩm/ảnh chính/ảnh guard, ba ảnh đó **không** link module U-mode — 37+3 TAP và budget của chúng
+  phẩm/ảnh chính/ảnh guard, ba ảnh đó **không** link module U-mode — TAP và budget của chúng
   giữ nguyên.
 - **Không** CNode/TCB/IPC/scheduler (K3b KT-58..61), **không** procsrv/shell/`wait`/`kill` (K3.5),
   **không** `.scn` (KT-55), **không** `FaultKind` đầy đủ / `spec/abi.toml` (KT-56). Trạng thái
@@ -1507,7 +1508,7 @@ error (0 = OK), `a1` = value.
   -icount shift=6`, đòi `Platform HART Count` của OpenSBI khớp N, TAP 100 %, **chỉ** dòng PANIC
   `u-mode fault` được phép. Mỗi vòng `NBOOT` boot **3 ảnh test** × matrix `1/2/4`; summary
   `N_BOOT*3`.
-- Ảnh chính vẫn **37 TAP**, ảnh guard **3 TAP** — không đổi số/không renumber (feature `user` chỉ
+- Ảnh chính giữ **TAP 1..36** (KT-55 sau này thêm TAP 37 ⇒ 38), ảnh guard **3 TAP** — không đổi số/không renumber (feature `user` chỉ
   bật ở ảnh user).
 
 ### 16.7 Ngân sách và tệp
@@ -1630,7 +1631,7 @@ bash v2/test/boot/ktest.sh --help
 
 ```
 # Cú pháp: <nhãn> <kế hoạch TAP> <số dòng `ok` kỳ vọng>
-ktest 37 37
+ktest 38 38
 ktest-guard 3 3
 ktest-user 5 5
 ```
@@ -1639,11 +1640,11 @@ Runner **đọc số từ tệp** (`expected_field`), không hardcode. Luật ki
 
 1. mỗi dòng không phải chú thích phải **đúng 3 trường**; trường 2/3 là số nguyên `>= 1`;
 2. **kế hoạch = số dòng `ok`** (runner không có khái niệm "TAP đỏ được phép" — `not ok` là FAIL);
-3. **không nhãn lặp**, **không nhãn lạ** (một dòng `ktes 37 37` do gõ nhầm phải đỏ, không bị bỏ qua);
+3. **không nhãn lặp**, **không nhãn lạ** (một dòng `ktes 38 38` do gõ nhầm phải đỏ, không bị bỏ qua);
 4. **đủ** ba nhãn mà runner biết (`ktest ktest-guard ktest-user`) — thiếu một ảnh ⇒ đỏ;
 5. **kế hoạch khớp số TAP runner biết tên**: runner có manifest tên cho từng TAP (`manifest_for`);
    lệch ⇒ đỏ `expected.txt: ảnh [x] kế hoạch A nhưng runner kiểm B TAP`. Nhờ vậy **không thể**
-   nâng `37 → 38` chỉ ở tệp (hoặc chỉ ở kernel) mà vẫn xanh: phải sửa cả hai cùng lúc.
+   nâng `N → N+1` chỉ ở tệp (hoặc chỉ ở kernel) mà vẫn xanh: phải sửa cả hai cùng lúc.
 
 Thêm/bớt một TAP ⇒ sửa **ba** chỗ trong cùng commit: (a) in `ok N` trong kernel, (b) manifest tên
 trong `ktest.sh`, (c) dòng số trong `expected.txt`. Bước (a)+(b)+(c) lệch nhau đều là **đỏ** — đó
@@ -1658,7 +1659,7 @@ là mục đích, không phải phiền hà.
 | 3 | Không `not ok` | bất kỳ dòng `not ok` nào ⇒ đỏ | `not-ok=K` |
 | 4 | PANIC | **đúng 1** dòng `PANIC`, và dòng đó phải khớp **mẫu cho phép của ảnh**, **neo cả đầu và cuối dòng** (ảnh chính: trap lồng nguyên văn; guard: `guard page fault scause=0xf stval=… sepc=… sstatus=…`; user: `u-mode fault scause=0xd stval=0x80200000 … from_u=1`). PANIC lạ, PANIC đúng mẫu nhưng **thêm đuôi**, **hoặc** PANIC thứ hai ⇒ đỏ; dòng `PANIC` **thụt đầu dòng** vẫn bị đếm (fail-closed) | `panic-khac=K`, `panic-tong=K/1` |
 | 5 | Tên từng TAP | với `N = 1..kế hoạch`: **đúng một** dòng `ok N - <tên>` khớp manifest ⇒ bắt trùng số, thiếu số, sai tên, đảo tên | `tapN` |
-| 6 | Evidence | mọi dòng `# …` bắt buộc của ảnh phải khớp **nguyên dòng** (`grep -E`, mẫu neo `^…$`): ảnh chính **51** mục, guard **5**, user **13**, kèm `OpenSBI vX.Y.Z` + `Platform HART Count : N` = số hart thật của **máy ảo** | `evK` (+ mẫu in ra stderr) |
+| 6 | Evidence | mọi dòng `# …` bắt buộc của ảnh phải khớp **nguyên dòng** (`grep -E`, mẫu neo `^…$`): ảnh chính **65** mục, guard **5**, user **13**, kèm `OpenSBI vX.Y.Z` + `Platform HART Count : N` = số hart thật của **máy ảo** | `evK` (+ mẫu in ra stderr) |
 | 7 | Hart theo cấu hình | ảnh chính: mỗi hart `0..N-1` có `# hart h alive … tp=h` và `# stack hart=h … owner=h … frame_trap=1 rw_nx=1 guard_none=1`; **tập** hart trong các dòng `# timer hart=`/`# plic hart=` (có `ok=1`) phải đúng `0..N-1`, mỗi hart **đúng một** dòng — không chỉ đếm dòng; guard: hart boot (đọc từ `# guard image: hart=`) nằm trong dải hart của máy và fault/load/store đúng hart đó | `hartN-alive`, `hartN-stack`, `timer-hart-lines`, `plic-hart-lines`, `guard-hart-out-of-range` |
 
 Ngoài ra runner kiểm **môi trường** (QEMU `>= 9.2` D2-72 Q2, OpenSBI có thật, ảnh đúng budget
@@ -1667,7 +1668,7 @@ Ngoài ra runner kiểm **môi trường** (QEMU `>= 9.2` D2-72 Q2, OpenSBI có 
 ### 17.4 Cách đọc kết quả
 
 - Mỗi boot in **một** dòng TAP của runner:
-  `ok - ktest smp=2 boot 7 (37 TAP, 11s) log /tmp/k3-ktest/ktest-smp2-7.log` hoặc
+  `ok - ktest smp=2 boot 7 (38 TAP, 11s) log /tmp/k3-ktest/ktest-smp2-7.log` hoặc
   `not ok - ktest smp=2 boot 7: thiếu tap12 ev7, log …` (danh sách token như bảng §17.3; mẫu
   evidence/TAP hỏng được in chi tiết ra **stderr** với tiền tố `#   `).
 - **Bảng tổng kết** in cuối (`image × smp × boot`): cột `TAP` = số dòng `ok` thực / kế hoạch trong
@@ -1687,12 +1688,12 @@ Ngoài ra runner kiểm **môi trường** (QEMU `>= 9.2` D2-72 Q2, OpenSBI có 
 Mỗi dòng `#` là **số đo do chính boot in ra** (QD §9 Q12: tài liệu không chép tay số đo); runner
 chỉ đòi **sự có mặt + hình dạng**, còn giá trị do kernel tính. Nhóm theo ảnh:
 
-**Ảnh chính `ktest` (37 TAP)**
+**Ảnh chính `ktest` (38 TAP)**
 
 | Dòng evidence (mẫu) | Nghĩa | TAP |
 |---|---|---|
 | `# ktest image: …` / `# ktest: …` | định danh ảnh test + địa chỉ nạp, `TAP version` của harness trong ảnh | 1 |
-| `# breakpoint: …`, `# ecall sbi: …`, `# nested trap: …` | trap `ebreak` thật (`scause=3`) resume đúng `sepc`; `ecall-S` đi SBI (D2-73: không delegate) và resume; trap lồng fatal có chủ đích | 2,3,4 / 37 |
+| `# breakpoint: …`, `# ecall sbi: …`, `# nested trap: …` | trap `ebreak` thật (`scause=3`) resume đúng `sepc`; `ecall-S` đi SBI (D2-73: không delegate) và resume; trap lồng fatal có chủ đích | 2,3,4 / 38 |
 | `# mmu: satp=… mode=8 …`, `# mmu map: … guard_none=1`, `# mmu on: … readback=… alias=1 …` | `satp` Sv39 đã bật, root/arena trong RAM, alias nửa cao, UART/kernel_low/kernel_high cùng nhìn thấy | 5 |
 | `# mmu layout: … none_low=1 none_high=1 none_physmap=1 …`, `… physmap_2m_nx=1 … all_harts=1` | guard page **NONE** ở cả ba bảng (không cửa sau), physmap 2 MiB NX, PLIC/UART map thiết bị, layout phủ **mọi** hart | 6 |
 | `# walk khop: pre=post=1 software=8/8 …` | walk phần cứng khớp walk phần mềm 8/8 mức | 7 |
@@ -1725,7 +1726,10 @@ chỉ đòi **sự có mặt + hình dạng**, còn giá trị do kernel tính. 
 | `# wx: x_then_w=WxViolation device_exec=WxViolation atomic=1 maps=1 w=0 x=1` | W^X chặn **hai chiều** (X→W, device+X) ở PTE/object layer, không map rác | 33,34 |
 | `# map: va=… level=0 pa=… satp=1 asid=… sum=1 write=1 read=1 protect=1 unmapped=1 flush=… walk_after=0 kernel=1` | map/unmap 4 KiB **phần cứng** (đọc/ghi/protect được, sau unmap walk trắng), kernel map được | 35 |
 | `# leak: cap=… used=0 free=… holes=0 frames=0 pts=0 vspaces=0 maps=0 orphans=0 check=1` | **0 rò** object sau toàn bộ pha | 36 |
-| `PANIC: nested trap (KT-45: trap trong handler = fatal, khong resume)` | trap lồng fatal **có chủ đích** — boot kết thúc sạch (đúng 1 PANIC) | 37 |
+| `# conf image: build=<16 hex> text=<len>` | **D2-80** — BUILD_ID (FNV-1a 64) của `.text` **đã nạp**; runner băm lại từ ELF và từ chối log lệch/không có | 37 |
+| `# conf: scn=22 name=vm-map steps=16 ok=1` … `scn=26 name=vm-shared …` | mỗi ca conformance khai **số bước trace** và `ok=1`; `scn=24` là `steps=0 skipped=smp1` trên `-smp 1` | 37 |
+| `# trace: <scn> <step> <op> k=v… => kết quả` | dòng trace **chuẩn hoá** từng bước (chỉ trường quan sát: `va/frame/rights/attrs/size/maps/w/x/n/reason/targets/acked/completed`); sim in **cùng** định dạng | 37 |
+| `PANIC: nested trap (KT-45: trap trong handler = fatal, khong resume)` | trap lồng fatal **có chủ đích** — boot kết thúc sạch (đúng 1 PANIC) | 38 |
 | `OpenSBI v…`, `Platform HART Count : N` | bằng chứng **ngoài kernel**: firmware thật + số hart thật của máy ảo = `-smp N` | tất cả |
 
 **Ảnh guard `ktest-guard` (3 TAP)**
@@ -1763,18 +1767,18 @@ thật sự áp dụng** (nếu không, `die` ngay — test không được "xan
 | Ca | Mutation (harness, **không** phải kernel) | Token lý do phải có | Bắt được gì |
 |---|---|---|---|
 | 1 | log thật (không sửa) | — (**xanh**) | không báo động giả |
-| 2 | `expected.txt` thật: `ktest 37 37 → 36 36` | `kế hoạch 36 nhưng runner kiểm 37 TAP` | nguồn sự thật: bớt 1 TAP là đỏ |
+| 2 | `expected.txt` thật: `ktest 38 38 → 37 37` | `kế hoạch 37 nhưng runner kiểm 38 TAP` | nguồn sự thật: bớt 1 TAP là đỏ |
 | 3 | `expected.txt` (bản sao): xoá dòng `ktest-user 5 5` | `thiếu dòng cho ảnh [ktest-user]` | thiếu hẳn một ảnh |
 | 4 | log: dòng `ok` đầu → `not ok` | `not-ok=1` | có `not ok` là FAIL |
 | 5 | log: xoá 1 dòng `ok` | `tap-day-1..` | dãy `ok` không liên tục |
-| 6 | log: nhân đôi 1 dòng `ok` | `ok-count=38/` | trùng số TAP |
+| 6 | log: nhân đôi 1 dòng `ok` | `ok-count=39/` | trùng số TAP |
 | 7 | log: xoá evidence `# obj init:` | `ev1` | thiếu dòng bằng chứng |
-| 8 | log: xoá dòng kế hoạch `1..N` | `plan-1..37=0` | thiếu dòng kế hoạch |
+| 8 | log: xoá dòng kế hoạch `1..N` | `plan-1..38=0` | thiếu dòng kế hoạch |
 | 9 | log: thêm PANIC thứ hai (đúng mẫu) | `panic-tong=2/1` | "đúng **1** PANIC" |
 | 10 | log: PANIC đúng mẫu **thêm đuôi lạ** | `panic-khac=1` | mẫu PANIC neo **cả dòng** |
 | 11 | log: PANIC **lạ** thay PANIC có chủ đích | `panic-khac=1` | PANIC ngoài danh sách |
 | 12 | **0 boot**: `ktest.sh 1 " "` | `SMP_LIST rỗng` (`die`) | không "0/0 boot sạch + PASS" |
-| 13 | log: `Platform HART Count 2 → 12` | `ev51` (ordinal tra bằng `--print-evidence`) | mẫu hart count neo cả dòng |
+| 13 | log: `Platform HART Count 2 → 12` | `ev65` (ordinal tra bằng `--print-evidence`) | mẫu hart count neo cả dòng |
 | 14 | log: `# mmu on: …` **thêm đuôi lạ** | `ev9` (ordinal tra bằng `--print-evidence`) | mẫu evidence neo cả dòng |
 | 15 | log: lặp `# timer hart=0` thay hart 1 | `timer-hart-lines` | kiểm **tập hart**, không chỉ đếm dòng |
 | 16 | log: lặp `# hart 0 alive` thay hart 1 | `hart1-alive` | dòng per-hart phải đúng hart |
@@ -1794,7 +1798,7 @@ thật sự áp dụng** (nếu không, `die` ngay — test không được "xan
    do TAP đánh giá.
 3. **Timeout 20 s** là 200 lát `0,1 s` đếm bằng vòng poll (không phải đồng hồ tuyệt đối) ⇒ cắt thực
    tế ≈ 20 s + overhead poll. Boot `smp=4` của ảnh chính là ca **sát trần nhất** (thời gian wall mỗi
-   boot do runner in trong dòng `ok - … (37 TAP, Ns)`, đọc ở log của từng lần chạy — không chép số
+   boot do runner in trong dòng `ok - … (38 TAP, Ns)`, đọc ở log của từng lần chạy — không chép số
    vào tài liệu); D2-72 Q10 giữ 20 s — **không nới**, máy quá tải ⇒ `TIMEOUT` là tín hiệu, không
    phải bỏ qua.
 4. Runner chạy **tuần tự một QEMU** tại một thời điểm (soak 3 luồng là KT-57) ⇒ `ktest.sh 50 matrix`
@@ -1828,3 +1832,185 @@ thật sự áp dụng** (nếu không, `die` ngay — test không được "xan
 Soak `1.000 boot × 3 luồng` + perf + K3-DOD (KT-57), conformance 5 `.scn` × sim/QEMU (KT-55),
 `FaultKind` + W^X **fault** + `spec/abi.toml` (KT-56), TAP kernel mới (mọi task kernel sau), runner
 ảnh **sản phẩm** `run.sh` (D2-72 Q2, không icount), `.scn`/sim, CNode/TCB/IPC (K3b).
+
+## 18. Conformance 5 `.scn` × sim/QEMU + chuẩn hoá trace (KT-55)
+
+### 18.1 Phạm vi — 5 ca nền tảng, hai đích
+
+K3 không có ABI đầy đủ (Q13) nên conformance **không** so ngữ nghĩa IPC/TCB; nó so **cùng một
+chương trình bước** chạy trên **hai backend**:
+
+| Đích | Runner | Trạng thái đo |
+|---|---|---|
+| **sim (host)** | `v2/sim/vifast-sim/tests/kt42_scn.rs` — chạy **mọi** bước của 5 tệp trên mô hình K2 (KT-42, 0 lệch), in `# trace:` cho tập con conformance | mô hình Frame/VSpace/TLB/fault của K2 |
+| **QEMU (kernel)** | `v2/kernel/vifast-kbin-riscv64/src/ktest_conf.rs` (ảnh `vifast-kbin-ktest`, TAP 37) | **PTE Sv39 thật** trong arena boot + shootdown **thật** qua IPI khi `-smp ≥ 2` |
+
+5 ca đúng D2-69: `22` `vm-map` (map/unmap/walk), `23` `vm-wx` (W^X + bộ đếm), `24` `vm-tlb`
+(shootdown 2 hart), `25` `vm-fault` (fault `NotMapped`), `26` `vm-shared` (frame chia sẻ read-only).
+Nguồn bước là **chính** 5 tệp `v2/test/scn/22..26-*.scn` — kernel nhúng bằng `include_str!`, sim đọc
+đĩa; **không** sửa tệp nào của K2.
+
+### 18.2 IR rút gọn + tập bước conformance
+
+Crate `v2/lib/vifast-scenario` (`no_std`, không cấp phát) đọc chuỗi bước `op k=v … => kết quả` của
+tệp rồi **chiếu** sang tập bước mà **cả hai** backend quan sát được. Hai bên gọi **cùng** hàm chiếu
+(`project`) nên danh sách bước không thể lệch; máy kiểm Python (`check_scn.py --trace`) đọc lại
+`.scn` **độc lập** và đỏ nếu lệch.
+
+Luật loại bước (mỗi luật có lý do đo được):
+
+| Loại | Bước bị loại | Lý do |
+|---|---|---|
+| Frame 1 GiB | mọi bước có `frame=f1` hoặc `va=0x80000000` | KT-52 L7 / D2-66: 1 GiB **chưa cho map** (`NotSupported`); cỡ Frame 1 GiB vẫn được TAP 32 chứng minh |
+| mô hình TLB per-hart | `vm_tlb_fill`, `vm_tlb_expect`, `vm_expect_pending`, `vm_expect_shootdown` | là mô hình của K2; TLB **thật** (stale→fresh, 3 dạng `sfence.vma`, 2 hart) đã có TAP 25..29 (KT-51) |
+| TCB/procsrv | `vm_dispatch`, `vm_expect_state`, `vm_procsrv_recv`, `vm_procsrv_resume` | K3 chưa có TCB/procsrv — Q13 (mở ở K3.5/KT-58) |
+
+Bước `vm_shootdown_begin` không in dòng riêng: mô hình sim chỉ quan sát được trạng thái **cuối**, còn
+kernel chỉ có shootdown **blocking** ⇒ dòng `shootdown` phát tại bước `vm_shootdown_wait`, mang `va`
+lấy từ `begin` (do hàm chiếu gắn vào). Tương tự, bước **`vm_touch` không được phủ** (nó chỉ đặt TCB
+vào `BlockedOnSend`); dòng `fault` phát tại bước **`vm_expect_fault`** và mang `reason` quan sát được —
+nên đừng đọc bảng này như "đã phủ `vm_touch`".
+
+### 18.3 Định dạng dòng `# trace:` (chuẩn hoá, dùng chung)
+
+`vifast_traceformat::TraceLine<N>` (no_std, `[u8; N]`, không cấp phát) in:
+
+```text
+# trace: <scn> <step> <op> <k=v>… => <kết quả>
+```
+
+- `<scn>`: 22..26; `<step>`: số thứ tự bước **trong tệp** (1-based, tính cả bước bị loại ⇒ hai log neo
+  đúng dòng tệp); `<op>`: `map|unmap|protect|walk|expect_map|counters|frames|check|activate|shootdown|fault`.
+- `<kết quả>`: `ok` hoặc tên mã lỗi của bước (`WxViolation`, `NotMapped`, `Permission`, …).
+- Trường của từng op (đúng tập này, không thừa):
+
+| op | trường | nguồn giá trị |
+|---|---|---|
+| `map` | `va`, `frame`, `rights`, `attrs` | `va` hex; còn lại chuỗi của tệp |
+| `unmap` | `va` | hex |
+| `protect` | `va`, `rights`, `attrs` | như `map` |
+| `walk` | `va` | hex; kết quả `ok`/`NotMapped` |
+| `expect_map` | `va`, `frame`, `size` | `size` **quan sát** từ cấp leaf (12/21) |
+| `counters` | `frame`, `maps`, `w`, `x` | **quan sát** từ Frame |
+| `frames` | `n` | **quan sát** số Frame sống |
+| `check` | — | `check_objmem` (kernel) / `check_vm` (sim) |
+| `activate` | `vs` | — |
+| `shootdown` | `va`, `targets`, `acked`, `completed` | **quan sát** từ `TlbShootdownInfo` (targets = mask `active_on`) |
+| `fault` | `va`, `access`, `reason` | `reason` **quan sát** (`NotMapped`/`Permission`) |
+
+**Không** in: PA tuyệt đối, thời gian/tick, hart. `v2/test/conformance/trace_compare.py` còn bỏ các
+trường volatile (`hart, harts, pa, phys, addr, t_ns, ticks, wait_ticks, rounds, seq, asid, messages`)
+trước khi so — nên đổi địa chỉ PA/tick/hart không làm đỏ, đổi `size`/`maps`/`w`/`x`/`present`/`reason`/
+`targets`/`acked`/`completed` **thì đỏ**.
+
+### 18.4 Kernel đo gì (TAP 37, ảnh `vifast-kbin-ktest`)
+
+- Rig **mỗi ca một lần** (như sim): `aobj::init()` rồi Retype 2 `VSpace` + 3 `Frame` (2 MiB, 4 KiB,
+  4 KiB). Frame 1 GiB bị loại khỏi tập bước nên **không** dựng (cửa sổ PA 1 GiB của u1 chồng u0 khi
+  cùng sống ⇒ `AlreadyMapped`); cỡ 1 GiB vẫn do KT-52 TAP 32 chứng minh. Thứ tự cấp **2 MiB trước
+  4 KiB** vì `pa_alloc` căn theo watermark (hành vi KT-52, không đổi).
+- `map/unmap/protect` gọi thẳng object layer; mọi `sfence.vma` do object layer sinh được **thi hành
+  thật** qua `aobj::run_flush` (KT-51).
+- `expect_map` so `size_bits` từ **cấp leaf thật** + `phys` = PA của Frame; `counters` đọc
+  `frame_counts`; `frames` đọc `cnts().frames`; `check` gọi `check_objmem` (cùng bất biến D2-67).
+- `fault`: **phân loại từ PTE thật** — `valid=0` ⇒ `NotMapped`; lá hợp lệ thiếu bit quyền theo
+  `access` ⇒ `Permission`. Đây **không** phải `FaultKind` ABI (KT-56) và **không** phải trap thật
+  (trap page-fault thật của KT-46/KT-53 vẫn là bằng chứng riêng); nó kiểm **quyền mà kernel đã ghi
+  vào PTE** khớp kỳ vọng của `.scn`.
+- `shootdown` (chỉ `-smp ≥ 2`): đặt `active_on` thật = `{0,1}` bằng API test-only của KT-51 (D2-78),
+  gọi `tlb::shootdown(Page{va})`, đọc `last_shootdown()` ⇒ `targets/acked/completed` thật; sau đó
+  **khôi phục** `active_on`. `-smp 1` in `# conf: scn=24 name=vm-tlb steps=0 skipped=smp1` (không giả
+  lập 2 hart); log `-smp 2` là nguồn so trace.
+- **D2-80 (định danh ảnh):** đầu pha in `# conf image: build=<16 hex> text=<len>` — FNV-1a 64 trên
+  **vùng `.text` đã nạp** của chính ảnh (`__text_start`/`__text_end` trong `linker.ld`).
+  `v2/test/conformance/image_digest.py` băm **cùng section** của tệp ELF; `ktest.sh` và
+  `trace_compare.py --image` **bắt buộc** log khai đúng BUILD_ID khớp ảnh, từ chối log không có/lệch
+  (chống ghép dòng trace từ nguồn khác vào log QEMU).
+- TAP 37: `-smp ≥ 2` in `ok 37 - conformance 5/5`; `-smp 1` in
+  `ok 37 - conformance 4/5 + 1 skipped` (ca 24 cần 2 hart thật) — nhãn TAP trong manifest phụ thuộc
+  `smp` (`conf37_name`), **không** claim 5/5 khi một ca vắng. Trap lồng fatal dời sang **38** (số TAP
+  1..36 của KT-45..52 **không đổi**). `expected.txt` + manifest + `# conf:` đổi trong cùng commit.
+
+### 18.5 Sim đo gì
+
+Runner KT-42 (`kt42_scn.rs`) vẫn chạy **mọi** bước của 5 tệp trên mô hình K2 và vẫn panic nếu lệch
+kỳ vọng; KT-55 chỉ **thêm** đường xuất trace: mỗi ca dựng `Rig::new` riêng, các nhánh `vm_map/
+vm_unmap/vm_protect/vm_walk/vm_expect_*` in trường **quan sát** sau khi assert. Lệnh lấy trace:
+
+```bash
+cargo test -p vifast-sim --test kt42_scn -- --nocapture --test-threads=1
+```
+
+`--test-threads=1` là **bắt buộc** để các dòng của 5 ca không xen nhau (mỗi test là một luồng).
+
+### 18.6 Cách chạy + đỏ trước
+
+```bash
+bash v2/test/conformance/run.sh --sim-only          # chỉ sim + check_scn --trace
+bash v2/test/conformance/run.sh --compare --smp 2   # sim ↔ log QEMU có sẵn
+bash v2/test/conformance/run.sh --boot --smp 2      # sim + ktest.sh matrix + so
+```
+
+- `trace_compare.py --sim … --qemu … --image <ktest>`: so **từng dòng, từng thứ tự**, bỏ trường
+  volatile; lệch số dòng, lệch trường, lệch kết quả, thiếu ca ⇒ exit 1 kèm dòng sim/qemu cạnh nhau.
+  `--image` là **bắt buộc** (D2-80): script băm `.text` của ảnh và đỏ nếu log QEMU không khai/lệch
+  `# conf image: build=…` — nên chép 61 dòng trace của sim vào một log QEMU không đúng ảnh **không**
+  qua được; log tái lập phải ghi rõ là "tái lập".
+- `check_scn.py --trace <sim>`: kiểm **chiều sim** — định dạng, tập bước chiếu độc lập từ `.scn`, giá
+  trị quan sát khớp kỳ vọng, `# conf: steps=N` khớp số dòng.
+- **Đỏ trước (D2-05):** trước khi có `# trace:` trong kernel, cùng tệp sim (đã 56 dòng) so với log QEMU
+  cũ ⇒ `not ok - trace rỗng: sim=56 dòng, qemu=0 dòng` (log `JOURNAL/kt55-red-diff.log`). Sau khi
+  kernel in trace: `ok - trace-compare: 61/61 dòng khớp, 5/5 ca`.
+- Ngưỡng: **0** khác biệt ngoài trường cho phép. Không có "gần đúng"; ca nào lệch thì log chỉ ra
+  dòng sim ↔ qemu và bước tệp tương ứng.
+
+### 18.7 Lỗi platform do conformance phát hiện (không nới ngưỡng)
+
+Ca `vm-wx` lộ **lỗi thật** của object layer K3: `Machine::map`/`protect` cho phép **một** mapping
+`W|X` cùng lúc. Hệ quả: `mapped_w` và `mapped_x` cùng tăng trên một Frame — chính object layer tạo ra
+trạng thái mà `check_objmem` (bất biến W^X toàn cục, D2-67) coi là sai; K2 từ chối `WxViolation`.
+Sửa: từ chối `flags.write && flags.exec` **trước** mọi thay đổi (atomic) trong `map` và `protect`;
+test host `wx_ca_3_cung_map_w_x_bi_tu_choi_atomic` **đỏ trước** rồi xanh. Đây là **sửa cho khớp bất
+biến đã có**, không phải nới ngưỡng và không đổi `spec/`.
+
+### 18.8 Ngân sách + bằng chứng
+
+- Ngân sách `.data + .bss ≤ 262.144` B giữ nguyên; số đo từng ảnh do `ktest.sh` in
+  (`# image=… data+bss=… budget=262144`). Bảng mới (`SCNS`) nằm trong `.rodata` (không tính ngân sách
+  `.data/.bss`); `TraceLine` 192 B đặt trên stack từng ca.
+- Bằng chứng bắt buộc mới trong `ktest.sh` (**65** mục ảnh chính): `# conf image: build=… text=…`,
+  5 dòng `# conf: scn=… name=… steps=… ok=…`, các dòng
+  `# trace:` đại diện (`map`, `WxViolation`, `NotMapped`, `Permission`, `check`), và — với `-smp ≥ 2` —
+  dòng `shootdown`; `-smp 1` đòi `skipped=smp1`. Hàm `check_trace` đòi **số dòng trace của ca =
+  `steps` ca tự khai** và mọi dòng đúng định dạng.
+- Log: `JOURNAL/kt55-red-diff.log` (đỏ trước — **log tái lập**, ghi rõ trong tệp),
+  `kt55-sim-trace.log`, `kt55-qemu-trace.log`, `kt55-trace-compare.log` (xanh, có `build=…`),
+  `kt55-ktest-matrix.log`, `kt55-gate.log`, `kt55-budget.log`, `kt55-selftest.log`,
+  `kt55-host-wx.log`, `kt55-notes.md`.
+
+### 18.9 Giới hạn phép đo (không giấu)
+
+1. `fault` của kernel là **phân loại từ PTE**, không phải trap thật; trap page-fault thật (`scause`
+   12/13/15 + resume) là bằng chứng của KT-46 (guard) và KT-53 (U-mode), không lặp ở đây. Vì vậy ca
+   25/26 chứng minh **quyền được ghi vào PTE khớp kỳ vọng**, không chứng minh đường trap.
+2. Ca 24 chỉ chạy `-smp ≥ 2`; `-smp 1` in `skipped` và **không** được so trace (script so dùng log
+   `-smp 2/4`). Số `targets`/`acked` là mask hart thật của kernel; sim mô hình 2 hart nên khớp trên
+   `-smp 2`; trên `-smp 4` kernel vẫn ép `active_on = {0,1}` (đúng kịch bản) và khôi phục sau ca.
+3. Tập bước bị loại (18.2) là **có chủ đích**: Frame 1 GiB (KT-52 L7), TLB per-hart model (TLB thật
+   ở KT-51), TCB/procsrv (Q13). Conformance không thay thế các TAP đó — nó so **phần chung**.
+4. Kernel **không** đọc `.scn` lúc chạy: tệp nhúng bằng `include_str!` ⇒ sửa `.scn` phải build lại
+   (đúng ý: nguồn sự thật là tệp trong repo, không phải ảnh cũ).
+5. Trace so **văn bản** đã chuẩn hoá, không so thời gian/PA/hart. Một lỗi chỉ ảnh hưởng PA tuyệt đối
+   (ví dụ chọn PA khác) **không** bị bắt; lỗi ảnh hưởng quyền/cỡ mapping/bộ đếm/fault **bị bắt**.
+6. Sim chạy `--test-threads=1`: chạy song song sẽ xen dòng giữa các ca (không phải lỗi dữ liệu, chỉ
+   là thứ tự in) — runner giữ 1 luồng.
+7. BUILD_ID (D2-80) là FNV-1a 64 — **fingerprint**, không phải MAC: người có cả log thật lẫn ảnh vẫn
+   có thể chép dòng `# conf image:` thật + các dòng trace giống hệt (vì sim và kernel **phải** giống
+   nhau). Nó chặn đường "ghép trace sim vào log không đúng ảnh/không có hash", không chống kẻ có đủ
+   hai nguồn; lớp chặn thứ hai vẫn là TAP/evidence của chính boot và `check_scn --trace` độc lập.
+
+### 18.10 Không thuộc KT-55
+
+`FaultKind` thật + `scause`→`FaultKind` + W^X **fault** + `spec/abi.toml` (KT-56); soak 1.000 boot +
+perf + K3-DOD (KT-57); port core/TCB/IPC/procsrv (K3.5/`KT-58`) — mở khoá các bước `vm_dispatch/
+vm_expect_state/vm_procsrv_*` cho conformance sau này; `.scn` mới (K2 đã đóng 26 tệp / 16 nhóm).

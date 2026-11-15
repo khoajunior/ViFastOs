@@ -7,7 +7,7 @@
 #   • 1 ca XANH (log thật qua, không báo động giả);
 #   • 15 ca ĐỎ — mỗi ca phá **đúng một** bất biến, và phải đỏ **kèm đúng token lý do** (không chấp
 #     nhận "exit ≠ 0 vô tội vạ"):
-#       (a) `expected.txt`: bớt 1 TAP (37→36) / mất dòng ảnh `ktest-user`;
+#       (a) `expected.txt`: bớt 1 TAP (N→N-1, N đọc từ tệp) / mất dòng ảnh `ktest-user`;
 #       (b) log: một dòng `ok` → `not ok` / xoá 1 dòng `ok` / nhân đôi 1 dòng `ok`;
 #       (c) log: xoá 1 dòng `# evidence` / xoá dòng kế hoạch `1..N`;
 #       (d) log: thêm PANIC thứ hai / PANIC đúng mẫu **thêm đuôi lạ** / PANIC **lạ**;
@@ -68,6 +68,10 @@ fi
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/kt54-selftest.XXXXXX")" || die "không tạo được thư mục tạm"
 cp "$EXPECTED" "$WORK/expected.orig" || die "không sao được expected.txt"
 SHA_BEFORE="$(sha_of "$EXPECTED")"
+# KT-55: số TAP đọc **từ** expected.txt (không hardcode) — thêm/bớt TAP không làm selftest cũ.
+PLAN="$(awk '$1 == "ktest" { print $2; exit }' "$WORK/expected.orig")"
+[ -n "$PLAN" ] || die "expected.txt không có dòng 'ktest N M'"
+PLAN_M1=$((PLAN - 1))
 
 LOG="${1:-}"
 if [ -z "$LOG" ]; then
@@ -163,12 +167,13 @@ ev_idx() {
 case_green "log thật $LOG qua runner (không báo động giả)" \
     bash "$KTEST" --check-log ktest "$LOG" "$SMP"
 
-# --- ca (a): expected.txt bớt 1 TAP của ảnh chính (37 → 36) --------------
+# --- ca (a): expected.txt bớt 1 TAP của ảnh chính (N → N−1) --------------
 # Phá **chính** tệp nguồn sự thật rồi trả lại ngay: chứng minh runner đọc số từ tệp.
-sed 's/^ktest 37 37$/ktest 36 36/' "$WORK/expected.orig" >"$EXPECTED" || die "không sửa được expected.txt"
+sed "s/^ktest $PLAN $PLAN$/ktest $PLAN_M1 $PLAN_M1/" "$WORK/expected.orig" >"$EXPECTED" ||
+    die "không sửa được expected.txt"
 RESTORE_NEEDED=1
-case_red "kế hoạch 36 nhưng runner kiểm 37 TAP" \
-    "expected.txt bớt 1 TAP (ktest 37 37 → 36 36)" \
+case_red "kế hoạch $PLAN_M1 nhưng runner kiểm $PLAN TAP" \
+    "expected.txt bớt 1 TAP (ktest $PLAN $PLAN → $PLAN_M1 $PLAN_M1)" \
     bash "$KTEST" --check-log ktest "$LOG" "$SMP"
 cp "$WORK/expected.orig" "$EXPECTED" || die "KHÔNG trả lại được expected.txt"
 RESTORE_NEEDED=0
@@ -197,7 +202,7 @@ case_red "tap-day-1.." \
 # --- ca (b''): nhân đôi một dòng `ok` (trùng TAP) ----------------------
 awk '/^ok / && !d { print; print; d = 1; next } { print }' "$LOG" >"$WORK/log-dup.log"
 mut_diff "$WORK/log-dup.log" "$LOG" "log: nhân đôi 1 dòng ok"
-case_red "ok-count=38/" \
+case_red "ok-count=$((PLAN + 1))/" \
     "log: nhân đôi 1 dòng 'ok' (trùng số TAP)" \
     bash "$KTEST" --check-log ktest "$WORK/log-dup.log" "$SMP"
 
@@ -211,7 +216,7 @@ case_red "ev1" \
 # --- ca (c'): thiếu dòng kế hoạch TAP ----------------------------------
 grep -v '^1\.\.' "$LOG" >"$WORK/log-noplan.log"
 mut_diff "$WORK/log-noplan.log" "$LOG" "log: xoá dòng kế hoạch 1..N"
-case_red "plan-1..37=0" \
+case_red "plan-1..$PLAN=0" \
     "log: xoá dòng kế hoạch '1..N'" \
     bash "$KTEST" --check-log ktest "$WORK/log-noplan.log" "$SMP"
 

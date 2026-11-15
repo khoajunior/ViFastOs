@@ -10,8 +10,10 @@ SECTIONS
     . = 0x80200000;
 
     .text : ALIGN(4K) {
+        __text_start = .;
         KEEP(*(.text.entry))
         *(.text .text.*)
+        __text_end = .;
     }
 
     .rodata : ALIGN(4K) {

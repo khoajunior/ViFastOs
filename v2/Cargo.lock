@@ -45,12 +45,18 @@ name = "vifast-pte"
 version = "0.1.0"
 
 [[package]]
+name = "vifast-scenario"
+version = "0.1.0"
+
+[[package]]
 name = "vifast-sim"
 version = "0.1.0"
 dependencies = [
  "vifast-abi",
  "vifast-objmem",
  "vifast-pte",
+ "vifast-scenario",
+ "vifast-traceformat",
 ]
 
 [[package]]

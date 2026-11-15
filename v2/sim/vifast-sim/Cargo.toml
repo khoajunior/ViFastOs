@@ -20,3 +20,8 @@ vifast-pte = { path = "../../lib/vifast-pte" }
 [[bin]]
 name = "vifast-sim"
 path = "src/main.rs"
+
+[dev-dependencies]
+# KT-55: IR conformance (đọc 5 `.scn`) + dòng trace chuẩn hoá dùng chung với kernel.
+vifast-scenario = { path = "../../lib/vifast-scenario" }
+vifast-traceformat = { path = "../../lib/vifast-traceformat", features = ["std"] }

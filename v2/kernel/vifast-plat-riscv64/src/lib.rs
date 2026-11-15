@@ -562,12 +562,82 @@ pub fn debug_put_str_atomic(s: &str) {
     debug_lock_do(|| debug_put_str(s));
 }
 
-/// Park vô hạn (hart thứ cấp sau khi xong/không cần chạy) — spin nhẹ, không `wfi`.
-///
-/// KT-50: trong lúc park vẫn **drain hộp thư của chính hart** mỗi vòng (D2-68 — chờ mà không
-/// drain là deadlock: kind `Wake`/`TlbFlush` gửi tới hart đang park sẽ không bao giờ được xử lý
-/// nếu chỉ dựa vào trap). `wfi` vẫn chưa dùng: QEMU `-icount` chỉ tiến thời gian khi vCPU chạy
-/// (KT-47/KT-49) và K3 chưa có scheduler đa hart.
+// ---------------------------------------------------------------------------------------------
+// KT-55 / D2-80 — BUILD_ID của **chính ảnh** (16 hex FNV-1a của `.text`)
+// ---------------------------------------------------------------------------------------------
+
+extern "C" {
+    /// Đầu `.text` (linker.ld) — bắt đầu vùng mã **đã nạp**.
+    static __text_start: u8;
+    /// Cuối `.text` (linker.ld) — dấu chấm hết của vùng mã.
+    static __text_end: u8;
+}
+
+/// FNV-1a 64-bit — **fingerprint** ảnh (BUILD_ID 16 hex, D2-80); không phải hàm băm mật mã.
+pub fn image_digest() -> (u64, usize) {
+    // SAFETY: hai symbol do linker.ld cấp trong cùng ảnh; `__text_start <= __text_end` và vùng
+    // `[__text_start, __text_end)` là đoạn `.text` **đã nạp** của chính tiến trình này (đọc, không
+    // ghi), không phụ thuộc dữ liệu ngoài. `unsafe` nằm trong danh sách đóng D2-17.
+    unsafe {
+        let start = core::ptr::addr_of!(__text_start) as usize;
+        let end = core::ptr::addr_of!(__text_end) as usize;
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        let mut p = start;
+        while p < end {
+            let byte = core::ptr::read_volatile(p as *const u8);
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            p += 1;
+        }
+        (hash, end.saturating_sub(start))
+    }
+}
+
+/// In `# conf image: build=<16 hex> text=<len>` — dòng **D2-80** buộc runner đối chiếu với ảnh.
+pub fn report_image_digest() {
+    let (hash, len) = image_digest();
+    let mut buf = [0u8; 96];
+    let mut n = 0usize;
+    let mut put = |s: &[u8], n: &mut usize| {
+        for &byte in s {
+            if *n < buf.len() {
+                buf[*n] = byte;
+                *n += 1;
+            }
+        }
+    };
+    put(b"# conf image: build=", &mut n);
+    let mut hex = [0u8; 16];
+    for i in 0..16 {
+        let nib = ((hash >> ((15 - i) * 4)) & 0xf) as u8;
+        hex[i] = if nib < 10 {
+            b'0' + nib
+        } else {
+            b'a' + nib - 10
+        };
+    }
+    put(&hex, &mut n);
+    put(b" text=", &mut n);
+    let mut dec = [0u8; 20];
+    let mut t = 0usize;
+    let mut v = len;
+    if v == 0 {
+        dec[t] = b'0';
+        t += 1;
+    }
+    while v > 0 {
+        dec[t] = b'0' + (v % 10) as u8;
+        v /= 10;
+        t += 1;
+    }
+    while t > 0 {
+        t -= 1;
+        put(&[dec[t]], &mut n);
+    }
+    put(b"\n", &mut n);
+    crate::debug_put_str(core::str::from_utf8(&buf[..n]).unwrap_or(""));
+}
+
 pub fn park_forever() -> ! {
     loop {
         let _ = ipi::drain_current();

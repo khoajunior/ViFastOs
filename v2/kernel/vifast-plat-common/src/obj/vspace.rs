@@ -38,6 +38,12 @@ impl<M: PhysMem> Machine<M> {
         if flags.device && flags.exec {
             return Err(ObjError::WxViolation);
         }
+        // KT-55 (conformance bắt được): **một** mapping `W|X` cùng lúc cũng là W^X — nếu cho qua
+        // thì `mapped_w` và `mapped_x` cùng tăng trên một Frame, tức chính object layer tạo ra
+        // trạng thái mà `check_objmem` (D2-67) coi là sai. K2 trả `WxViolation`; kernel khớp.
+        if flags.write && flags.exec {
+            return Err(ObjError::WxViolation);
+        }
         // L7 (reviewer): cửa sổ PA của Frame 1 GiB trên `-m 128M` **trùm RAM thật** (nhãn
         // D2-66); chưa cho map Frame 1 GiB tới K4/K5 (K3 chỉ kiểm nhãn ở TAP 32).
         if fr.size_bits == PAGE_SIZE_BITS[2] {
@@ -253,6 +259,10 @@ impl<M: PhysMem> Machine<M> {
             return Err(ObjError::InvalidArgument);
         }
         if flags.device && flags.exec {
+            return Err(ObjError::WxViolation);
+        }
+        // KT-55: cùng lý do với `map` — `protect` sang `W|X` trên **một** mapping cũng phá W^X.
+        if flags.write && flags.exec {
             return Err(ObjError::WxViolation);
         }
         let slot = self.find_mapping(vs_idx, va).ok_or(ObjError::NotMapped)?;

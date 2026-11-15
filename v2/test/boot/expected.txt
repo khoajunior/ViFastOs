@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # expected TAP — runner boot K3 (đọc bởi v2/test/boot/ktest.sh).
 #
+# KT-55: thêm **TAP 37 conformance** (5 `.scn` × sim/QEMU, `# trace:` chuẩn hoá; nhãn
+# `conformance 5/5` khi `-smp ≥ 2`, `4/5 + 1 skipped` khi `-smp 1`) ⇒ trap lồng dời sang **38**
+# (tổng 38 TAP); không đổi số TAP 1..36 của KT-45..52.
+#
 # KT-49: ảnh test chính 20 TAP (1..14 = KT-45/46/47/48; 15..19 = SMP KT-49; 20 = trap lồng
 # fatal có chủ đích). KT-50: thêm 5 TAP IPI (20..24). KT-51: thêm 5 TAP TLB/ASID/shootdown
 # (25..29); KT-52: thêm **7 TAP object layer** (30..36: retype vspace, byte invariant, frame 3
@@ -17,7 +21,7 @@
 #   - số TAP ghi ở đây phải **bằng** số TAP runner có tên trong manifest (`ktest.sh`
 #     `manifest_for`) ⇒ thêm/bớt TAP phải sửa cả kernel, manifest và dòng này trong cùng commit.
 # Cách đọc + ý nghĩa từng dòng evidence: `v2/docs/k3-riscv64.md` §17.
-ktest 37 37
+ktest 38 38
 ktest-guard 3 3
 
 # KT-53: ảnh test **user** (bin riêng) — U-mode + 3 syscall + nạp `init` ELF; 5 TAP, boot kết

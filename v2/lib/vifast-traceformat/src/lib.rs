@@ -147,6 +147,155 @@ impl Ring {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// KT-55 — dòng trace **văn bản chuẩn hoá** dùng chung sim/QEMU
+// ---------------------------------------------------------------------------------------------
+
+/// Dòng `# trace: <scn> <step> <op> <k=v>… => <kết quả>` — **một** định dạng cho cả sim (host)
+/// và kernel (ktest in qua UART), để `v2/test/conformance/trace_compare.py` so được từng trường.
+///
+/// Không cấp phát (D2-42): bộ đệm `[u8; N]` do người gọi chọn; kernel dùng 192 B trên stack.
+/// Chỉ chứa **trường được phép** (do backend chọn khi gọi): không thời gian, không địa chỉ PA
+/// tuyệt đối, không hart (tập trường so sánh nằm ở `v2/docs/k3-riscv64.md` §18 + script so).
+pub struct TraceLine<const N: usize> {
+    buf: [u8; N],
+    len: usize,
+    /// Set khi bộ đệm đầy — `as_str` trả phần đã ghi, `truncated` cho backend biết để đỏ.
+    truncated: bool,
+}
+
+impl<const N: usize> Default for TraceLine<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const N: usize> TraceLine<N> {
+    /// Bộ đệm rỗng.
+    pub const fn new() -> Self {
+        Self {
+            buf: [0u8; N],
+            len: 0,
+            truncated: false,
+        }
+    }
+
+    /// `true` ⇔ có lần ghi bị cắt (dòng không hợp lệ — backend phải coi là lỗi).
+    pub const fn truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// Nội dung đã ghi (không gồm byte 0 cuối).
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.buf[..self.len]).unwrap_or("")
+    }
+
+    fn push_str(&mut self, s: &str) {
+        for &byte in s.as_bytes() {
+            if self.len < N {
+                self.buf[self.len] = byte;
+                self.len += 1;
+            } else {
+                self.truncated = true;
+            }
+        }
+    }
+
+    fn push_u64_dec(&mut self, mut v: u64) {
+        let mut tmp = [0u8; 20];
+        let mut n = 0usize;
+        if v == 0 {
+            self.push_str("0");
+            return;
+        }
+        while v > 0 {
+            tmp[n] = b'0' + (v % 10) as u8;
+            v /= 10;
+            n += 1;
+        }
+        while n > 0 {
+            n -= 1;
+            let byte = tmp[n];
+            if self.len < N {
+                self.buf[self.len] = byte;
+                self.len += 1;
+            } else {
+                self.truncated = true;
+            }
+        }
+    }
+
+    fn push_u64_hex(&mut self, v: u64) {
+        self.push_str("0x");
+        let mut started = false;
+        for shift in (0..16).rev() {
+            let nib = ((v >> (shift * 4)) & 0xf) as u8;
+            if nib != 0 || started || shift == 0 {
+                started = true;
+                let byte = if nib < 10 {
+                    b'0' + nib
+                } else {
+                    b'a' + nib - 10
+                };
+                if self.len < N {
+                    self.buf[self.len] = byte;
+                    self.len += 1;
+                } else {
+                    self.truncated = true;
+                }
+            }
+        }
+    }
+
+    /// Mở dòng: `# trace: <scn> <step> <op>`.
+    pub fn start(&mut self, scn: u8, step: u16, op: &str) -> &mut Self {
+        self.len = 0;
+        self.truncated = false;
+        self.push_str("# trace: ");
+        self.push_u64_dec(scn as u64);
+        self.push_str(" ");
+        self.push_u64_dec(step as u64);
+        self.push_str(" ");
+        self.push_str(op);
+        self
+    }
+
+    /// Thêm trường chuỗi: ` k=v` (tên/giá trị do backend chọn trong allowlist §18).
+    pub fn field_str(&mut self, key: &str, value: &str) -> &mut Self {
+        self.push_str(" ");
+        self.push_str(key);
+        self.push_str("=");
+        self.push_str(value);
+        self
+    }
+
+    /// Thêm trường số thập phân.
+    pub fn field_u64(&mut self, key: &str, value: u64) -> &mut Self {
+        self.push_str(" ");
+        self.push_str(key);
+        self.push_str("=");
+        self.push_u64_dec(value);
+        self
+    }
+
+    /// Thêm trường số hex `0x…` (dùng cho VA/bitmask — không phải địa chỉ PA tuyệt đối).
+    pub fn field_hex(&mut self, key: &str, value: u64) -> &mut Self {
+        self.push_str(" ");
+        self.push_str(key);
+        self.push_str("=");
+        self.push_u64_hex(value);
+        self
+    }
+
+    /// Kết thúc dòng: ` => <kết quả>\n`.
+    pub fn result(&mut self, result: &str) -> &mut Self {
+        self.push_str(" => ");
+        self.push_str(result);
+        self.push_str("\n");
+        self
+    }
+}
+
 #[cfg(all(test, feature = "alloc"))]
 mod tests {
     use super::*;

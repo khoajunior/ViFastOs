@@ -28,12 +28,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use vifast_scenario::{IrStep, RawStep, MAX_STEPS};
 use vifast_sim::ipc::{Message, MessageInfo};
 use vifast_sim::kobj::{
     FaultAccess, FaultKind, KError, Machine, MapAttrs, MapRights, ObjId, ObjType, SlotRef,
     TcbState, VmFaultReason,
 };
 use vifast_sim::procsrv_model::ProcsrvModel;
+use vifast_traceformat::TraceLine;
 
 const S_UVA: usize = 0;
 const S_UF4: usize = 1;
@@ -150,10 +152,17 @@ fn scn_path(ten: &str) -> PathBuf {
 
 /// Đọc tệp `.scn`: `harts` + mọi chuỗi có `=>` (theo thứ tự xuất hiện — `setup` trước,
 /// `thread` sau, đúng thứ tự chạy). Đọc tệp là nguồn kỳ vọng duy nhất — không chép tay.
-fn doc(ten: &str) -> (u16, Vec<Buoc>) {
+///
+/// KT-55: trả thêm **tập bước conformance** do `vifast-scenario` chiếu từ chính tệp này (cùng
+/// logic với kernel) — runner chạy **mọi** bước như KT-42 nhưng chỉ in `# trace:` cho bước được
+/// chiếu. Text được `leak` (chỉ trong test) để `IrStep<'_>` sống cùng quá trình chạy.
+fn doc(ten: &str) -> (u16, Vec<Buoc>, Vec<IrStep<'static>>) {
     let path = scn_path(ten);
-    let text = fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("không đọc được {}: {e}", path.display()));
+    let text: &'static str = Box::leak(
+        fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("không đọc được {}: {e}", path.display()))
+            .into_boxed_str(),
+    );
     assert!(
         text.contains("version = 1"),
         "{ten}: fixture phải có version = 1"
@@ -165,7 +174,7 @@ fn doc(ten: &str) -> (u16, Vec<Buoc>) {
         .map(|(_, v)| v.trim().parse().expect("harts phải là số"))
         .unwrap_or(1);
     let mut steps = Vec::new();
-    let mut rest = text.as_str();
+    let mut rest: &str = text;
     while let Some(start) = rest.find('"') {
         let after = &rest[start + 1..];
         let Some(end) = after.find('"') else { break };
@@ -191,12 +200,29 @@ fn doc(ten: &str) -> (u16, Vec<Buoc>) {
         });
     }
     assert!(!steps.is_empty(), "{ten}: không có bước nào");
-    (harts, steps)
+    let scn = vifast_scenario::CASES
+        .iter()
+        .find(|c| c.2 == ten)
+        .map(|c| c.0)
+        .expect("tên tệp phải thuộc 5 ca KT-55");
+    let mut raw = [RawStep::EMPTY; MAX_STEPS];
+    let n_raw = vifast_scenario::parse(text, &mut raw);
+    assert_eq!(n_raw, steps.len(), "{ten}: parser IR lệch số bước runner");
+    let mut ir = [IrStep::EMPTY; MAX_STEPS];
+    let n_ir = vifast_scenario::project(scn, &raw[..n_raw], &mut ir);
+    assert!(n_ir > 0, "{ten}: tập con conformance rỗng");
+    (harts, steps, ir[..n_ir].to_vec())
 }
 
 /// Rig chuẩn của 5 kịch bản VM (xem quy ước ở doc module).
 struct Rig {
     m: Machine,
+    /// KT-55: ca (22..26), số thứ tự bước hiện tại và tập bước được in trace.
+    scn: u8,
+    step: u16,
+    traced: Vec<IrStep<'static>>,
+    /// `va` của `vm_shootdown_begin` gần nhất (bước `wait` mới in dòng trace).
+    last_shootdown_va: u64,
     vs: [ObjId; 2],
     f4: ObjId,
     f2: ObjId,
@@ -208,7 +234,7 @@ struct Rig {
 }
 
 impl Rig {
-    fn new(harts: u16) -> Self {
+    fn new(harts: u16, scn: u8, traced: Vec<IrStep<'static>>) -> Self {
         let mut m = Machine::with_harts(harts);
         let c = m.add_cnode(1024);
         let uva = m.add_untyped(0, 2 * 1024 * 1024);
@@ -296,6 +322,10 @@ impl Rig {
         let _ = next;
         Self {
             m,
+            scn,
+            step: 0,
+            traced,
+            last_shootdown_va: 0,
             vs,
             f4,
             f2,
@@ -320,6 +350,30 @@ impl Rig {
             "rep0" => self.rep,
             other => panic!("tên object lạ {other:?}"),
         }
+    }
+
+    /// In `# trace:` cho bước hiện tại **nếu** nó thuộc tập con conformance.
+    ///
+    /// `fields` là trường *quan sát được* (không phải bản sao kỳ vọng của tệp) — đây là dữ liệu
+    /// `v2/test/conformance/trace_compare.py` so với log QEMU. Không in `hart`/PA/thời gian.
+    fn emit(&self, fields: &[(&str, String)], result: &str) {
+        if !vifast_scenario::is_traced(self.scn, self.step, &self.traced) {
+            return;
+        }
+        let (op, _) = self
+            .traced
+            .iter()
+            .find(|s| s.scn == self.scn && s.step == self.step)
+            .map(|s| (s.op_name(), s))
+            .expect("bước trace phải có trong tập chiếu");
+        let mut line: TraceLine<256> = TraceLine::new();
+        line.start(self.scn, self.step, op);
+        for (k, v) in fields {
+            line.field_str(k, v);
+        }
+        line.result(result);
+        assert!(!line.truncated(), "dòng trace vượt 256 B");
+        print!("{}", line.as_str());
     }
 
     fn expect_ok(&self, b: &Buoc, r: Result<(), KError>) {
@@ -347,8 +401,10 @@ impl Rig {
         match b.op.as_str() {
             "vm_activate" => {
                 let vs = self.obj(b.p("vs"));
+                self.last_shootdown_va = 0;
                 let r = self.m.vspace_activate(vs, b.p_u32("hart") as u16);
                 self.expect_ok(b, r);
+                self.emit(&[("vs", b.p("vs").to_string())], "ok");
             }
             "vm_map" => {
                 let vs = self.obj(b.p("vs"));
@@ -364,6 +420,15 @@ impl Rig {
                     )
                     .map(|_| ());
                 self.expect_ok(b, r);
+                self.emit(
+                    &[
+                        ("va", format!("{:#x}", b.p_u64("va"))),
+                        ("frame", b.p("frame").to_string()),
+                        ("rights", b.p("rights").to_string()),
+                        ("attrs", b.p("attrs").to_string()),
+                    ],
+                    b.expect.as_str(),
+                );
             }
             "vm_unmap" => {
                 self.m
@@ -372,6 +437,10 @@ impl Rig {
                 let vs = self.obj(b.p("vs"));
                 let r = self.m.vspace_unmap(vs, b.p_u64("va")).map(|_| ());
                 self.expect_ok(b, r);
+                self.emit(
+                    &[("va", format!("{:#x}", b.p_u64("va")))],
+                    b.expect.as_str(),
+                );
             }
             "vm_protect" => {
                 self.m
@@ -388,10 +457,20 @@ impl Rig {
                     )
                     .map(|_| ());
                 self.expect_ok(b, r);
+                self.emit(
+                    &[
+                        ("va", format!("{:#x}", b.p_u64("va"))),
+                        ("rights", b.p("rights").to_string()),
+                        ("attrs", b.p("attrs").to_string()),
+                    ],
+                    b.expect.as_str(),
+                );
             }
             "vm_walk" => {
                 let vs = self.obj(b.p("vs"));
                 let r = self.m.vspace_walk(vs, b.p_u64("va")).map(|_| ());
+                let got = r.as_ref().err().map(|e| e.name()).unwrap_or("ok");
+                self.emit(&[("va", format!("{:#x}", b.p_u64("va")))], got);
                 self.expect_ok(b, r);
             }
             "vm_expect_map" => {
@@ -415,6 +494,14 @@ impl Rig {
                     "{}: pa sai",
                     b.op
                 );
+                self.emit(
+                    &[
+                        ("va", format!("{va:#x}")),
+                        ("frame", b.p("frame").to_string()),
+                        ("size", u32::from(m.size_bits).to_string()),
+                    ],
+                    "ok",
+                );
                 self.expect_ok(b, Ok(()));
             }
             "vm_expect_counters" => {
@@ -423,6 +510,15 @@ impl Rig {
                 assert_eq!(meta.maps, b.p_u32("maps"), "{}: maps sai", b.op);
                 assert_eq!(meta.mapped_w, b.p_u32("w"), "{}: mapped_w sai", b.op);
                 assert_eq!(meta.mapped_x, b.p_u32("x"), "{}: mapped_x sai", b.op);
+                self.emit(
+                    &[
+                        ("frame", b.p("frame").to_string()),
+                        ("maps", meta.maps.to_string()),
+                        ("w", meta.mapped_w.to_string()),
+                        ("x", meta.mapped_x.to_string()),
+                    ],
+                    "ok",
+                );
                 self.expect_ok(b, Ok(()));
             }
             "vm_expect_frames" => {
@@ -432,6 +528,7 @@ impl Rig {
                     "{}: frame_count sai",
                     b.op
                 );
+                self.emit(&[("n", self.m.frame_count().to_string())], "ok");
                 self.expect_ok(b, Ok(()));
             }
             "vm_tlb_fill" => {
@@ -454,6 +551,7 @@ impl Rig {
             }
             "vm_shootdown_begin" => {
                 let vs = self.obj(b.p("vs"));
+                self.last_shootdown_va = b.p_u64("va");
                 let r = self
                     .m
                     .tlb_shootdown_begin(b.p_u32("hart") as u16, vs, b.p_u64("va"))
@@ -463,6 +561,19 @@ impl Rig {
             "vm_shootdown_wait" => {
                 let r = self.m.tlb_shootdown_wait(b.p_u32("hart") as u16);
                 self.expect_ok(b, r);
+                let info = self
+                    .m
+                    .last_tlb_shootdown()
+                    .expect("phải có shootdown vừa xong");
+                self.emit(
+                    &[
+                        ("va", format!("{:#x}", self.last_shootdown_va)),
+                        ("targets", format!("{:#x}", info.targets.bits())),
+                        ("acked", format!("{:#x}", info.acked.bits())),
+                        ("completed", u8::from(info.completed).to_string()),
+                    ],
+                    "ok",
+                );
             }
             "vm_expect_pending" => {
                 let info = self
@@ -519,6 +630,14 @@ impl Rig {
                     "{}: fault sai payload/đích",
                     b.op
                 );
+                self.emit(
+                    &[
+                        ("va", format!("{:#x}", b.p_u64("va"))),
+                        ("access", b.p("access").to_string()),
+                        ("reason", b.p("reason").to_string()),
+                    ],
+                    "ok",
+                );
                 self.expect_ok(b, Ok(()));
             }
             "vm_expect_state" => {
@@ -555,6 +674,7 @@ impl Rig {
             "vm_check" => {
                 let r = self.m.check_vm();
                 self.expect_ok_string(b, r);
+                self.emit(&[], "ok");
             }
             other => panic!("KT-42: runner chưa cài op {other:?}"),
         }
@@ -596,11 +716,23 @@ fn kiem_shootdown(b: &Buoc, info: &vifast_sim::tlb::TlbShootdownInfo) {
 }
 
 fn run_scn(ten: &str) {
-    let (harts, steps) = doc(ten);
-    let mut r = Rig::new(harts);
-    for step in &steps {
+    let (harts, steps, traced) = doc(ten);
+    let scn = vifast_scenario::CASES
+        .iter()
+        .find(|c| c.2 == ten)
+        .map(|c| c.0)
+        .expect("tên tệp phải thuộc 5 ca KT-55");
+    let mut r = Rig::new(harts, scn, traced);
+    for (i, step) in steps.iter().enumerate() {
+        r.step = (i + 1) as u16;
         r.chay(step);
     }
+    // KT-55: dòng tổng kết của ca (script so đọc để đối chiếu số bước trace).
+    println!(
+        "# conf: scn={scn} name={} steps={} ok=1",
+        vifast_scenario::tag_of(scn).unwrap_or("?"),
+        r.traced.len()
+    );
     println!("# SCN OK: {ten} (harts={harts}, {} bước)", steps.len());
 }
 

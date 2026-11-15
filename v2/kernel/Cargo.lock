@@ -12,6 +12,8 @@ version = "0.1.0"
 dependencies = [
  "vifast-plat-common",
  "vifast-plat-riscv64",
+ "vifast-scenario",
+ "vifast-traceformat",
 ]
 
 [[package]]
@@ -31,4 +33,12 @@ dependencies = [
 
 [[package]]
 name = "vifast-pte"
+version = "0.1.0"
+
+[[package]]
+name = "vifast-scenario"
+version = "0.1.0"
+
+[[package]]
+name = "vifast-traceformat"
 version = "0.1.0"

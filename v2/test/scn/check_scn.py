@@ -4,7 +4,15 @@
 
 Đỏ trước: viết khi `v2/test/scn/*.scn` chưa có tệp nào.
 
-Dùng: `python3 check_scn.py [--dir v2/test/scn] [--spec spec/abi.toml]`
+Dùng: `python3 check_scn.py [--dir v2/test/scn] [--spec spec/abi.toml] [--trace <sim trace>]`
+
+**KT-55** — `--trace <tệp>` kiểm **chiều sim**: tệp `# trace:` do runner sim in ra phải (a) đúng
+định dạng chuẩn hoá, (b) đúng **tập bước conformance** chiếu từ chính 5 tệp `.scn` (cùng luật với
+crate `vifast-scenario`: bỏ bước `frame=f1`/`va=0x80000000`, bỏ op mô hình TLB per-hart và op cần
+TCB/procsrv), (c) mang **giá trị quan sát** khớp kỳ vọng ghi trong tệp (`size`, `maps/w/x`, `n`,
+`reason`, kết quả map/walk/unmap/protect), và (d) `# conf:` tự khai `steps=N` bằng đúng số dòng
+trace của ca. Đây là đầu sim của hợp đồng KT-55; đầu QEMU do `v2/test/conformance/trace_compare.py`
+so từng dòng.
 """
 
 import pathlib
@@ -182,21 +190,305 @@ def parse_step(line):
     return kind, name, params, expect
 
 
+# ---------------------------------------------------------------------------------------------
+# KT-55 — kiểm chiều **sim** của trace conformance
+# ---------------------------------------------------------------------------------------------
+
+# 5 ca nền tảng (D2-69) — trùng `vifast_scenario::CASES`.
+CONF_CASES = [
+    (22, "vm-map", "22-frame-map-unmap-walk.scn"),
+    (23, "vm-wx", "23-wx-violation-counters.scn"),
+    (24, "vm-tlb", "24-shootdown-2-hart.scn"),
+    (25, "vm-fault", "25-vm-fault-notmapped-resume.scn"),
+    (26, "vm-shared", "26-shared-readonly-frame.scn"),
+]
+
+# Luật chiếu — phải **trùng** `vifast-scenario::{skipped,project}` (hai bên đọc độc lập; lệch là
+# trace sim không khớp tập bước kỳ vọng ⇒ đỏ ngay tại đây).
+CONF_SKIP_FRAME = {"f1"}
+CONF_SKIP_VA = {"0x80000000"}
+CONF_SKIP_OPS = {
+    "vm_tlb_fill",
+    "vm_tlb_expect",
+    "vm_expect_pending",
+    "vm_expect_shootdown",
+    "vm_expect_state",
+    "vm_dispatch",
+    "vm_procsrv_recv",
+    "vm_procsrv_resume",
+}
+CONF_OP = {
+    "vm_map": "map",
+    "vm_unmap": "unmap",
+    "vm_protect": "protect",
+    "vm_walk": "walk",
+    "vm_expect_map": "expect_map",
+    "vm_expect_counters": "counters",
+    "vm_expect_frames": "frames",
+    "vm_check": "check",
+    "vm_activate": "activate",
+    "vm_shootdown_wait": "shootdown",
+    "vm_expect_fault": "fault",
+}
+# Trường **được phép** của từng op trace (không có hart/PA/thời gian — `trace_compare.py` cũng
+# bỏ các trường volatile khi so QEMU, nhưng ở đây kiểm chặt: đúng tập này).
+CONF_FIELDS = {
+    "map": {"va", "frame", "rights", "attrs"},
+    "unmap": {"va"},
+    "protect": {"va", "rights", "attrs"},
+    "walk": {"va"},
+    "expect_map": {"va", "frame", "size"},
+    "counters": {"frame", "maps", "w", "x"},
+    "frames": {"n"},
+    "check": set(),
+    "activate": {"vs"},
+    "shootdown": {"va", "targets", "acked", "completed"},
+    "fault": {"va", "access", "reason"},
+}
+TRACE_RE = re.compile(
+    r"^# trace: (?P<scn>[0-9]+) (?P<step>[0-9]+) (?P<op>[a-z_]+)"
+    r"(?P<fields>(?: [a-z_]+=[^ ]+)*) => (?P<result>[^ ]+)$"
+)
+
+
+def conf_steps(text):
+    """Đọc bước của một tệp `.scn` (mọi chuỗi có `=>`) — cùng cách runner K2/IR đọc."""
+    steps = []
+    rest = text
+    while True:
+        start = rest.find('"')
+        if start < 0:
+            break
+        after = rest[start + 1:]
+        end = after.find('"')
+        if end < 0:
+            break
+        inner = after[:end]
+        rest = after[end + 1:]
+        if "=>" not in inner:
+            continue
+        body, expect = inner.rsplit("=>", 1)
+        toks = body.split()
+        op = toks[0]
+        params = {}
+        for tok in toks[1:]:
+            k, _, v = tok.partition("=")
+            params[k] = v
+        steps.append({"op": op, "params": params, "expect": expect.strip()})
+    return steps
+
+
+def conf_project(scn, steps):
+    """Chiếu sang bước trace kỳ vọng: list `(step_no, op_trace, params, expect)`."""
+    out = []
+    pending_va = None
+    for index, st in enumerate(steps, start=1):
+        if st["op"] == "vm_shootdown_begin":
+            pending_va = st["params"].get("va")
+            continue
+        if st["params"].get("frame") in CONF_SKIP_FRAME:
+            continue
+        if st["params"].get("va") in CONF_SKIP_VA:
+            continue
+        if st["op"] in CONF_SKIP_OPS:
+            continue
+        op = CONF_OP.get(st["op"])
+        if op is None:
+            continue
+        params = dict(st["params"])
+        if op == "shootdown":
+            params = {"va": pending_va or "0x0"}
+        out.append((index, op, params, st["expect"]))
+    return out
+
+
+def conf_num(value):
+    try:
+        return int(value, 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_trace(trace_path, scn_dir, files):
+    """Kiểm tệp trace của **sim** theo hợp đồng KT-55. Trả True nếu sạch."""
+    try:
+        raw = trace_path.read_text().splitlines()
+    except FileNotFoundError:
+        print(f"not ok - trace: không thấy {trace_path}")
+        return False
+
+    lines = []
+    bad = 0
+    conf_re = re.compile(r"^# conf: scn=([0-9]+) name=([a-z-]+) steps=([0-9]+) ok=1$")
+    for line in raw:
+        if conf_re.match(line):
+            continue  # dòng tổng kết của ca — kiểm riêng bên dưới
+        m = TRACE_RE.match(line)
+        if not m:
+            bad += 1
+            print(f"not ok - trace: dòng sai định dạng: {line!r}")
+            continue
+        fields = {}
+        for tok in m.group("fields").split():
+            k, _, v = tok.partition("=")
+            fields[k] = v
+        lines.append(
+            {
+                "scn": int(m.group("scn")),
+                "step": int(m.group("step")),
+                "op": m.group("op"),
+                "fields": fields,
+                "result": m.group("result"),
+            }
+        )
+    if bad:
+        return False
+
+    # `# conf:` của sim — mỗi ca tự khai số bước; phải bằng số dòng trace của ca đó.
+    conf = {}
+    for line in raw:
+        m = conf_re.match(line)
+        if m:
+            conf[int(m.group(1))] = (m.group(2), int(m.group(3)))
+    if set(conf) != {c[0] for c in CONF_CASES}:
+        print(f"not ok - trace: thiếu # conf: của ca (có {sorted(conf)})")
+        return False
+
+    ok = True
+    pos = 0
+    expected_all = []
+    for scn, tag, name in CONF_CASES:
+        path = scn_dir / name
+        if not path.exists():
+            print(f"not ok - trace: không thấy {path}")
+            return False
+        steps = conf_steps(path.read_text())
+        proj = conf_project(scn, steps)
+        expected_all.extend((scn, tag) + item for item in proj)
+        if conf[scn][0] != tag:
+            print(f"not ok - trace: # conf: ca {scn} tag {conf[scn][0]!r} ≠ {tag!r}")
+            ok = False
+        if conf[scn][1] != len(proj):
+            print(f"not ok - trace: # conf: ca {scn} khai {conf[scn][1]} bước ≠ chiếu {len(proj)}")
+            ok = False
+
+    # So **từng dòng** theo thứ tự với tập bước kỳ vọng.
+    if len(lines) != len(expected_all):
+        print(f"not ok - trace: {len(lines)} dòng, kỳ vọng {len(expected_all)}")
+        ok = False
+    n = min(len(lines), len(expected_all))
+    for i in range(n):
+        scn, tag, step, op, params, expect = expected_all[i]
+        got = lines[i]
+        if (got["scn"], got["step"], got["op"]) != (scn, step, op):
+            print(
+                f"not ok - trace: dòng {i + 1} là {got['scn']} b{got['step']} {got['op']}"
+                f", kỳ vọng {scn} b{step} {op}"
+            )
+            ok = False
+            continue
+        allowed = CONF_FIELDS[op]
+        if set(got["fields"]) != allowed:
+            print(
+                f"not ok - trace: {scn} b{step} {op} có trường {sorted(got['fields'])}"
+                f" ≠ {sorted(allowed)}"
+            )
+            ok = False
+            continue
+        f = got["fields"]
+        # Giá trị **quan sát** phải khớp kỳ vọng của tệp.
+        if op in ("map", "unmap", "protect", "walk"):
+            if got["result"] != expect:
+                print(f"not ok - trace: {scn} b{step} {op} kết quả {got['result']} ≠ {expect}")
+                ok = False
+        elif op == "expect_map":
+            if got["result"] != "ok" or conf_num(f["size"]) != conf_num(params.get("size")):
+                print(f"not ok - trace: {scn} b{step} expect_map {f} ≠ {params}")
+                ok = False
+        elif op == "counters":
+            got_t = (conf_num(f["maps"]), conf_num(f["w"]), conf_num(f["x"]))
+            want_t = (
+                conf_num(params.get("maps")),
+                conf_num(params.get("w")),
+                conf_num(params.get("x")),
+            )
+            if got["result"] != "ok" or got_t != want_t or f["frame"] != params.get("frame"):
+                print(f"not ok - trace: {scn} b{step} counters {f} ≠ {params}")
+                ok = False
+        elif op == "frames":
+            if got["result"] != "ok" or conf_num(f["n"]) != conf_num(params.get("n")):
+                print(f"not ok - trace: {scn} b{step} frames {f} ≠ {params}")
+                ok = False
+        elif op == "check":
+            if got["result"] != "ok":
+                print(f"not ok - trace: {scn} b{step} check lỗi: {got['result']}")
+                ok = False
+        elif op == "activate":
+            if got["result"] != "ok" or f["vs"] != params.get("vs"):
+                print(f"not ok - trace: {scn} b{step} activate {f} ≠ {params}")
+                ok = False
+        elif op == "shootdown":
+            # Kỳ vọng lấy từ bước `vm_expect_shootdown` của cùng tệp (targets/acked/completed).
+            want = None
+            for st in steps:
+                if st["op"] == "vm_expect_shootdown":
+                    want = st["params"]
+                    break
+            if got["result"] != "ok" or conf_num(f["completed"]) != 1:
+                print(f"not ok - trace: {scn} b{step} shootdown chưa xong: {f} => {got['result']}")
+                ok = False
+            elif want is not None and (
+                conf_num(f["targets"]) != conf_num(want.get("targets"))
+                or conf_num(f["acked"]) != conf_num(want.get("acked"))
+                or (1 if want.get("completed") == "true" else 0) != conf_num(f["completed"])
+            ):
+                print(f"not ok - trace: {scn} b{step} shootdown {f} ≠ {want}")
+                ok = False
+        elif op == "fault":
+            if got["result"] != "ok" or f["reason"] != params.get("reason"):
+                print(f"not ok - trace: {scn} b{step} fault {f} ≠ reason={params.get('reason')}")
+                ok = False
+    if not ok:
+        return False
+    per = " ".join(f"{scn}:{len(conf_project(scn, conf_steps((scn_dir / name).read_text())))}"
+                   for scn, _tag, name in CONF_CASES)
+    print(f"# trace sim: OK ({len(lines)} dòng, 5 ca — {per})")
+    return True
+
+
 def main():
     scn_dir = pathlib.Path("v2/test/scn")
     spec_path = pathlib.Path("spec/abi.toml")
     draft_path = pathlib.Path("v2/docs/abi-reserved-objects.toml")
     sig_path = pathlib.Path("v2/docs/abi-call-signatures.toml")
     args = sys.argv[1:]
+    trace_path = None
+    steps_scn = None
     i = 0
     while i < len(args):
         if args[i] == "--dir":
             scn_dir = pathlib.Path(args[i + 1]); i += 2
         elif args[i] == "--spec":
             spec_path = pathlib.Path(args[i + 1]); i += 2
+        elif args[i] == "--trace":
+            trace_path = pathlib.Path(args[i + 1]); i += 2
+        elif args[i] == "--steps":
+            steps_scn = int(args[i + 1]); i += 2
         else:
             print(f"tham số lạ: {args[i]}")
             return 2
+
+    # KT-55: in **tập số bước** conformance của một ca (nguồn độc lập với crate Rust) — dùng bởi
+    # `ktest.sh check_trace` để đòi log QEMU có **đúng tập** `scn=NN step=K`, không chỉ đếm.
+    if steps_scn is not None:
+        name = dict((c[0], c[2]) for c in CONF_CASES).get(steps_scn)
+        if name is None:
+            print(f"không có ca {steps_scn}")
+            return 2
+        steps = conf_steps((scn_dir / name).read_text())
+        proj = conf_project(steps_scn, steps)
+        print(" ".join(str(item[0]) for item in proj))
+        return 0
 
     try:
         _, spec = load_toml(spec_path)
@@ -368,6 +660,12 @@ def main():
             print(f"not ok - {msg}")
         print(f"# {len(fails)} mục sai")
         return 1
+
+    if trace_path is not None:
+        if not check_trace(trace_path, scn_dir, files):
+            print("# scn-check: FAIL (trace sim)")
+            return 1
+
     print(f"scn-check: PASS ({len(files)} tệp, {len(blocked)} blocked, {len(tags_seen)} nhóm)")
     return 0
 

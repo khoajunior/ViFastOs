@@ -59,7 +59,10 @@
 //! 35. `ok 35 - map/unmap 4 KiB` — VSpace thật: `satp` + `sfence.vma`, map 4 KiB `U|R|W`,
 //!    ghi/đọc qua VA user (SUM), protect R|NX, unmap, khôi phục `satp` kernel.
 //! 36. `ok 36 - 0 ro` — 0 rò byte/object/mapping sau revoke; `check_objmem` ĐẠT.
-//! 37. `ok 37 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//! 37. `ok 37 - conformance 5/5` — **KT-55**: 5 `.scn` nền tảng (22..26) chạy trong kernel và in
+//!    `# trace:` cùng định dạng với sim; so 61 dòng / 5 ca (`v2/test/conformance/`). Ca 24 (2 hart)
+//!    in `skipped=smp1` trên `-smp 1`; `fault` là phân loại từ PTE thật, không phải trap (KT-56).
+//! 38. `ok 38 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -67,6 +70,7 @@
 #![no_std]
 #![no_main]
 
+mod ktest_conf;
 mod ktest_ipi;
 mod ktest_obj;
 mod ktest_smp;
@@ -125,7 +129,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..37\n");
+    PLATFORM.put_str("TAP version 13\n1..38\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -896,6 +900,8 @@ pub extern "C" fn rust_main() -> ! {
     fails += ktest_tlb::tlb_phase();
     // ---------------------------------------- 30..36) object layer nội bộ (KT-52)
     fails += ktest_obj::obj_phase();
+    // --------------------- 37) conformance 5 `.scn` × sim/QEMU (KT-55) — `# trace:` chuẩn hoá
+    fails += ktest_conf::conf_phase();
 
     {
         let mut w = PlatformWriter(&PLATFORM);
@@ -914,10 +920,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 37) trap LỒNG (fatal, có chủ đích)
-    // In `ok 37` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 38) trap LỒNG (fatal, có chủ đích)
+    // In `ok 38` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 37 - trap nested panic\n");
+    PLATFORM.put_str("ok 38 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

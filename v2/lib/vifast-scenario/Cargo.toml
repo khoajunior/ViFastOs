@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "vifast-scenario"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "KT-55 — IR rút gọn của 5 kịch bản VM (đọc `.scn`, chiếu sang bước trace dùng chung sim/kernel)"
+
+[dependencies]
+
+[dev-dependencies]

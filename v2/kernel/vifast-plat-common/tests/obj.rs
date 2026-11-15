@@ -448,3 +448,36 @@ fn frame_1g_khong_duoc_map_khi_chua_co_backing() {
     m.revoke(vs).unwrap();
     m.check_objmem().unwrap();
 }
+
+/// **KT-55** (conformance tìm ra lỗi platform): một mapping `W|X` **cùng lúc** phải bị từ chối —
+/// nếu không, `mapped_w` và `mapped_x` cùng tăng trên một Frame ⇒ chính bất biến W^X toàn cục của
+/// `check_objmem` (D2-67) bị chính object layer tạo ra. K2 từ chối (`WxViolation`) nên kernel phải
+/// khớp; đây là **lỗi đỏ trước** của KT-55, không phải nới ngưỡng.
+#[test]
+fn wx_ca_3_cung_map_w_x_bi_tu_choi_atomic() {
+    let (mut m, u0, _u1) = machine();
+    let vs = m.retype(u0, ObjKind::VSpace, 0).unwrap();
+    let fr = m.retype(u0, ObjKind::Frame, 12).unwrap();
+    let wx = MapFlags {
+        read: true,
+        write: true,
+        exec: true,
+        user: false,
+        device: false,
+    };
+    let before = m.counts();
+    assert_eq!(m.map(vs, VA, fr, wx).unwrap_err(), ObjError::WxViolation);
+    assert!(!m.walk(vs, VA).unwrap().valid, "không được ghi PTE");
+    assert_eq!(m.counts(), before, "atomic: không mapping/không đổi đếm");
+    assert_eq!(m.frame_counts(fr).unwrap(), (0, 0, 0));
+    // Protect sang W|X cũng bị từ chối, PTE cũ giữ nguyên.
+    m.map(vs, VA, fr, MapFlags::RX_USER).expect("map RX");
+    assert_eq!(m.protect(vs, VA, wx).unwrap_err(), ObjError::WxViolation);
+    let raw = m.walk(vs, VA).unwrap().raw;
+    assert_ne!(raw & (1 << 3), 0, "X còn (Sv39: X = bit 3)");
+    assert_eq!(raw & (1 << 2), 0, "W không được bật (Sv39: W = bit 2)");
+    assert_eq!(m.frame_counts(fr).unwrap(), (1, 0, 1));
+    m.check_objmem().expect("W^X toàn cục vẫn đạt");
+    m.revoke(vs).unwrap();
+    m.revoke(fr).unwrap();
+}
