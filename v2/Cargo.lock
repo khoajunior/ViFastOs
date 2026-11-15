@@ -11,6 +11,13 @@ name = "vifast-agentctl"
 version = "0.1.0"
 
 [[package]]
+name = "vifast-core"
+version = "0.1.0"
+dependencies = [
+ "vifast-abi",
+]
+
+[[package]]
 name = "vifast-elf"
 version = "0.1.0"
 
@@ -53,6 +60,7 @@ name = "vifast-sim"
 version = "0.1.0"
 dependencies = [
  "vifast-abi",
+ "vifast-core",
  "vifast-objmem",
  "vifast-pte",
  "vifast-scenario",

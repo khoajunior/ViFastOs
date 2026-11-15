@@ -76,6 +76,28 @@ def gen_rs(doc: dict) -> str:
     for oid, name in reserved:
         out.append(f'    ("{name}", {oid}),')
     out.append("];")
+    # KT-58: kích thước/căn lề object từ `[object_size]` (QD §3.9) — core `no_std` dùng
+    # hằng sinh, không hardcode 48/64/4096 trong `vifast-core`.
+    osz = doc.get("object_size") or {}
+    slot = osz.get("slot") or {}
+    if slot:
+        out.append("#[rustfmt::skip]")
+        out.append(f"pub const SLOT_BYTES: usize = {int(slot['bytes'])};")
+        out.append("#[rustfmt::skip]")
+        out.append(f"pub const SLOT_ALIGN_BYTES: usize = {int(slot['align_bytes'])};")
+    for key, name in (
+        ("default_align_bytes", "DEFAULT_ALIGN_BYTES"),
+        ("page_bytes", "PAGE_BYTES"),
+        ("untyped_min_bytes", "UNTYPED_MIN_BYTES"),
+    ):
+        if key in osz:
+            out.append("#[rustfmt::skip]")
+            out.append(f"pub const {name}: usize = {int(osz[key])};")
+    rv = osz.get("riscv64") or {}
+    for key in sorted(rv):
+        const = "CNODE_BASE_BYTES" if key == "cnode_base" else f"OBJ_{key.upper()}_BYTES"
+        out.append("#[rustfmt::skip]")
+        out.append(f"pub const {const}: usize = {int(rv[key])};")
     out.append("#[rustfmt::skip]")
     out.append("/// (method, params, returns) — từ `[method_signature]` (stable-draft).")
     out.append("#[rustfmt::skip]")

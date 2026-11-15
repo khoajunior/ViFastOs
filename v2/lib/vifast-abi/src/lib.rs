@@ -3,6 +3,10 @@
 //!
 //! `generated.rs` do `v2/bin/vifast-gen gen` sinh; **không sửa tay** — `gen-check` trong
 //! `./v2/bin/v2 check` so byte và bắt mọi sửa tay.
+//!
+//! `no_std`: từ KT-58 kernel `no_std` (`vifast-core`) dùng chung hằng số sinh từ spec;
+//! test vẫn chạy trên host (std).
+#![cfg_attr(not(test), no_std)]
 
 mod generated;
 
@@ -56,6 +60,23 @@ mod tests {
         assert!(FAULT_KINDS
             .iter()
             .any(|(n, f)| *n == "Exit" && f.contains(&"code: u64")));
+    }
+
+    #[test]
+    fn kich_thuoc_object_dung_spec_khong_hardcode() {
+        // KT-58: `vifast-core` đọc các hằng này thay vì chép tay 48/64/4096 (D2-11).
+        assert_eq!(SLOT_BYTES, 48);
+        assert_eq!(SLOT_ALIGN_BYTES, 16);
+        assert_eq!(CNODE_BASE_BYTES, 64);
+        assert_eq!(DEFAULT_ALIGN_BYTES, 16);
+        assert_eq!(PAGE_BYTES, 4096);
+        assert_eq!(UNTYPED_MIN_BYTES, 4096);
+        assert_eq!(OBJ_TCB_BYTES, 512);
+        assert_eq!(OBJ_SCHED_CONTEXT_BYTES, 256);
+        assert_eq!(OBJ_ENDPOINT_BYTES, 64);
+        assert_eq!(OBJ_NOTIFICATION_BYTES, 64);
+        assert_eq!(OBJ_REPLY_BYTES, 64);
+        assert_eq!(OBJ_SCHED_CONTROL_BYTES, 64);
     }
 
     #[test]

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "vifast-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Core kernel no_std (K3b/KT-58): Untyped + CNode + MDB + capability port từ sim, không unsafe, không alloc"
+
+[dependencies]
+# D2-11: hằng số ABI (48 B slot, cỡ object, 16 syscall, 19 error) sinh từ `spec/abi.toml`,
+# không chép tay sang core.
+vifast-abi = { path = "../../lib/vifast-abi" }

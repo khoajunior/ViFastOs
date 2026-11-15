@@ -72,6 +72,30 @@ pub const RESERVED_OBJECTS: [(&str, u16); 8] = [
     ("PowerControl", 16),
 ];
 #[rustfmt::skip]
+pub const SLOT_BYTES: usize = 48;
+#[rustfmt::skip]
+pub const SLOT_ALIGN_BYTES: usize = 16;
+#[rustfmt::skip]
+pub const DEFAULT_ALIGN_BYTES: usize = 16;
+#[rustfmt::skip]
+pub const PAGE_BYTES: usize = 4096;
+#[rustfmt::skip]
+pub const UNTYPED_MIN_BYTES: usize = 4096;
+#[rustfmt::skip]
+pub const CNODE_BASE_BYTES: usize = 64;
+#[rustfmt::skip]
+pub const OBJ_ENDPOINT_BYTES: usize = 64;
+#[rustfmt::skip]
+pub const OBJ_NOTIFICATION_BYTES: usize = 64;
+#[rustfmt::skip]
+pub const OBJ_REPLY_BYTES: usize = 64;
+#[rustfmt::skip]
+pub const OBJ_SCHED_CONTEXT_BYTES: usize = 256;
+#[rustfmt::skip]
+pub const OBJ_SCHED_CONTROL_BYTES: usize = 64;
+#[rustfmt::skip]
+pub const OBJ_TCB_BYTES: usize = 512;
+#[rustfmt::skip]
 /// (method, params, returns) — từ `[method_signature]` (stable-draft).
 #[rustfmt::skip]
 pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 13] = [

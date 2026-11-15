@@ -25,3 +25,6 @@ path = "src/main.rs"
 # KT-55: IR conformance (đọc 5 `.scn`) + dòng trace chuẩn hoá dùng chung với kernel.
 vifast-scenario = { path = "../../lib/vifast-scenario" }
 vifast-traceformat = { path = "../../lib/vifast-traceformat", features = ["std"] }
+# KT-58: core kernel `no_std` (K3b tầng 1) — test parity chạy **cùng** kịch bản trên sim
+# (oracle) và core; chỉ dev-dependency, không đổi ngữ nghĩa sim.
+vifast-core = { path = "../../kernel/vifast-core" }

@@ -5,6 +5,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "vifast-core",
     "vifast-kbin-riscv64",
     "vifast-plat-common",
     "vifast-plat-riscv64",
