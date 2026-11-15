@@ -151,5 +151,6 @@ file 89.848 → 90.696; `.text` 19.302 → 20.210; BUILD_ID `072cf7807b5d4a94` �
 
 - Cổng K3 §5.2: **9/9 ĐẠT**, không nới ngưỡng; KT-57 and K3 **DONE (đề xuất)** — chờ reviewer +
   Agent 0 lật QUEUE (D2-37).
-- Commit `[KT-57]` + `[KT-57b]` (hash ghi ở STATE sau commit), push `origin/main`; worktree
-  `viscript/` của tab khác **không chạm**.
+- Commit `[KT-57]` = **`ce943707`** + `[KT-57b]` (STATE/journalkết quả cuối), push
+  `origin/main` (`d543352d..ce943707`); `HEAD..origin/main = 0` sau push; worktree `viscript/`
+  của tab khác **không chạm**.

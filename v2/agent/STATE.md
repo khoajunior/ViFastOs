@@ -4,10 +4,11 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : KT-57 đang chốt — HEAD vào task `d543352d` ([KT-00] lật KT-56 DONE + mở KT-57;
-                parent code KT-56 `25251719`). Commit `[KT-57]` + `[KT-57b]` tạo sau review; hash
-                ghi trong khối này sau commit (không thể tự tham chiếu trước). Worktree có
-                `viscript/` + `review/` của tab khác — **không chạm**; commit KT-57 = `v2/**`.
+HEAD          : `ce943707` ([KT-57] cổng K3: soak 0/1000, matrix 9/9, 100k L1, perf, K3-DOD) +
+                `[KT-57b]` — **đã push**, `HEAD..origin/main = 0`. HEAD vào task `d543352d`
+                ([KT-00] lật KT-56 DONE + mở KT-57; parent code KT-56 `25251719`); reviewer-kt57
+                DRIFT thấp → vá tài liệu F1..F7 + T-INFRA trước commit. Worktree có `viscript/` +
+                `review/` của tab khác — **không chạm**; commit KT-57 = `v2/**` (không `spec/`).
 BUILD_ID      : ảnh **đổi nhẹ** so KT-56 (chỉ ảnh sản phẩm +4 dòng evidence-only D2-80; 3 ảnh
                 test **không đổi byte** — BUILD_ID ktest vẫn `3e6ae37a278300df`):
                 product 90.696 B / data+bss **11.248** (không đổi), ktest 332.176 / 17.344,
@@ -31,7 +32,8 @@ Bước          : 9/9 xong: baseline gate 574 → đỏ trước `soak.sh 999` 
                 median 389.084.167 ns; drift 9.999.900–10.020.100 ns; late 20,0–20,1 µs) →
                 budget 4 ảnh → conformance 5/5 (61/61) → **gate 574** → reviewer-kt57 **DRIFT
                 mức THẤP** (cổng đạt thật, tự kiểm cả 1.000 log; patch sha 71318083 khớp) → vá
-                tài liệu F1..F7 + T-INFRA (không chạy lại soak/L1) → gate lại 574 → commit.
+                tài liệu F1..F7 + T-INFRA (không chạy lại soak/L1) → gate lại **574** → commit
+                `ce943707` + `[KT-57b]` + push.
 Nhánh         : main
 Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 574 test/75 suite, 0 failed**, L1 1.000 seed
                 **824 ms** (`JOURNAL/kt57-gate.log`, lần cuối; trước đó 743 ms); baseline **574**. Kernel **không** trong
