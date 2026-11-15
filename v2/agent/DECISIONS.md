@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-92`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-93`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-92: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-93: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -153,3 +153,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-91** **Kỷ luật commit khi nhiều agent dùng chung worktree**: index là **tài nguyên chung** ⇒ commit của lead đã vô tình nuốt staged của Agent 2 (KT-63 nằm trong `4dd5014f` thay vì commit riêng). Từ nay: (a) **trước mọi commit**, chạy `git diff --cached --name-only` và chỉ tiếp nếu rỗng **hoặc** toàn tệp của mình; (b) lead commit bằng **pathspec**: `git commit -- <đường-dẫn>`, không dựa vào index; (c) Agent 2 **không** `git add` trước khi lead lật sổ; (d) **không** rewrite lịch sử đã push để “sửa” phân bổ — ghi chú bằng `*-commit-note.md` như KT-63. Vi phạm này không làm sai nội dung (cây cuối xanh đủ cổng) nhưng làm sai **truy vết**, nên phải chặn từ quy trình.
 
 - **D2-92** KT-64 — bốn chốt sau review: (a) **cửa sổ slot phải là hàm của (region, offset)**, không chỉ `offset`: hai CNode retype ở offset 0 của hai region khác nhau **không** được trùng word, và phải có **test hồi quy** hai region; (b) **`Busy` khi quá hạn chờ ack phải chứng minh được**: nếu mọi vòng waiter tự `tlb_service` hộ hart khác thì nhánh `Busy` là **dead code** — phải làm nó **reachable** (không tự ack hộ) hoặc test bằng `TlbEnv` tiêm mà ack không bao giờ tới, khẳng định `Busy` + không treo; (c) **parity `TlbFlush` phải làm**, không được miễn: sim **có** mô hình giao thức shootdown (`tlb_shootdown_begin/wait/poll`, `tlb_pending`, mask ack — KT-40) nên `seq/targets/pending/acked/Busy` so được; đưa vào **KT-64a**; (d) **`ScData.bound` phải có bất biến** trong `check_*` (1:1 hai chiều) và có test **revoke**-gỡ-mồ-côi, không chỉ `delete`.
+
+- **D2-93** KT-65 — **`vifast-plat-user` được nằm trong danh sách crate đóng của D2-17**: nó khớp tiền tố `kernel/vifast-plat-*` (luật R5 của `v2/bin/v2` + thiết kế §702) và là **shim ABI U-mode**: chỉ `ecall` + đọc tham số trả về, **không** lệnh đặc quyền (không CSR, không `sfence`, không truy cập vật lý). Ba chương trình U-mode (`procsrv`, `shell`, `child`) vì vậy vẫn **0 `unsafe`**. Điều kiện: (a) mọi `unsafe` của crate này phải nằm trong hàm gọi syscall; (b) reviewer phải xác nhận **không** có lệnh đặc quyền nào; (c) nếu sau này cần thêm lệnh đặc quyền ⇒ **D2 mới**, cấm tự mở rộng. Ghi tên crate đích danh vào D2-17 để hết mơ hồ tiền tố.
