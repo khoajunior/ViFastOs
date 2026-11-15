@@ -1,5 +1,7 @@
 # KT-60 — K3b tầng 3: IPC/Reply/Notification/WaitAddr/fault (`no_std`)
 
+**Commit:** `70fd5e45` `[KT-60]` + `[KT-60b]` (STATE) — pushed `main`, `HEAD..origin/main = 0`.
+
 **Vào:** `agentctl next --project v2` ⇒ KT-60; HEAD `56083428` ([KT-00] lật KT-59 DONE, mở
 KT-60). Baseline `gate --fast` **587 test/76 suite**, L1 1.000 seed; `ktest.sh 1 matrix` 9/9
 (TAP 43/3/7). Đọc `review/agent0/K3-PLAN.md` Q13, D2-82/83/84, `docs/k3b-core.md` §6/§7,
