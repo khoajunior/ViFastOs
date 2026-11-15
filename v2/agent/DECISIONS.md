@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-86`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-87`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-86: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-87: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -141,6 +141,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-85** Footprint trước KT-61: (a) **pin 196.608 B của D2-84 áp cho `size_of::<Machine>()`**, còn **trần 262.144 B áp cho ảnh link** (QD §3.5) — hai ngưỡng khác nhau, cấm đọc lẫn; (b) `Machine` hiện 192.456 B (97,9 % pin) ⇒ **bắt buộc** giảm **`MAX_MAIL_LOG` 64 → 32** (−12.288 B) để lấy lại headroom trước KT-61, cập nhật bảng phân bố + pin; (c) test pin phải **chứng minh bảng đủ** (assert `padding ≤ 8`, hoặc so `size_of` từng field) — `padding = total − used` rồi assert tổng bằng total là **tautology**, cấm dùng làm bằng chứng; (d) KT-61 phải đo ảnh link thật và giữ ≤ 262.144 B, đồng thời ghi cả hai con số (core + ảnh) trong báo cáo.| `.data + .bss` | ≤ **256 KiB** `[TK]` `[GT]`, đo ở K0.5 | QD §3.5, §9 Q8 |
 
 - **D2-86** **K3b DONE** (phase-level): core `no_std` (Untyped/CNode/MDB/cap/TCB/sched/IPC/Notification/WaitAddr/fault) **chạy trên nhân thật** — TAP **43..52** trên QEMU (không host), `ktest` **53/53** + guard 3/3 + user 7/7, matrix smp 1/2/4 **9/9**; soak **0/1000** (227 s, 3 luồng, không icount, BUILD_ID `34dc594e0f651ed3` neo `.text`); conformance **61/61 / 5/5**; gate **598/78**; `size_of::<Machine>()` **180.168 ≤ 196.608**, ảnh **191.416 / 197.568 / 2.680 / 11.752 ≤ 262.144**, static ở **`.bss`** (`init_zeroed`, RW `filesz` ~7,8 KB) — không đưa 180 KB vào file; clippy kernel `-D warnings` **sạch**; helper chết đã xoá. **Phạm vi đúng**: K3b = core **chạy trên nhân**, **không** phải kernel đầy đủ. Nợ → **K3.5** (10 mục, DOD §11): procsrv+shell; cap transfer (receive window/`plan_cap_transfer`); finalise IPC khi Revoke; `TlbFlush` thật; `SchedContext.Bind`; `tcb_resume_with_regs`; `SlotPool` → arena; syscall/`init` dùng core; WaitAddr + Reply cap toàn phần; L1 100k **đủ 4 cấu hình** (mới xong smp 1, phần còn lại là nợ thời gian — **DoD cổng K6**).| mã lỗi kernel | **19** (bỏ `Restart`); syscall **0..14** + **15 `DebugGetInfo`**; dải reserved **16..31** | QD §4, D2-29 |
-| soak v2 | **N = 1.000**, máy **ps**, 3 luồng, `n ≥ 3/p`, p = 0,3 % | QD §5.3 |
+
+- **D2-87** **K3.5 roadmap** (từ nợ D2-86/DOD §11, mỗi task ≤ 3 h): **KT-62** syscall `0..15` đi vào `Machine` thật + `init` U-mode dùng core (xoá đường tạm KT-53); **KT-63** chuyển cap qua IPC (receive window/`plan_cap_transfer`/`RIGHT_GRANT`/badge) + finalise IPC khi Revoke (huỷ caller/waiter/hàng); **KT-64** `TlbFlush` thật + `SlotPool`→arena (một nguồn sự thật cap) + `SchedContext.Bind` + `tcb_resume_with_regs` + WaitAddr toàn phần; **KT-65** procsrv U-mode (Rust, `Recv` FaultKind, `wait`/`kill`) + shell tối thiểu trên UART; **KT-66** cổng K3.5 (TAP 100 %, soak 0/1000, L1 100k × smp 1/2/4/8 = 400.000 lượt, conformance 5/5, `K35-DOD`). **Luật**: mỗi task phải chứng minh trên QEMU (TAP), không “host-only”; không mở lại `spec/` trừ khi D2 mới; L1 400k đủ 4 cấu hình là **DoD cổng** (KT-66), không phải task thường.| soak v2 | **N = 1.000**, máy **ps**, 3 luồng, `n ≥ 3/p`, p = 0,3 % | QD §5.3 |
 | L1 trong `--fast` | **1.000** seed (nightly **100.000**) | QD §5.2 |
 | số kịch bản ABI | **21** `.scn` = 20 ca gốc (QD §4) + ca "Exit khi procsrv chưa Recv" (DUYET §1.3) | D2-27 |
