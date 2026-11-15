@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! `vifast-core` — core kernel `no_std` của K3b, **tầng 1** (KT-58): Untyped + CNode + MDB +
-//! capability, port **nguyên ngữ nghĩa** từ `v2/sim/vifast-sim/src/kobj.rs` (sim vẫn là
-//! oracle; core không thiết kế lại).
+//! `vifast-core` — core kernel `no_std` của K3b: **tầng 1** (KT-58) Untyped + CNode + MDB +
+//! capability, **tầng 2** (KT-59) TCB + transition + scheduler 256 mức + ngân sách MCS + hộp
+//! thư FIFO, port **nguyên ngữ nghĩa** từ `v2/sim/vifast-sim/src/kobj.rs` (sim vẫn là oracle;
+//! core không thiết kế lại).
 //!
 //! # Phạm vi KT-58 (D2-82 §12 nợ K3b)
 //!
@@ -9,10 +10,18 @@
 //!   `CNode` (slot 48 B theo spec, Copy/Mint/Delete/Revoke, quyền 4 bit, badge),
 //!   cây dẫn xuất MDB kiểu seL4 (cha–con, reparent khi xoá, revoke cây con, finalise CNode
 //!   lồng nhau), và các bất biến `check_caps`/`check_bytes`.
-//! - **Không**: TCB/scheduler/MCS (KT-59), Endpoint/Notification/Reply/IPC/WaitAddr/fault
-//!   (KT-60), Frame/PageTable/VSpace (K2 object layer `vifast-plat-common::obj`, KT-52) —
-//!   `Retype` các loại reserved trả `NotSupported` như sim (trừ Frame/PageTable mà sim đã
-//!   mở ở K2, xem `docs/k3b-core.md` §khác biệt), kết nối syscall/`init` (KT-61).
+//! - **Không**: Endpoint/Notification/Reply/IPC/WaitAddr/fault (KT-60), Frame/PageTable/
+//!   VSpace (K2 object layer `vifast-plat-common::obj`, KT-52) — `Retype` các loại reserved
+//!   trả `NotSupported` như sim (trừ Frame/PageTable mà sim đã mở ở K2, xem
+//!   `docs/k3b-core.md` §khác biệt), kết nối syscall/`init` (KT-61).
+//! - **KT-59**: `TcbState` 11 trạng thái + bảng `ALLOWED` 11×11, `Tcb.Configure/SetFaultEp/
+//!   SetSpace/SetSchedParams/SetPriority/SetAffinity/SetHome/Suspend/Resume/ReadState`, một
+//!   cửa `transition_tcb`; scheduler 256 mức + bitmap, ready queue tĩnh FIFO (round-robin khi
+//!   preempt/yield), `dispatch`/`block_current`/`wake`/`yield_current`, preempt ép; ngân sách
+//!   MCS `SchedControl.Configure`/`tick`/refill + `pick` chỉ TCB có budget; hộp thư theo hart
+//!   FIFO cố định 8 message + backpressure `Busy` + `post_mail`/`process_mail`/`send_mail`.
+//!   Donation KT-21 là phần của `Call`/`Reply` (KT-60): giữ trường + công thức
+//!   `donated_priority`, chưa có đường tạo donation.
 //!
 //! # Vì sao `no_std` + tĩnh
 //!
@@ -40,14 +49,31 @@
 
 pub mod arena;
 mod check;
+mod core_sched;
+mod core_tcb;
 mod error;
 mod machine;
+pub mod mailbox;
+pub mod mcs;
+pub mod sched;
 mod slotpool;
 pub mod spec;
+pub mod tcb;
 
 pub use arena::Region;
 pub use error::{CapId, CapInfo, CheckFailure, KError, ObjId, ObjType, SlotRef};
-pub use machine::{Machine, MAX_CAPS, MAX_OBJECTS, MAX_SLOT_WORDS, MAX_UNTYPEDS};
+pub use machine::{
+    FinaliseEntry, Footprint, Machine, FOOTPRINT_PARTS, MAX_CAPS, MAX_FINALISE, MAX_HARTS,
+    MAX_OBJECTS, MAX_SCHED_CONTEXTS, MAX_SLOT_WORDS, MAX_TCBS, MAX_UNTYPEDS,
+};
+pub use mailbox::{FlushMsg, HartMailbox, Mailbox, MailboxMsg, MAILBOX_CAP, MAX_MAIL_LOG};
+pub use mcs::{donated_priority, ScBudget, ScInfo};
+pub use sched::{HartSched, Published, BITMAP_WORDS, MAX_PRIORITY};
+pub use tcb::{
+    allowed, allowed_count, coverage, coverage_design, forbidden_count, reserved_count,
+    BlockedOnKind, FaultAccess, FaultKind, SleepReason, SuspendMode, TcbInfo, TcbSnapshot,
+    TcbState, VmFaultReason, ALLOWED, TCB_STATE_COUNT,
+};
 
 /// Số hole tự do tối đa của pool slot CNode (`slotpool`).
 pub(crate) const MAX_HOLES: usize = 16;

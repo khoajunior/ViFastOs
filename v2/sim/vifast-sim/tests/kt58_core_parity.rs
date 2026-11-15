@@ -2676,5 +2676,13 @@ fn core_hang_so_spec_va_dau_chan_tinh() {
         kc::MAX_CAPS,
         kc::MAX_SLOT_WORDS
     );
-    assert!(size <= 96 * 1024, "core tĩnh phải ≤ 96 KiB (đo {size} B)");
+    // **D2-84**: pin core = **≤ 196.608 B (192 KiB)** = trần ảnh 262.144 B trừ 64 KiB
+    // headroom cho static kernel + cấu trúc tương lai. KT-58 pin `≤ 96 KiB` là dấu chân
+    // **tầng 1**; KT-59 thêm 64 body TCB (512 B IPC buffer) + 32 SchedContext + 8 hart + 8 hộp
+    // thư nên dấu chân tăng đúng phạm vi. Vượt 192 KiB ⇒ **tối ưu** (giảm `MAX_MAIL_LOG`,
+    // chuyển body TCB sang arena), **không** nâng pin; KT-61 đo lại ảnh link thật.
+    assert!(
+        size <= 196_608,
+        "core tĩnh phải ≤ 192 KiB theo D2-84 (đo {size} B)"
+    );
 }

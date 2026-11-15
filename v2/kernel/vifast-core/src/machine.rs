@@ -1,23 +1,34 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! `Machine` — model core tầng 1: Untyped + CNode + MDB + capability (KT-58).
+//! `Machine` — model core K3b: Untyped + CNode + MDB + capability (KT-58) **và** TCB +
+//! transition + scheduler + hộp thư (KT-59).
 //!
 //! Port **nguyên ngữ nghĩa** từ `v2/sim/vifast-sim/src/kobj.rs` (oracle): cùng id tuần tự
-//! không tái dùng, cùng thứ tự cấp phát, cùng mã lỗi, cùng bất biến `check_caps`/`check_bytes`.
-//! Khác biệt **duy nhất** so với sim ở tầng này (ghi trong `docs/k3b-core.md`):
+//! không tái dùng, cùng thứ tự cấp phát, cùng mã lỗi, cùng bất biến `check_caps`/`check_bytes`/
+//! `check_sched`/`check_mailboxes`. Khác biệt **duy nhất** so với sim (ghi trong
+//! `docs/k3b-core.md`):
 //!
 //! 1. Bảng tĩnh `.bss` thay `Vec` (không `alloc`); đầy bảng ⇒ `NotEnoughMemory` (harness
 //!    `add_*` panic như sim khi arena kernel đầy).
-//! 2. Chưa có body TCB/IPC/Notification/Reply (KT-59/60): object vẫn có `ObjType`, `alive`,
-//!    `untyped/offset/len`, cap/MDB đầy đủ — đủ cho parity CNode/MDB/Untyped.
+//! 2. Chưa có body Endpoint/Notification/Reply/IPC (KT-60): object vẫn có `ObjType`, `alive`,
+//!    `untyped/offset/len`, cap/MDB đầy đủ; TCB/SchedContext **đã có body** (KT-59).
 //! 3. Không `Retype` `Frame`/`PageTable`/`VSpace` (K2 object layer `vifast-plat-common::obj`,
 //!    KT-52) — trả `NotSupported`; sim (K2) đã mở `Frame`/`PageTable`, xem `docs/k3b-core.md`.
+//! 4. **Donation KT-21** là phần của `Call`/`Reply` (KT-60): KT-59 giữ trường
+//!    `donated_sc`/`donated_to`/`donor` + công thức `donated_priority`, nhưng chưa có đường tạo
+//!    donation — parity KT-59 phủ trạng thái **không donation** (ghi trong docs §7).
+//! 5. **Reply/Notification/IPC** chưa có body ⇒ `unlink_tcb_queues` chỉ là mốc (không có hàng
+//!    chờ nào của KT-24..28 để gỡ); `TlbFlush` trong hộp thư là no-op (core chưa có TLB).
 
 use crate::arena::Region;
 use crate::error::{CapId, CapInfo, KError, ObjId, ObjType, SlotRef};
+use crate::mailbox::HartMailbox;
+use crate::mcs::ScBudget;
+use crate::sched::{HartSched, Published};
 use crate::slotpool::SlotPool;
 use crate::spec::{
     ARENA_ALIGN, CNODE_BASE_BYTES, DEFAULT_ALIGN_BYTES, FLAG_GUEST, RIGHTS_ALL, RIGHT_WRITE,
 };
+use crate::tcb::{TcbInfo, TcbState, TCB_STATE_COUNT};
 
 /// Số object tối đa trong bảng tĩnh (id **không tái dùng**, kể cả object đã chết).
 pub const MAX_OBJECTS: usize = 256;
@@ -27,6 +38,142 @@ pub const MAX_CAPS: usize = 512;
 pub const MAX_UNTYPEDS: usize = 16;
 /// Số word slot CNode tối đa (1 word = 1 cap id; 48 B slot của spec vẫn được kế toán byte).
 pub const MAX_SLOT_WORDS: usize = 4096;
+/// Số **body TCB** tối đa (biên tĩnh `[TK]`; sim không biên vì `Box`).
+pub const MAX_TCBS: usize = 64;
+/// Số **body SchedContext** tối đa (biên tĩnh `[TK]`).
+pub const MAX_SCHED_CONTEXTS: usize = 32;
+/// Số hart tối đa của mô hình (`MAX_HARTS = 8`, KT-49/D2-72 Q4).
+pub const MAX_HARTS: usize = 8;
+/// Số dòng log finalise TCB tối đa — **bằng `MAX_OBJECTS`** (không phải `MAX_TCBS`).
+///
+/// `finalise_tcb` ghi **một** dòng cho mỗi TCB **đang sống** khi finalise; body tái dùng nên
+/// một `Machine` có thể finalise nhiều lượt TCB (tối đa bằng số object id từng cấp —
+/// `MAX_OBJECTS`). Đầy ⇒ [`Machine::finalise_tcb`] trả `NotEnoughMemory` (không cắt im lặng,
+/// không panic); caller phải tái tạo `Machine` nếu cần quá `MAX_OBJECTS` finalise.
+pub const MAX_FINALISE: usize = MAX_OBJECTS;
+
+// ---------------------------------------------------------------------------------------------
+// Body của object (phần trạng thái KT-59 thêm vào; `.bss`, không cấp phát)
+// ---------------------------------------------------------------------------------------------
+
+/// Loại body đã cấp cho một object — `NONE` với các loại chưa port body (Endpoint/...).
+pub(crate) const BODY_NONE: u8 = 0;
+/// Body TCB (`Machine::tcbs`).
+pub(crate) const BODY_TCB: u8 = 1;
+/// Body SchedContext (`Machine::scs`).
+pub(crate) const BODY_SC: u8 = 2;
+
+/// Tham chiếu body của object — chỉ số + cờ sống.
+///
+/// sim `destroy` body khi object chết; core đánh dấu `alive = false` và trả chỉ số vào
+/// free-list để tái dùng. Truy cập body đã chết trả `InvalidCapability` như sim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BodyRef {
+    pub(crate) kind: u8,
+    pub(crate) idx: u16,
+    pub(crate) alive: bool,
+}
+
+impl BodyRef {
+    pub(crate) const NONE: Self = Self {
+        kind: BODY_NONE,
+        idx: 0,
+        alive: false,
+    };
+}
+
+/// Ruột TCB — port `TcbData` của sim (D2-33/§4.4), bỏ các trường IPC của KT-24..28
+/// (`last_ipc_error`/`recv_window`/`last_fault`/`notif` — KT-60).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TcbData {
+    pub(crate) state: TcbState,
+    pub(crate) suspended: bool,
+    pub(crate) exit_code: Option<u64>,
+    /// Cap `fault_ep` (`Tcb.SetFaultEp`).
+    pub(crate) fault_ep: Option<CapId>,
+    /// CSpace của TCB (object CNode).
+    pub(crate) cspace: Option<ObjId>,
+    pub(crate) priority: u8,
+    pub(crate) max_controlled_priority: u8,
+    /// HartMask ≤ 64 bit.
+    pub(crate) affinity: u64,
+    pub(crate) home: u16,
+    /// SchedContext riêng (`set_sched_params`).
+    pub(crate) sched_context: Option<ObjId>,
+    /// SC đang nhận donation (KT-21 — chưa có đường tạo ở KT-59, luôn `None`).
+    pub(crate) donated_sc: Option<ObjId>,
+    /// Notification đang bind (KT-27 — chưa có ở KT-59, luôn `None`).
+    pub(crate) bound_notification: Option<ObjId>,
+    /// 60 word "IPC buffer model" (KT-24 — KT-59 chỉ giữ chỗ + accessor; transfer thuộc KT-60).
+    pub(crate) ipc_buffer: [u64; 60],
+    /// 4 MR "thanh ghi" (KT-24 — như trên).
+    pub(crate) regs: [u64; 4],
+}
+
+impl TcbData {
+    pub(crate) const EMPTY: Self = Self {
+        state: TcbState::Inactive,
+        suspended: false,
+        exit_code: None,
+        fault_ep: None,
+        cspace: None,
+        priority: 0,
+        max_controlled_priority: 0,
+        affinity: 1,
+        home: 0,
+        sched_context: None,
+        donated_sc: None,
+        bound_notification: None,
+        ipc_buffer: [0; 60],
+        regs: [0; 4],
+    };
+
+    pub(crate) fn snapshot(&self) -> TcbInfo {
+        TcbInfo {
+            state: self.state,
+            suspended: self.suspended,
+            exit_code: self.exit_code,
+            fault_ep: self.fault_ep,
+            cspace: self.cspace,
+            priority: self.priority,
+            max_controlled_priority: self.max_controlled_priority,
+            affinity: self.affinity,
+            home: self.home,
+            sched_context: self.sched_context,
+            donated_sc: self.donated_sc,
+            bound_notification: self.bound_notification,
+        }
+    }
+}
+
+/// Ruột `SchedContext` — port `SchedData` của sim, bỏ phần `bound` (KT-27).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScData {
+    pub(crate) budget: ScBudget,
+    /// TCB đang nhận donation (KT-21 — chưa tạo ở KT-59).
+    pub(crate) donated_to: Option<ObjId>,
+    /// TCB đang cho mượn SC (KT-21 — chưa tạo ở KT-59).
+    pub(crate) donor: Option<ObjId>,
+}
+
+impl ScData {
+    pub(crate) const EMPTY: Self = Self {
+        budget: ScBudget::new(),
+        donated_to: None,
+        donor: None,
+    };
+}
+
+/// Một dòng log finalise TCB (KT-18 DoD 9) — port `FinaliseEntry` của sim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FinaliseEntry {
+    /// TCB.
+    pub tcb: ObjId,
+    /// Trạng thái ghi log (luôn `Dead` ở sim).
+    pub state: TcbState,
+    /// SC được trả lại (hook finalise).
+    pub released_sched_context: Option<ObjId>,
+}
 /// Sổ cái một object (metadata; body của object lõi **chưa** port ở tầng này).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Meta {
@@ -47,6 +194,8 @@ pub(crate) struct Meta {
     pub(crate) slot_len: usize,
     /// CNode: offset trong pool word.
     pub(crate) slot_base: usize,
+    /// Body TCB/SchedContext (KT-59); `NONE` với loại chưa port body.
+    pub(crate) body: BodyRef,
 }
 
 impl Meta {
@@ -60,6 +209,7 @@ impl Meta {
         slots_meta: None,
         slot_len: 0,
         slot_base: 0,
+        body: BodyRef::NONE,
     };
 }
 
@@ -87,7 +237,7 @@ impl Cap {
     };
 }
 
-/// Core model (tầng 1) — **không** `unsafe`, **không** cấp phát động.
+/// Core model K3b — **không** `unsafe`, **không** cấp phát động.
 #[derive(Debug, Clone, Copy)]
 pub struct Machine {
     pub(crate) regions: [Region; MAX_UNTYPEDS],
@@ -97,6 +247,68 @@ pub struct Machine {
     pub(crate) caps: [Cap; MAX_CAPS],
     pub(crate) n_caps: usize,
     pub(crate) slots: SlotPool,
+    /// Body TCB (KT-59) + free-list chỉ số.
+    pub(crate) tcbs: [TcbData; MAX_TCBS],
+    pub(crate) n_tcbs: usize,
+    pub(crate) tcb_free: [u16; MAX_TCBS],
+    pub(crate) n_tcb_free: usize,
+    /// Body SchedContext (KT-59) + free-list chỉ số.
+    pub(crate) scs: [ScData; MAX_SCHED_CONTEXTS],
+    pub(crate) n_scs: usize,
+    pub(crate) sc_free: [u16; MAX_SCHED_CONTEXTS],
+    pub(crate) n_sc_free: usize,
+    /// Bộ đếm cặp chuyển trạng thái 11×11 (KT-18 DoD 4).
+    pub(crate) pair_hits: [u32; TCB_STATE_COUNT * TCB_STATE_COUNT],
+    /// Bộ đếm cặp **cấm** bị thử (KT-23 DoD 3).
+    pub(crate) forbidden_hits: [u32; TCB_STATE_COUNT * TCB_STATE_COUNT],
+    /// Số lần `Running → Sleeping{Budget}` (KT-20/KT-23).
+    pub(crate) budget_sleeps: u64,
+    /// Số lần một `SchedContext` được nạp lại (KT-20/KT-23).
+    pub(crate) budget_refills: u64,
+    /// Log finalise TCB (KT-18 DoD 9), có biên `MAX_FINALISE`.
+    pub(crate) finalise_log: [FinaliseEntry; MAX_FINALISE],
+    pub(crate) n_finalise: usize,
+    /// Số lần `finalise_tcb` bị từ chối vì log đầy (chẩn đoán; không phải ABI).
+    pub(crate) finalise_overflow: u32,
+    /// Scheduler theo hart (KT-19/KT-29).
+    pub(crate) sched: [HartSched; MAX_HARTS],
+    /// Số hart đang dùng (`1..=MAX_HARTS`).
+    pub(crate) n_harts: usize,
+    /// Hộp thư theo hart (KT-22).
+    pub(crate) mail: [HartMailbox; MAX_HARTS],
+    /// Trường công bố mỗi hart (KT-29).
+    pub(crate) published: [Published; MAX_HARTS],
+    /// Hart "đang chạy" của mô hình tại thời điểm gọi (KT-29).
+    pub(crate) current_hart: u16,
+    /// Số TCB đã di trú thành công (KT-29).
+    pub(crate) migrate_count: u64,
+    /// Preempt ép tại mọi public op (KT-19, mặc định tắt).
+    pub(crate) preempt_every_step: bool,
+    /// Thời gian ảo (tick) — **không** đọc wall clock (D2-49(h)).
+    pub(crate) now: u64,
+}
+
+/// Số thành phần của báo cáo [`Footprint`] (14 bảng/mảng + scalar + padding).
+pub const FOOTPRINT_PARTS: usize = 14;
+
+/// Phân bố byte **tĩnh** của [`Machine`] (D2-84) — không cấp phát; dùng cho test pin và
+/// KT-61 trước khi link vào ảnh.
+///
+/// `bytes[i]` là `size_of::<[T; N]>()` của từng bảng; `scalars` là tổng 9 `usize` + 4 `u64` +
+/// 1 `u16` + 1 `u32` + 1 `bool` (các trường đếm/cờ); `padding` là byte đệm/đuôi do `repr(Rust)`:
+/// `sum(bytes) + scalars + padding == total == size_of::<Machine>()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Footprint {
+    /// Tên 14 thành phần (cùng thứ tự `bytes`).
+    pub names: [&'static str; FOOTPRINT_PARTS],
+    /// Byte của từng thành phần.
+    pub bytes: [usize; FOOTPRINT_PARTS],
+    /// Tổng byte của các trường vô hướng.
+    pub scalars: usize,
+    /// Byte đệm (giữa các trường/đuôi struct).
+    pub padding: usize,
+    /// `size_of::<Machine>()`.
+    pub total: usize,
 }
 
 impl Default for Machine {
@@ -106,8 +318,20 @@ impl Default for Machine {
 }
 
 impl Machine {
-    /// Model rỗng (Untyped/CNode do harness thêm).
+    /// Model rỗng **1 hart** (Untyped/CNode do harness thêm).
     pub const fn new() -> Self {
+        Self::with_harts(1)
+    }
+
+    /// Model rỗng `harts` hart (`1..=MAX_HARTS`) — như sim `Machine::with_harts`.
+    ///
+    /// # Panics
+    /// `harts == 0` hoặc `harts > MAX_HARTS` (lỗi init của harness, như sim).
+    pub const fn with_harts(harts: u16) -> Self {
+        assert!(
+            harts > 0 && harts as usize <= MAX_HARTS,
+            "vifast-core: số hart phải trong 1..=MAX_HARTS"
+        );
         Self {
             regions: [Region::EMPTY; MAX_UNTYPEDS],
             n_regions: 0,
@@ -116,6 +340,91 @@ impl Machine {
             caps: [Cap::EMPTY; MAX_CAPS],
             n_caps: 0,
             slots: SlotPool::EMPTY,
+            tcbs: [TcbData::EMPTY; MAX_TCBS],
+            n_tcbs: 0,
+            tcb_free: [0; MAX_TCBS],
+            n_tcb_free: 0,
+            scs: [ScData::EMPTY; MAX_SCHED_CONTEXTS],
+            n_scs: 0,
+            sc_free: [0; MAX_SCHED_CONTEXTS],
+            n_sc_free: 0,
+            pair_hits: [0; TCB_STATE_COUNT * TCB_STATE_COUNT],
+            forbidden_hits: [0; TCB_STATE_COUNT * TCB_STATE_COUNT],
+            budget_sleeps: 0,
+            budget_refills: 0,
+            finalise_log: [FinaliseEntry {
+                tcb: 0,
+                state: TcbState::Dead,
+                released_sched_context: None,
+            }; MAX_FINALISE],
+            n_finalise: 0,
+            finalise_overflow: 0,
+            sched: [HartSched::new(); MAX_HARTS],
+            n_harts: harts as usize,
+            mail: [HartMailbox::new(); MAX_HARTS],
+            published: [Published {
+                idle: true,
+                cur_prio: 0,
+            }; MAX_HARTS],
+            current_hart: 0,
+            migrate_count: 0,
+            preempt_every_step: false,
+            now: 0,
+        }
+    }
+
+    // ------------------------------------------------------- dấu chân tĩnh (D2-84)
+
+    /// Báo cáo phân bố byte tĩnh của [`Machine`] (D2-84).
+    pub fn footprint() -> Footprint {
+        use core::mem::size_of;
+        let bytes = [
+            size_of::<[Region; MAX_UNTYPEDS]>(),
+            size_of::<[Meta; MAX_OBJECTS]>(),
+            size_of::<[Cap; MAX_CAPS]>(),
+            size_of::<SlotPool>(),
+            size_of::<[TcbData; MAX_TCBS]>(),
+            size_of::<[u16; MAX_TCBS]>(),
+            size_of::<[ScData; MAX_SCHED_CONTEXTS]>(),
+            size_of::<[u16; MAX_SCHED_CONTEXTS]>(),
+            size_of::<[u32; TCB_STATE_COUNT * TCB_STATE_COUNT]>(),
+            size_of::<[u32; TCB_STATE_COUNT * TCB_STATE_COUNT]>(),
+            size_of::<[FinaliseEntry; MAX_FINALISE]>(),
+            size_of::<[HartSched; MAX_HARTS]>(),
+            size_of::<[HartMailbox; MAX_HARTS]>(),
+            size_of::<[Published; MAX_HARTS]>(),
+        ];
+        // 9 × usize (n_regions/n_objects/n_caps/n_tcbs/n_tcb_free/n_scs/n_sc_free/
+        // n_finalise/n_harts) + 4 × u64 (budget_sleeps/budget_refills/migrate_count/now)
+        // + 1 × u16 (current_hart) + 1 × bool (preempt_every_step).
+        let scalars = 9 * size_of::<usize>()
+            + 4 * size_of::<u64>()
+            + size_of::<u16>()
+            + size_of::<u32>()
+            + size_of::<bool>();
+        let total = size_of::<Machine>();
+        let used: usize = bytes.iter().sum::<usize>() + scalars;
+        Footprint {
+            names: [
+                "regions[16]",
+                "objects[256]",
+                "caps[512]",
+                "slot_pool",
+                "tcbs[64]",
+                "tcb_free[64]",
+                "scs[32]",
+                "sc_free[32]",
+                "pair_hits[121]",
+                "forbidden_hits[121]",
+                "finalise_log[256]",
+                "sched[8]",
+                "mail[8]",
+                "published[8]",
+            ],
+            bytes,
+            scalars,
+            padding: total.saturating_sub(used),
+            total,
         }
     }
 
@@ -138,7 +447,17 @@ impl Machine {
         let region = self.n_regions;
         self.regions[region] = Region::new(base, size);
         self.n_regions += 1;
-        self.push_meta(ObjType::Untyped, None, 0, 0, Some(region), None, 0, 0)
+        self.push_meta(
+            ObjType::Untyped,
+            None,
+            0,
+            0,
+            Some(region),
+            None,
+            0,
+            0,
+            BodyRef::NONE,
+        )
     }
 
     /// Thêm CNode **do harness cấp** (init giữ CNode gốc) — như sim `add_cnode`.
@@ -151,7 +470,17 @@ impl Machine {
             .slots
             .alloc(slots)
             .expect("vifast-core: pool slot hết chỗ (tăng MAX_SLOT_WORDS)");
-        self.push_meta(ObjType::CNode, None, 0, 0, None, Some(slots), base, slots)
+        self.push_meta(
+            ObjType::CNode,
+            None,
+            0,
+            0,
+            None,
+            Some(slots),
+            base,
+            slots,
+            BodyRef::NONE,
+        )
     }
 
     /// Thêm object lõi **do harness cấp** (SchedControl, TCB khởi tạo, ...).
@@ -171,7 +500,16 @@ impl Machine {
         } else {
             (0, 0, None)
         };
-        self.push_meta(ty, None, 0, 0, None, slots_meta, slot_base, slot_len)
+        let body = match ty {
+            ObjType::Tcb => self
+                .alloc_tcb_body()
+                .expect("vifast-core: hết MAX_TCBS (harness)"),
+            ObjType::SchedContext => self
+                .alloc_sc_body()
+                .expect("vifast-core: hết MAX_SCHED_CONTEXTS (harness)"),
+            _ => BodyRef::NONE,
+        };
+        self.push_meta(ty, None, 0, 0, None, slots_meta, slot_base, slot_len, body)
     }
 
     /// Cap gốc cho một object (không cha) — harness đặt vào CNode bằng [`Machine::put_cap`].
@@ -482,6 +820,8 @@ impl Machine {
         if self.n_objects >= MAX_OBJECTS
             || self.n_caps >= MAX_CAPS
             || (need_region && self.n_regions >= MAX_UNTYPEDS)
+            || (ty == ObjType::Tcb && !self.tcb_body_available())
+            || (ty == ObjType::SchedContext && !self.sc_body_available())
         {
             return Err(KError::NotEnoughMemory);
         }
@@ -513,6 +853,12 @@ impl Machine {
         } else {
             (0, 0)
         };
+        // Đã kiểm sức chứa body ở trên ⇒ chỉ có thể thành công; lỗi nội bộ là bất biến vỡ.
+        let body = match ty {
+            ObjType::Tcb => self.alloc_tcb_body().ok_or(KError::NotEnoughMemory)?,
+            ObjType::SchedContext => self.alloc_sc_body().ok_or(KError::NotEnoughMemory)?,
+            _ => BodyRef::NONE,
+        };
         let obj = self.push_meta(
             ty,
             Some(u_idx),
@@ -526,6 +872,7 @@ impl Machine {
             },
             slot_base,
             slot_len,
+            body,
         );
         Ok(self.push_cap(obj, ty, Some(src_cap), src_rights, None))
     }
@@ -747,12 +1094,26 @@ impl Machine {
                     self.slots.fill_zero(base, len);
                 }
             }
-            // Đánh dấu chết + trả word slot pool (body TCB/IPC là KT-59/60 — không có ở đây).
+            // KT-18/KT-59: finalise TCB **trước** khi object chết (gỡ ready queue, `Dead`,
+            // trả `sched_context` qua hook, ghi log) — như sim `revoke_children`.
+            for &id in &dead[..ndead] {
+                if self.objects[id as usize - 1].ty == ObjType::Tcb {
+                    let _ = self.finalise_tcb(id);
+                }
+            }
+            // Đánh dấu chết + trả word slot pool + trả body TCB/SchedContext về free-list.
             for &id in &dead[..ndead] {
                 let idx = id as usize - 1;
+                let body = self.objects[idx].body;
                 {
                     let m = &mut self.objects[idx];
                     m.alive = false;
+                    m.body.alive = false;
+                }
+                if body.kind == BODY_TCB {
+                    self.free_tcb_body(body.idx);
+                } else if body.kind == BODY_SC {
+                    self.free_sc_body(body.idx);
                 }
                 let (base, len) = (self.objects[idx].slot_base, self.objects[idx].slot_len);
                 if len > 0 {
@@ -803,6 +1164,7 @@ impl Machine {
         slots_meta: Option<usize>,
         slot_base: usize,
         slot_len: usize,
+        body: BodyRef,
     ) -> ObjId {
         assert!(
             self.n_objects < MAX_OBJECTS,
@@ -818,6 +1180,7 @@ impl Machine {
             slots_meta,
             slot_len,
             slot_base,
+            body,
         };
         self.n_objects += 1;
         self.n_objects as ObjId
@@ -848,7 +1211,67 @@ impl Machine {
         self.n_caps as CapId
     }
 
-    fn object_index(&self, obj: ObjId) -> Result<usize, KError> {
+    fn tcb_body_available(&self) -> bool {
+        self.n_tcb_free > 0 || self.n_tcbs < MAX_TCBS
+    }
+
+    fn sc_body_available(&self) -> bool {
+        self.n_sc_free > 0 || self.n_scs < MAX_SCHED_CONTEXTS
+    }
+
+    fn alloc_tcb_body(&mut self) -> Option<BodyRef> {
+        let idx = if self.n_tcb_free > 0 {
+            self.n_tcb_free -= 1;
+            self.tcb_free[self.n_tcb_free] as usize
+        } else if self.n_tcbs < MAX_TCBS {
+            let i = self.n_tcbs;
+            self.n_tcbs += 1;
+            i
+        } else {
+            return None;
+        };
+        self.tcbs[idx] = TcbData::EMPTY;
+        Some(BodyRef {
+            kind: BODY_TCB,
+            idx: idx as u16,
+            alive: true,
+        })
+    }
+
+    fn alloc_sc_body(&mut self) -> Option<BodyRef> {
+        let idx = if self.n_sc_free > 0 {
+            self.n_sc_free -= 1;
+            self.sc_free[self.n_sc_free] as usize
+        } else if self.n_scs < MAX_SCHED_CONTEXTS {
+            let i = self.n_scs;
+            self.n_scs += 1;
+            i
+        } else {
+            return None;
+        };
+        self.scs[idx] = ScData::EMPTY;
+        Some(BodyRef {
+            kind: BODY_SC,
+            idx: idx as u16,
+            alive: true,
+        })
+    }
+
+    fn free_tcb_body(&mut self, idx: u16) {
+        if self.n_tcb_free < MAX_TCBS {
+            self.tcb_free[self.n_tcb_free] = idx;
+            self.n_tcb_free += 1;
+        }
+    }
+
+    fn free_sc_body(&mut self, idx: u16) {
+        if self.n_sc_free < MAX_SCHED_CONTEXTS {
+            self.sc_free[self.n_sc_free] = idx;
+            self.n_sc_free += 1;
+        }
+    }
+
+    pub(crate) fn object_index(&self, obj: ObjId) -> Result<usize, KError> {
         if obj == 0 || obj as usize > self.n_objects {
             return Err(KError::InvalidCapability);
         }
