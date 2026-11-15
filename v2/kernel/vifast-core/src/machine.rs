@@ -23,6 +23,7 @@ use crate::arena::Region;
 use crate::captable::{CapChildren, CapTable};
 use crate::error::{CapId, CapInfo, KError, ObjId, ObjType, SlotRef};
 use crate::mailbox::HartMailbox;
+use crate::mdb::{push_id, sort_dedup};
 use crate::objstate::{
     AddrWord, EndpointData, NotificationData, QueuedMsg, ReplyData, WaitNode, MAX_ADDR_WORDS,
     MAX_WAIT_NODES, NODE_NONE, WAITADDR_BUCKETS,
@@ -228,6 +229,10 @@ pub struct Machine {
     pub(crate) ipc_delivered: u64,
     pub(crate) ipc_dropped: u64,
     pub(crate) transfer_calls: u64,
+    /// **KT-63** — bộ đếm chuyển cap: cài được, unwrap, thất bại mềm (cùng tên/nghĩa sim).
+    pub(crate) cap_transfer_installed: u64,
+    pub(crate) cap_unwrapped: u64,
+    pub(crate) cap_transfer_failed: u64,
     pub(crate) fault_events: u64,
     /// Bộ đếm cặp chuyển trạng thái 11×11 (KT-18 DoD 4).
     pub(crate) pair_hits: [u32; TCB_STATE_COUNT * TCB_STATE_COUNT],
@@ -330,6 +335,9 @@ impl Machine {
             ipc_delivered: 0,
             ipc_dropped: 0,
             transfer_calls: 0,
+            cap_transfer_installed: 0,
+            cap_unwrapped: 0,
+            cap_transfer_failed: 0,
             fault_events: 0,
             pair_hits: [0; TCB_STATE_COUNT * TCB_STATE_COUNT],
             forbidden_hits: [0; TCB_STATE_COUNT * TCB_STATE_COUNT],
@@ -931,6 +939,10 @@ impl Machine {
     /// Con của cap bị xoá thuộc về **ông** (tổ tiên sống gần nhất) — MDB kiểu seL4.
     pub fn delete(&mut self, slot: SlotRef) -> Result<(), KError> {
         let cap = self.cap_at(slot.cnode, slot.slot)?;
+        let (cap_ty, cap_obj) = {
+            let c = self.cap(cap)?;
+            (c.ty, c.obj)
+        };
         let mut new_parent = self.cap(cap)?.parent;
         while let Some(p) = new_parent {
             if p != 0 && (p as usize) <= self.n_caps && self.caps[p as usize - 1].alive {
@@ -951,6 +963,15 @@ impl Machine {
         if let Some(c) = self.caps.get_mut(cap as usize - 1) {
             c.alive = false;
             c.parent = None;
+        }
+        // **KT-63** — cap Reply bị xoá ⇒ caller đang `BlockedOnReply` được đánh thức
+        // `Cancelled` + `Ready` (D2-53 Q8, như `Machine::delete` của sim); waiter Recv còn giữ
+        // cap Reply **đã chết** được coi như "không cấp Reply" (Q7b) thay vì lỗi cứng.
+        if cap_ty == ObjType::Reply && self.object_alive(cap_obj) {
+            self.cancel_reply_object(cap_obj);
+        }
+        if cap_ty == ObjType::Reply {
+            self.clear_dead_reply_in_waiters();
         }
         Ok(())
     }
@@ -1070,6 +1091,19 @@ impl Machine {
                     let _ = self.finalise_tcb(id);
                 }
             }
+            // **KT-63** — finalise IPC của object chết **trước** khi body về free-list:
+            // Reply huỷ caller (`Cancelled + Ready`), Endpoint đánh thức Recv waiter + đếm
+            // message bị huỷ (`ipc_dropped`), Notification đánh thức waiter (chống treo).
+            for &id in &dead[..ndead] {
+                match self.objects[id as usize - 1].ty {
+                    ObjType::Reply => {
+                        self.cancel_reply_object(id);
+                    }
+                    ObjType::Endpoint => self.finalise_endpoint_body(id),
+                    ObjType::Notification => self.finalise_notification_body(id),
+                    _ => {}
+                }
+            }
             // Đánh dấu chết + trả word slot pool + trả body TCB/SchedContext về free-list.
             for &id in &dead[..ndead] {
                 let idx = id as usize - 1;
@@ -1112,6 +1146,17 @@ impl Machine {
         }
 
         sort_dedup(&mut doomed, &mut nd);
+        // **KT-63** — Reply mất cap cuối qua `Revoke` cũng phải huỷ đường reply (Q8): ghi lại
+        // object Reply của các cap sắp chết để huỷ **sau** khi xoá (như `revoke_children` sim).
+        let mut reply_objs = [0u32; MAX_CAPS];
+        let mut n_reply = 0usize;
+        for &cap in &doomed[..nd] {
+            let c = self.caps[cap as usize - 1];
+            if c.alive && c.ty == ObjType::Reply && !reply_objs[..n_reply].contains(&c.obj) {
+                reply_objs[n_reply] = c.obj;
+                n_reply += 1;
+            }
+        }
         let mut deleted = 0;
         for &cap in &doomed[..nd] {
             if self.caps[cap as usize - 1].alive {
@@ -1120,6 +1165,10 @@ impl Machine {
                 deleted += 1;
             }
         }
+        for &obj in &reply_objs[..n_reply] {
+            self.cancel_reply_object(obj);
+        }
+        self.clear_dead_reply_in_waiters();
         Ok(deleted)
     }
 
@@ -1158,7 +1207,7 @@ impl Machine {
         self.n_objects as ObjId
     }
 
-    fn push_cap(
+    pub(crate) fn push_cap(
         &mut self,
         obj: ObjId,
         ty: ObjType,
@@ -1380,7 +1429,7 @@ impl Machine {
         Ok(if word == 0 { None } else { Some(word) })
     }
 
-    fn cnode_set_slot(
+    pub(crate) fn cnode_set_slot(
         &mut self,
         cnode: ObjId,
         slot: usize,
@@ -1405,7 +1454,7 @@ impl Machine {
         Ok(())
     }
 
-    fn check_cnode_slot(&self, cnode: ObjId, slot: usize) -> Result<(), KError> {
+    pub(crate) fn check_cnode_slot(&self, cnode: ObjId, slot: usize) -> Result<(), KError> {
         let n = self.cnode_slot_count(cnode)?;
         if slot >= n {
             return Err(KError::RangeError);
@@ -1426,75 +1475,4 @@ impl Machine {
             }
         }
     }
-
-    /// Gom `root` và mọi con/cháu còn sống của nó (theo cạnh cha) vào `out`.
-    fn collect_subtree(&self, root: CapId, out: &mut [CapId; MAX_CAPS], n: &mut usize) {
-        for i in 1..=self.n_caps as CapId {
-            if !self.caps[i as usize - 1].alive {
-                continue;
-            }
-            let mut cur = Some(i);
-            let mut steps = 0usize;
-            while let Some(p) = cur {
-                if p == root {
-                    push_id(out, n, i);
-                    break;
-                }
-                if p == 0 || p as usize > self.n_caps {
-                    break;
-                }
-                cur = self.caps[p as usize - 1].parent;
-                steps += 1;
-                if steps > self.n_caps {
-                    break;
-                }
-            }
-        }
-    }
-
-    /// Gom mọi object sống nằm trong `u_idx`, đệ quy qua Untyped con.
-    fn collect_untyped_tree(&self, u_idx: usize, out: &mut [ObjId; MAX_OBJECTS], n: &mut usize) {
-        for i in 0..self.n_objects {
-            let (alive, unty, ty) = {
-                let m = &self.objects[i];
-                (m.alive, m.untyped, m.ty)
-            };
-            if !alive || unty != Some(u_idx) {
-                continue;
-            }
-            push_id(out, n, (i as u32) + 1);
-            if ty == ObjType::Untyped {
-                self.collect_untyped_tree(i, out, n);
-            }
-        }
-    }
-}
-
-/// Thêm id vào mảng có biên (bỏ nếu đầy — mọi nơi gọi đều ≤ `MAX_*` theo bất biến bảng).
-pub(crate) fn push_id<const N: usize>(out: &mut [u32; N], n: &mut usize, id: u32) {
-    if *n < N {
-        out[*n] = id;
-        *n += 1;
-    }
-}
-
-/// Sắp xếp + khử trùng tại chỗ (mảng nhỏ, không cấp phát).
-fn sort_dedup(out: &mut [CapId; MAX_CAPS], n: &mut usize) {
-    for i in 1..*n {
-        let x = out[i];
-        let mut j = i;
-        while j > 0 && out[j - 1] > x {
-            out[j] = out[j - 1];
-            j -= 1;
-        }
-        out[j] = x;
-    }
-    let mut w = 0usize;
-    for r in 0..*n {
-        if w == 0 || out[w - 1] != out[r] {
-            out[w] = out[r];
-            w += 1;
-        }
-    }
-    *n = w;
 }

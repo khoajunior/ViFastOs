@@ -6,12 +6,14 @@
 //! `MessageInfo` 35 bit (`label:0..19 | caps:20..22 | no_reply:23 | extra:24..27 |
 //! length:28..34`), 64 MR (`4` thanh ghi + `60` IPC buffer), ≤ 4 cap.
 //!
-//! **Biên KT-60:** `Message` giữ **hình dạng** `caps` của sim nhưng **chưa** chuyển cap —
-//! message có cap (`caps > 0`) bị từ chối `InvalidArgument`; chuyển cap (receive window,
-//! `plan_cap_transfer`, mất `RIGHT_GRANT`) là nợ ghi trong `docs/k3b-core.md` §8 (KT-61).
+//! **KT-63:** `Message` mang **`CapId` nguồn** (≤ 4, `caps: [CapId; 4]`) như `Vec<CapId>`
+//! của sim + **ảnh chụp** (`CapSnapshot`) chụp lúc message vào đường IPC; kernel port
+//! [`plan_cap_transfer`]/[`CapPlan`] nguyên ngữ nghĩa sim (unwrap badge, thiếu `RIGHT_GRANT`
+//! hoặc ô đích bận ⇒ thất bại **mềm**; window chưa bind ⇒ `InvalidArgument` **trước** khi
+//! giao). Message **không** copy object — chỉ cap tham chiếu (con của cap nguồn).
 //! `badge`/`msg_id` **có** (Notification badge OR + bất biến bảo toàn message).
 
-use crate::error::KError;
+use crate::error::{CapId, KError, ObjId, ObjType, SlotRef};
 
 /// Số MR tối đa của một message — `spec/abi.toml` `[message].max_words = 64`.
 pub const MAX_WORDS: usize = 64;
@@ -171,7 +173,143 @@ impl MessageInfo {
     }
 }
 
-/// Một message IPC: `info` 35 bit + **đủ 64 MR** + `badge` + `msg_id` (kernel cấp).
+/// Một cap **nguồn** của message, chụp ảnh ở thời điểm message vào đường IPC (KT-63, port
+/// `ipc::CapSnapshot` của sim): bên gửi có thể xoá cap ngay sau khi gửi, ảnh chụp đủ để cài
+/// một cap con vào receive window của bên nhận.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapSnapshot {
+    /// `CapId` nguồn (kiểm còn sống lúc giao).
+    pub cap: CapId,
+    /// Object cap trỏ tới.
+    pub obj: ObjId,
+    /// Loại object.
+    pub ty: ObjType,
+    /// Quyền của cap nguồn (quyền **đã lọc** khi cài = `rights & !RIGHT_GRANT`).
+    pub rights: u8,
+    /// Badge nguồn (giữ nguyên khi cài; OR vào message khi unwrap).
+    pub badge: Option<u64>,
+}
+
+impl CapSnapshot {
+    /// Ảnh chụp rỗng (mốc const).
+    pub const EMPTY: Self = Self {
+        cap: 0,
+        obj: 0,
+        ty: ObjType::Untyped,
+        rights: 0,
+        badge: None,
+    };
+}
+
+/// Kế hoạch chuyển cap cho **một** lần giao message (port `ipc::CapPlan` của sim, D2-53 Q6).
+///
+/// - `install`: `(chỉ số cap trong message, ô receive window đích)`;
+/// - `unwrap`: badge của các cap **unwrap** (OR vào `Message.badge`);
+/// - `skipped`: số cap **thất bại mềm** (thiếu `RIGHT_GRANT` hoặc ô đích đã có cap) — message
+///   **vẫn** giao, bộ đếm `cap_transfer_failed` tăng (không thêm bit `MessageInfo`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapPlan {
+    install: [(u8, SlotRef); MAX_CAPS],
+    n_install: u8,
+    unwrap: [u64; MAX_CAPS],
+    n_unwrap: u8,
+    skipped: u8,
+}
+
+impl CapPlan {
+    /// Kế hoạch rỗng.
+    pub const EMPTY: Self = Self {
+        install: [(0, SlotRef { cnode: 0, slot: 0 }); MAX_CAPS],
+        n_install: 0,
+        unwrap: [0; MAX_CAPS],
+        n_unwrap: 0,
+        skipped: 0,
+    };
+
+    /// Số cap sẽ cài vào receive window.
+    pub fn installed(&self) -> usize {
+        self.n_install as usize
+    }
+
+    /// Số cap được unwrap thành badge.
+    pub fn unwrapped(&self) -> usize {
+        self.n_unwrap as usize
+    }
+
+    /// OR các badge unwrap (0 nếu không có).
+    pub fn badge(&self) -> u64 {
+        self.unwrap[..self.n_unwrap as usize]
+            .iter()
+            .fold(0u64, |a, b| a | *b)
+    }
+
+    /// Số cap thất bại mềm.
+    pub fn skipped(&self) -> usize {
+        self.skipped as usize
+    }
+
+    /// Các cặp `(chỉ số cap, ô đích)` sẽ cài.
+    pub fn install(&self) -> &[(u8, SlotRef)] {
+        &self.install[..self.n_install as usize]
+    }
+
+    /// Không có cap nào (message không mang cap).
+    pub fn is_empty(&self) -> bool {
+        self.n_install == 0 && self.n_unwrap == 0 && self.skipped == 0
+    }
+}
+
+impl Default for CapPlan {
+    fn default() -> Self {
+        Self::EMPTY
+    }
+}
+
+/// **Quyết định** chuyển ≤ 4 cap vào receive window của thread nhận — **không** đổi trạng thái
+/// (port **nguyên văn** `ipc::plan_cap_transfer` của sim; thiết kế §4.6 `:319`, D2-53 Q6).
+///
+/// Quy tắc (theo **vị trí**: cap thứ `i` ứng với ô window thứ `i`):
+/// 1. cap trỏ **chính Endpoint đang gọi** (`endpoint == Some(obj)`) **và** có badge ⇒
+///    **unwrap**: badge OR vào message, `extra_caps_unwrapped` tăng, **không** chiếm window;
+/// 2. thiếu `RIGHT_GRANT` ⇒ **thất bại mềm** (`skipped += 1`), message vẫn giao;
+/// 3. ô window đích **đã có cap** ⇒ **thất bại mềm**;
+/// 4. còn lại ⇒ cài vào `window[i]` (bên gọi tạo cap con **bỏ** `RIGHT_GRANT`, giữ badge).
+///
+/// `caps.len() > 4` ⇒ `InvalidArgument` (biên ABI, **không** nới). `window = None` (TCB nhận
+/// **chưa bind**) ⇒ `InvalidArgument` khi có cap **cần cài**; message chỉ mang cap **unwrap**
+/// vẫn giao được (không cần window).
+pub fn plan_cap_transfer(
+    caps: &[CapSnapshot],
+    window: Option<&[SlotRef; MAX_CAPS]>,
+    occupied: &[bool; MAX_CAPS],
+    endpoint: Option<ObjId>,
+) -> Result<CapPlan, KError> {
+    if caps.len() > MAX_CAPS {
+        return Err(KError::InvalidArgument);
+    }
+    let mut plan = CapPlan::EMPTY;
+    for (i, c) in caps.iter().enumerate() {
+        if let (Some(ep), Some(badge)) = (endpoint, c.badge) {
+            if ep == c.obj {
+                plan.unwrap[plan.n_unwrap as usize] = badge;
+                plan.n_unwrap += 1;
+                continue;
+            }
+        }
+        let Some(window) = window else {
+            return Err(KError::InvalidArgument);
+        };
+        if c.rights & crate::spec::RIGHT_GRANT == 0 || occupied[i] {
+            plan.skipped += 1;
+            continue;
+        }
+        plan.install[plan.n_install as usize] = (i as u8, window[i]);
+        plan.n_install += 1;
+    }
+    Ok(plan)
+}
+
+/// Một message IPC: `info` 35 bit + **đủ 64 MR** + `badge` + `msg_id` (kernel cấp) + cap nguồn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Message {
     /// `MessageInfo` 35 bit.
@@ -182,6 +320,14 @@ pub struct Message {
     pub badge: u64,
     /// `msg_id` do kernel cấp khi message vào đường IPC (`0` = chưa cấp).
     pub msg_id: u64,
+    /// `CapId` **nguồn** của các cap mang theo (≤ 4) — `n_caps` phần tử đầu có nghĩa.
+    pub caps: [CapId; MAX_CAPS],
+    /// Số cap nguồn (0..=4); phải bằng `info.caps()` khi message vào đường IPC.
+    pub n_caps: u8,
+    /// Ảnh chụp cap nguồn (kernel điền ở `admit`, xoá sau khi giao).
+    pub snaps: [CapSnapshot; MAX_CAPS],
+    /// Số ảnh chụp có nghĩa.
+    pub n_snaps: u8,
 }
 
 impl Message {
@@ -197,31 +343,85 @@ impl Message {
         mr: [0; MAX_WORDS],
         badge: 0,
         msg_id: 0,
+        caps: [0; MAX_CAPS],
+        n_caps: 0,
+        snaps: [CapSnapshot::EMPTY; MAX_CAPS],
+        n_snaps: 0,
     };
 
     /// Message **không cap**: `info.caps()` phải bằng 0, `words.len()` phải bằng
     /// `info.length()`. Vi phạm ⇒ `InvalidArgument`.
     pub fn new(info: MessageInfo, words: &[u64]) -> Result<Self, KError> {
         if info.caps() != 0 {
-            // KT-60: chưa port chuyển cap (nợ §8) — không nhận message có cap để không
-            // âm thầm bỏ cap.
             return Err(KError::InvalidArgument);
         }
-        Self::build(info, words)
+        Self::build(info, words, &[], 0)
     }
 
-    fn build(info: MessageInfo, words: &[u64]) -> Result<Self, KError> {
+    /// Message **có** cap/badge — `caps.len()` phải bằng `info.caps()` (≤ 4) và mỗi phần tử
+    /// là `CapId` **nguồn** (kernel chụp ảnh ở `admit`, cài vào receive window khi giao).
+    pub fn with_caps(
+        info: MessageInfo,
+        words: &[u64],
+        caps: &[CapId],
+        badge: u64,
+    ) -> Result<Self, KError> {
+        if caps.len() > MAX_CAPS || caps.len() != info.caps() as usize {
+            return Err(KError::InvalidArgument);
+        }
+        Self::build(info, words, caps, badge)
+    }
+
+    /// Message từ danh sách `CapId` + độ dài tự suy — dạng dùng cho test/runner (như sim
+    /// `Message::with_cap_ids`). **5 cap ⇒ `InvalidArgument`** ngay khi dựng message
+    /// (`spec/abi.toml` `max_caps = 4`), trước khi vào đường IPC.
+    pub fn with_cap_ids(label: u32, words: &[u64], caps: &[CapId]) -> Result<Self, KError> {
+        let info = MessageInfo::new(label, caps.len() as u8, false, 0, words.len() as u8)?;
+        Self::with_caps(info, words, caps, 0)
+    }
+
+    fn build(info: MessageInfo, words: &[u64], caps: &[CapId], badge: u64) -> Result<Self, KError> {
         if words.len() != info.length() as usize || words.len() > MAX_WORDS {
             return Err(KError::InvalidArgument);
         }
         let mut mr = [0u64; MAX_WORDS];
         mr[..words.len()].copy_from_slice(words);
+        let mut ids = [0u32; MAX_CAPS];
+        ids[..caps.len()].copy_from_slice(caps);
         Ok(Self {
             info,
             mr,
-            badge: 0,
+            badge,
             msg_id: 0,
+            caps: ids,
+            n_caps: caps.len() as u8,
+            snaps: [CapSnapshot::EMPTY; MAX_CAPS],
+            n_snaps: 0,
         })
+    }
+
+    /// Các `CapId` nguồn của message (`caps[..n_caps]`). Sau khi kernel giao message, danh
+    /// sách này **rỗng** (cap đã cài vào receive window; số cap nằm ở `MessageInfo.caps`).
+    pub fn cap_ids(&self) -> &[CapId] {
+        &self.caps[..self.n_caps as usize]
+    }
+
+    /// Số cap nguồn đi cùng message (0..=4).
+    pub fn cap_count(&self) -> usize {
+        self.n_caps as usize
+    }
+
+    /// Ảnh chụp cap nguồn (`snaps[..n_snaps]`) — kernel điền khi `admit`.
+    pub fn snapshots(&self) -> &[CapSnapshot] {
+        &self.snaps[..self.n_snaps as usize]
+    }
+
+    /// Xoá danh sách cap nguồn + ảnh chụp sau khi đã cài vào receive window.
+    pub fn clear_caps(&mut self) {
+        self.caps = [0; MAX_CAPS];
+        self.n_caps = 0;
+        self.snaps = [CapSnapshot::EMPTY; MAX_CAPS];
+        self.n_snaps = 0;
     }
 
     /// Các MR **thật** của message (`mr[..length]`).

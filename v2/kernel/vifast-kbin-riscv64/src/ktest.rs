@@ -4,9 +4,10 @@
 //!
 //! KT-49 mở rộng ảnh này lên **20 TAP**; KT-50 thêm **5 TAP IPI** (20..24); KT-51 thêm **5 TAP
 //! TLB/ASID/shootdown** (25..29); KT-52 thêm **7 TAP object layer** (30..36); KT-55 thêm **TAP
-//! 37** conformance; **KT-56 thêm 5 TAP FaultKind/W^X (38..42)** và dời trap lồng sang **43** —
-//! tổng **53 TAP** (KT-61 thêm 43..52 = core trên nhân thật; ảnh guard 3 TAP, ảnh user
-//! 7 TAP — §19 docs):
+//! 37** conformance; **KT-56 thêm 5 TAP FaultKind/W^X (38..42)** và dời trap lồng sang **43**;
+//! **KT-61 thêm 43..52** (core trên nhân thật); **KT-63 thêm 53..55** (chuyển cap qua IPC +
+//! finalise IPC khi Revoke) và dời trap lồng sang **56** — tổng **56 TAP** (ảnh guard 3 TAP,
+//! ảnh user 17 TAP — §19 docs):
 //!
 //! 1. `ok 1 - ktest image` — marker tách ảnh của KT-44.
 //! 2. `ok 2 - trap breakpoint` — **trap phần cứng thật** (`ebreak` → `scause=3`, resume đúng
@@ -95,7 +96,15 @@
 //! 51. `ok 51 - core d2-83 boundary` — `Retype` Frame/PageTable/VSpace trong core ⇒
 //!     `NotSupported` **3/3** atomic; object layer vẫn tạo/revoke VSpace+Frame thật.
 //! 52. `ok 52 - core invariants` — revoke cây Untyped ⇒ byte về 0, **12/12** bất biến xanh, 0 rò.
-//! 53. `ok 53 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//! 53. `ok 53 - core cap transfer` — chuyển 4 cap Endpoint→Recv qua 2 TCB: cap nhận **bỏ**
+//!     `RIGHT_GRANT` (giữ badge), thiếu GRANT/ô bận ⇒ thất bại **mềm**, unwrap badge; evidence
+//!     `# ipc: cap-transfer …`.
+//! 54. `ok 54 - core cap message` — message mang cap qua **Call/Reply**: caller `BlockedOnReply`
+//!     nhận 2 cap vào receive window, `Reply.caller` sạch; evidence `# ipc: cap-message …`.
+//! 55. `ok 55 - core revoke finalise` — `Revoke` cây Untyped khi có caller/waiter/hàng: caller
+//!     `Ready + Cancelled`, Recv/Notification waiter thức (`Ready + Cancelled`), hàng rỗng,
+//!     `ipc_dropped` cộng đủ; evidence `# ipc: revoke …`.
+//! 56. `ok 56 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -164,7 +173,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..53\n");
+    PLATFORM.put_str("TAP version 13\n1..56\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -939,7 +948,8 @@ pub extern "C" fn rust_main() -> ! {
     fails += ktest_conf::conf_phase();
     // ------------- 38..42) `FaultKind` thật + W^X qua ABI + Device toàn cục (KT-56)
     fails += ktest_fault::fault_phase();
-    // ---------------- 43..52) core `no_std` trên **nhân thật** (KT-61): CNode/TCB/sched/IPC
+    // ---------------- 43..55) core `no_std` trên **nhân thật** (KT-61/63): CNode/TCB/sched/
+    // IPC + chuyển cap + finalise IPC khi Revoke
     fails += ktest_core::core_phase();
 
     {
@@ -959,10 +969,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 53) trap LỒNG (fatal, có chủ đích)
-    // In `ok 53` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 56) trap LỒNG (fatal, có chủ đích)
+    // In `ok 56` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 53 - trap nested panic\n");
+    PLATFORM.put_str("ok 56 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

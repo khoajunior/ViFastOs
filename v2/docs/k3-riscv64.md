@@ -2254,9 +2254,10 @@ Nguồn: **D2-82** (K3 DONE phase-level, mở K3b), **D2-83** (biên giới core
   `#![forbid(unsafe_code)]`.
 - Ảnh **sản phẩm** (soak 1.000): `# core: product …` + một **vòng đời TCB thật** mỗi boot
   (`Retype→Configure→Suspend/Resume→revoke`); sai ⇒ `PANIC: core init product`.
-- Ảnh **test** `ktest`: TAP **43..52** chạy trên `Machine` thật (CNode/MDB/cap/TCB/sched/MCS/IPC/
-  Notification/WaitAddr/fault), trap lồng dời **53**; `expected.txt` = **53 53** (nguồn sự thật
-  duy nhất); `ktest.sh` thêm **11** regex evidence `# core:`.
+- Ảnh **test** `ktest`: TAP **43..55** chạy trên `Machine` thật (CNode/MDB/cap/TCB/sched/MCS/IPC/
+  Notification/WaitAddr/fault; **KT-63** thêm 53..55 = chuyển cap qua IPC + message mang cap +
+  finalise IPC khi Revoke), trap lồng dời **56**; `expected.txt` = **56 56** (nguồn sự thật
+  duy nhất); `ktest.sh` thêm **11** regex evidence `# core:` + **3** regex `# ipc:` (KT-63).
 
 ### 21.2 Biên D2-83 — điều KHÔNG đổi
 

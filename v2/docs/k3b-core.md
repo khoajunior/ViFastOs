@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 # K3b — port core `no_std`: tầng 1 (KT-58) + TCB/scheduler (KT-59) + IPC/Reply/Notification/WaitAddr/fault (KT-60)
 
-- **Trạng thái:** KT-58 **DONE**; **KT-59 DONE**; **KT-60 DONE**; **KT-61 DONE (đề xuất — chờ
-  review độc lập + Agent 0 lật QUEUE)**: core `no_std` **chạy trên nhân thật** (TAP 43..52 trên
-  QEMU, soak 0/1000 ảnh sản phẩm, matrix smp 1/2/4, conformance 5/5). **K3b xong phần core chạy
-  được**; procsrv/shell là **K3.5** — xem §9 + `agent/reports/K3B-DOD.md`.
+- **Trạng thái:** KT-58 **DONE**; **KT-59 DONE**; **KT-60 DONE**; **KT-61 DONE**; **KT-62 DONE**;
+  **KT-63 DONE (đề xuất — chờ review độc lập + Agent 0 lật QUEUE)**: core `no_std` **chạy trên
+  nhân thật** (TAP 43..55 trên QEMU, soak 0/1000 ảnh sản phẩm, matrix smp 1/2/4, conformance
+  5/5) + **chuyển cap qua IPC** + **finalise IPC khi Revoke/Delete** (§12). **K3b xong phần core
+  chạy được**; procsrv/shell là **K3.5** — xem §9 + `agent/reports/K3B-DOD.md`.
 - **Nguồn sự thật:** sim `v2/sim/vifast-sim/src/kobj.rs` là **oracle**; task này **không**
   thiết kế lại ngữ nghĩa, không sửa `spec/`, không đụng `viscript/`.
 - **Crate:** `v2/kernel/vifast-core` — `#![no_std]`, `#![forbid(unsafe_code)]`, **không**
@@ -42,12 +43,15 @@
 | `src/mailbox.rs` | 433 | `Mailbox<T, CAP=8>` FIFO + backpressure, `MailboxMsg`, `HartMailbox` (log biên `MAX_MAIL_LOG=32` — D2-85b + `stopped`) |
 | `src/core_tcb.rs` | 726 | khối `impl Machine`: TCB/transition/MCS (tách khỏi `machine.rs` để giữ R1) |
 | `src/core_sched.rs` | 879 | khối `impl Machine`: scheduler/hộp thư/`check_sched`/`check_sc_refs`/`check_budget`/`check_mailboxes` |
-| `src/ipc.rs` | 320 | **KT-60**: `MessageInfo` 35 bit, `Message` 64 MR, `IpcArea` (4+60), `transfer` |
+| `src/ipc.rs` | 520 | **KT-60**: `MessageInfo` 35 bit, `Message` 64 MR, `IpcArea` (4+60), `transfer`; **KT-63**: `CapSnapshot`/`CapPlan`/`plan_cap_transfer` + `Message` mang `CapId` nguồn (≤ 4) |
 | `src/objstate.rs` | 265 | **KT-60**: body Endpoint/Reply/Notification, `IpcQueue` FIFO 8, pool `QueuedMsg`, nút WaitAddr/`AddrWord` |
-| `src/core_ipc.rs` | 1325 | **KT-60**: `Call/Send/Recv/NBRecv/Reply/ReplyMsg/ReplyRecv/NBSendRecv/NBSendWait`, `Exit`/`inject_fault`, `unlink_tcb_queues`, donation KT-21 |
+| `src/core_ipc.rs` | 1421 | **KT-60**: `Call/Send/Recv/NBRecv/Reply/ReplyMsg/ReplyRecv/NBSendRecv/NBSendWait`, `Exit`/`inject_fault`, `unlink_tcb_queues`, donation KT-21; **KT-63**: wire cap transfer (`resolve_caps`/`prepare_caps`/`deliver_message`) vào mọi đường IPC + receive window API (§12) |
+| `src/core_capxfer.rs` | 136 | **KT-63**: `deliver_caps`/`deliver_message`/`resolve_caps`/`prepare_caps` — cài cap con **bỏ `RIGHT_GRANT`** vào receive window, cập nhật `MessageInfo.caps`/`badge`, thất bại mềm |
+| `src/core_finalise.rs` | 111 | **KT-63**: finalise IPC khi `Revoke`/`Delete` — `cancel_reply_object`, `clear_dead_reply_in_waiters`, `finalise_endpoint_body`, `finalise_notification_body` |
+| `src/mdb.rs` | 105 | **KT-63**: tách helper cây MDB (`collect_subtree`/`collect_untyped_tree`/`push_id`/`sort_dedup`) khỏi `machine.rs` để giữ R1 ≤ 1.500 dòng |
 | `src/core_sync.rs` | 519 | **KT-60**: Notification (signal/wait/poll/bind) + WaitAddr (wait/wake/giá trị) |
 | `src/check_ipc.rs` | 395 | **KT-60**: `check_ipc`/`check_reply_links`/`check_notifications`/`check_waitaddr`/`check_fault` |
-| `src/footprint.rs` | 124 | **KT-60**: bảng phân bố 27 dòng + pin D2-84 (tách khỏi `machine.rs` để giữ R1) |
+| `src/footprint.rs` | 152 | **KT-60**: bảng phân bố 27 dòng + pin D2-84 (tách khỏi `machine.rs` để giữ R1); **KT-63**: scalars 12 × `u64` (3 bộ đếm cap) |
 | `src/{captable,tcbdata}.rs` | 60+102 | tách khỏi `machine.rs` (R1 ≤ 1.500 dòng) |
 | `tests/kt58_core_parity.rs` (trong sim) | 2680 | parity host KT-58: 14 kịch bản + differential 32×48 + 2 test core-only |
 | `tests/kt59_core_parity.rs` (trong sim) | 2214 | parity host KT-59: 5 kịch bản KT-18/19/20/22/29 + differential 16×32 + 2 test core-only |
@@ -370,9 +374,10 @@ thật** trước khi thêm bảng; từ **KT-61 core đã link** nên `.data+.b
 (số đo từng ảnh: `K3B-DOD.md` §6.2).
 
 `Machine::footprint()` trả bảng phân bố byte tĩnh (D2-84); test pin in bảng + assert
-`sum(bytes) + scalars + padding == size_of::<Machine>()`. Bảng **cập nhật KT-60** (log
-`JOURNAL/kt60-parity.log`, 2026-11-15; `[ĐO]`) — KT-59 chỉ có 14 dòng / 167.896 B; KT-60 thêm
-body Endpoint/Reply/Notification, pool message, bảng WaitOnAddress và `IpcArea` trong TCB:
+`sum(bytes) + scalars + padding == size_of::<Machine>()`. Bảng **cập nhật KT-63** (log
+`JOURNAL/kt63-parity.log`; `[ĐO]`): KT-63 thêm `recv_window` trong `TcbData` (+4.608 B) và
+cap nguồn/ảnh chụp trong `Message` (+3.648 B ở pool 24 message) — **pin không đổi**, còn
+8.160 B headroom:
 
 | Thành phần | Byte | Ghi chú |
 |---|---:|---|
@@ -380,7 +385,7 @@ body Endpoint/Reply/Notification, pool message, bảng WaitOnAddress và `IpcAre
 | `objects[256]` | 22.528 | `Meta` 88 B |
 | `caps[512]` | 28.672 | `Cap` 56 B |
 | `slot_pool` | 16.656 | `MAX_SLOT_WORDS=4096` + hole |
-| `tcbs[64]` | 45.056 | `TcbData` 704 B (IpcArea 544 B + scheduler/state) |
+| `tcbs[64]` | 49.664 | `TcbData` 776 B (IpcArea 544 B + `recv_window` 72 B + scheduler/state — KT-63) |
 | `tcb_free[64]` | 128 | free-list body |
 | `scs[32]` | 1.792 | `ScData` 56 B |
 | `sc_free[32]` | 64 | free-list body |
@@ -392,13 +397,13 @@ body Endpoint/Reply/Notification, pool message, bảng WaitOnAddress và `IpcAre
 | `endpoints[16]` + `endpoint_free[16]` | 1.280 + 32 | body Endpoint (KT-60) |
 | `replies[32]` + `reply_free[32]` | 256 + 64 | body Reply (KT-60) |
 | `notifications[16]` + `notification_free[16]` | 512 + 32 | body Notification (KT-60) |
-| `ipc_msgs[24]` + `ipc_msg_free[24]` | 13.632 + 48 | pool `QueuedMsg` 568 B (KT-60) |
+| `ipc_msgs[24]` + `ipc_msg_free[24]` | 17.280 + 48 | pool `QueuedMsg` 720 B (KT-60; **KT-63** +152 B: `Message` mang cap nguồn/ảnh chụp) |
 | `addr_words[64]` | 1.536 | `(frame, offset) -> u64` (KT-60) |
 | `wait_nodes[64]` + `wait_free[64]` | 1.024 + 128 | nút waiter (KT-60) |
 | `wait_buckets[64]` + `wait_buckets_tail[64]` | 128 + 128 | 64 bucket (KT-60) |
-| scalars | 239 | 20 `usize` + 9 `u64` + `u16` + `u32` + `bool` |
+| scalars | 263 | 20 `usize` + 12 `u64` (3 bộ đếm cap — KT-63) + `u16` + `u32` + `bool` |
 | padding | 1 | `repr(Rust)` |
-| **Tổng** | **180.168** | **91,6 % pin 196.608 B; còn 16.440 B** (D2-85b; phân tích + điều kiện KT-61 ở §8.5) |
+| **Tổng** | **188.448** | **95,9 % pin 196.608 B; còn 8.160 B** (D2-84; KT-63 **không** nâng pin — chỉ thêm trường theo đúng phạm vi) |
 
 Pin KT-58 `≤ 96 KiB` (dấu chân **tầng 1**) được thay bằng pin D2-84 trong
 `tests/kt58_core_parity.rs` vì KT-59 thêm đúng phạm vi; **không** nới trần sản phẩm.
@@ -509,8 +514,9 @@ core_ipc/core_sync` trước/sau (`sha256sum -c` OK).
 
 ### 8.5 Dấu chân + **điều kiện tiên quyết KT-61** (D2-84)
 
-- `size_of::<Machine>() = 180.168 B` `[ĐO]` — **91,6 % pin 196.608 B**, còn **16.440 B**
-  (bảng 27 dòng §7.3). Đã áp **D2-85b**: `MAX_MAIL_LOG` 64 → 32 (−12.288 B) **trước KT-61**;
+- `size_of::<Machine>() = 180.168 B` `[ĐO]` lúc KT-60 — **91,6 % pin 196.608 B**, còn
+  **16.440 B** (bảng 27 dòng §7.3). **KT-63** thêm receive window + cap trong message ⇒
+  **188.448 B** (95,9 %, còn 8.160 B) — vẫn **không** nâng pin (§12.4). Đã áp **D2-85b**: `MAX_MAIL_LOG` 64 → 32 (−12.288 B) **trước KT-61**;
   pin test KT-59 cập nhật 32.
 - **D2-85a — hai ngưỡng khác nhau, cấm đọc lẫn:** pin **196.608 B** áp cho
   `size_of::<Machine>()`; trần **262.144 B** áp cho **ảnh link** (`.data+.bss` thật). KT-61
@@ -827,12 +833,13 @@ dự án đo `.data+.sdata+.bss+.sbss` theo D2-72 Q5/D2-85a, **không** đo file
 
 | # | Nợ | Chủ |
 |---|---|---|
-| 1 | chuyển cap trong message (`MessageInfo.caps > 0` vẫn `InvalidArgument`) | KT-63 |
-| 2 | MR4..MR63 qua IPC buffer user (`length > 4` ⇒ 5 hiện tại) | KT-63/64 |
+| 1 | ~~chuyển cap trong message~~ — **ĐÓNG KT-63**: receive window + `plan_cap_transfer` + `RIGHT_GRANT` + badge (§12) | KT-63 |
+| 2 | MR4..MR63 qua IPC buffer user (`length > 4` ⇒ 5 hiện tại) | KT-64 |
 | 3 | invocation (Call trên cap không phải Endpoint) vẫn `NotSupported` (D2-53 Q11) | K3.5/K4 |
 | 4 | scheduler U-mode: TCB chặn/ngủ ⇒ `PANIC: u-mode syscall khong the quay lai U-mode` có chẩn đoán (chưa có context switch user) | KT-64/65 |
 | 5 | bản ghi trace 32 B cho syscall (hiện chỉ dòng văn bản `# sys:`) | K6 |
 | 6 | **phủ QEMU** cho `resolve_addr` (9/10), `now_ns` (11) và nhánh `Switched` — hiện chỉ biên dịch + host rig/TAP `TestEnv` (F4) | KT-64/65 |
+| 7 | ~~finalise IPC khi Revoke (caller treo)~~ — **ĐÓNG KT-63**: caller `Cancelled + Ready`, waiter thức, hàng huỷ (§12) | KT-63 |
 
 ### 11.6 Chạy lại
 
@@ -841,5 +848,102 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt62_syscall -- --test-threads=1
 cargo test --manifest-path v2/kernel/Cargo.toml -p vifast-plat-common
 bash v2/test/boot/ktest.sh 1 matrix
+./v2/bin/v2 gate --fast
+```
+
+## 12. KT-63 — chuyển cap qua IPC + finalise IPC khi Revoke (K3.5 tầng 2)
+
+**Trạng thái:** KT-63 **DONE (đề xuất; chờ review độc lập + Agent 0 lật QUEUE)**. Phạm vi: port
+**nguyên ngữ nghĩa sim** đường **chuyển cap qua IPC** (receive window 4 ô, `plan_cap_transfer`,
+`RIGHT_GRANT`, badge/unwrap, thất bại **mềm**, lỗi **cứng trước khi giao**) và **finalise IPC khi
+`Revoke`/`Delete`** (caller `BlockedOnReply` ⇒ `Cancelled + Ready`; Recv/Notification waiter của
+object bị finalise ⇒ thức, chống treo; hàng Endpoint huỷ + `ipc_dropped`). **Không** đổi `spec/`,
+không sửa sim semantics, không đụng `viscript/`; `vifast-core` vẫn `#![forbid(unsafe_code)]`.
+
+### 12.1 API + điểm nối (một nguồn: `kernel/vifast-core/src/{ipc,core_capxfer,core_finalise}.rs`)
+
+| Thành phần | Ngữ nghĩa (giữ nguyên sim) |
+|---|---|
+| `Message.caps: [CapId; 4]` + `n_caps` | Cap **nguồn** đi cùng message — **không** copy object; `Message::with_caps`/`with_cap_ids` kiểm `caps.len() == info.caps()` ≤ 4 (**5 cap ⇒ `InvalidArgument`** ngay khi dựng, `.scn` 15) |
+| `Message.snaps: [CapSnapshot; 4]` | Ảnh chụp `(cap, obj, ty, rights, badge)` lúc `admit` — bên gửi xoá cap ngay sau khi gửi vẫn cài đúng; cap chết giữa hàng và giao ⇒ thất bại **mềm** |
+| `TcbData.recv_window: Option<[SlotRef; 4]>` | `None` = **chưa bind** (message có cap **cần cài** ⇒ `InvalidArgument` **trước** khi giao); `Some` = 4 ô CSpace (bind rỗng hợp lệ); ô đã có cap ⇒ cap tương ứng thất bại mềm (theo **vị trí**, không dồn) |
+| `Machine::tcb_set_recv_window` / `tcb_recv_window` | Model API `[TK]` như sim: slot **có thật** của CNode còn sống, các ô **khác nhau**; **không** thêm chữ ký ABI (`Tcb.Configure` chỉ có CSpace) |
+| `ipc::plan_cap_transfer` / `CapPlan` | (1) cap trỏ **chính Endpoint đang gọi** + có badge ⇒ **unwrap** (badge OR vào `Message.badge`, `extra_caps_unwrapped` tăng, **không** chiếm window); (2) thiếu `RIGHT_GRANT` ⇒ thất bại **mềm**; (3) ô đích đã có cap ⇒ thất bại mềm; (4) còn lại ⇒ cài con **bỏ `RIGHT_GRANT`**, giữ badge |
+| `core_capxfer.rs` | `resolve_caps` (lỗi cứng `InvalidCapability` **trước** `msg_id`), `prepare_caps`, `deliver_caps`, `deliver_message` — gọi ở `call_msg`/`endpoint_send`/`recv`/`nb_recv`/`reply_with`/`deliver_queued` |
+| `core_finalise.rs` | `cancel_reply_object`, `clear_dead_reply_in_waiters`, `finalise_endpoint_body`, `finalise_notification_body` — gọi từ `Machine::{delete,revoke_children}` |
+| Bộ đếm `cap_transfer_{installed,failed}`/`cap_unwrapped` | Cùng tên/nghĩa sim; accessor `cap_transfer_stats() -> (installed, unwrapped, failed)` |
+
+**Thứ tự nguyên tử** (như sim): kiểm cap nguồn + receive window **trước** khi cấp `msg_id`/pop ⇒
+lỗi cứng **không** giao nửa chừng, message **ở lại** hàng, không đổi trạng thái. Thất bại mềm
+(thiếu GRANT/ô bận/cap chết) **không** làm mất message — `MessageInfo.caps` = số **cài được**.
+
+### 12.2 Parity sim↔core — 5 kịch bản mới, so mã lỗi + digest **sau từng bước**
+
+Mở rộng `v2/sim/vifast-sim/tests/kt60_core_parity.rs` (thêm `windows`/`cap_stats` vào `Digest`,
+`Rig63` + `Op63` + runner `run63`) — **5 kịch bản mới**: 1 kịch bản **cap transfer** nhiều bước
+(4 cap bỏ GRANT; thiếu GRANT/ô bận thất bại mềm; window chưa bind/cap nguồn chết lỗi cứng;
+unwrap badge; Call/Reply mang cap) và **4 đường finalise** (`Delete` cap Reply, `Revoke` cap
+Reply con, Reply cap chết trong waiter Q7b, `Revoke` Untyped khi có caller/waiter/hàng). Digests so **sau mỗi bước**: 3 TCB (state +
+`TcbInfo` + `ReadState` + `IpcArea`), **receive window** (4 CPTR + `CapFp{ty,rights,badge}`),
+hàng Endpoint đầy đủ nội dung, `Reply.caller`, Notification, counters IPC + **3 bộ đếm cap**,
+8 cờ bất biến. Log: `JOURNAL/kt63-parity.log` — **16/16** test kt60 parity (11 cũ + 5 mới),
+`JOURNAL/kt63-core-tests.log` — **10/10** test core-only.
+
+### 12.3 Đỏ trước (D2-05)
+
+`JOURNAL/kt63-red-before.log`: viết test trước khi port (`kt63_core_cap_ipc.rs`) ⇒ core HEAD cũ
+**không biên dịch** (`E0599` cho `Message::with_cap_ids`, `tcb_set_recv_window`,
+`cap_transfer_stats`, `cap_transfer_installed/failed/unwrapped`) — đúng "tính năng chưa có",
+không phải test sai. Sau port: 10/10 xanh. Không retry lấy xanh; không nới ngưỡng.
+
+### 12.4 Hai ngưỡng (D2-85a) — vẫn **không** nâng pin
+
+| Ngưỡng | Áp cho | KT-62 | KT-63 | Kết quả |
+|---|---|---|---|---|
+| **196.608 B** (pin D2-84) | `size_of::<Machine>()` | 180.168 | **188.448** (95,9 %; còn **8.160 B**) | ĐẠT — thêm `recv_window` (+4.608 B) + cap trong `Message` (+3.648 B) |
+| **262.144 B** (trần ảnh) | `.data+.sdata+.bss+.sbss` ELF thật | 191.416 / 197.568 / 2.680 / 192.304 | **199.696** (product) / **209.856** (ktest) / **2.680** (guard) / **200.584** (user) | ĐẠT |
+
+File ảnh (byte): product **191.824**, ktest **533.496**, guard **53.808**, user **326.568** — log
+`JOURNAL/kt63-budget.log` (script `budget.sh` in, tài liệu không chép tay số đo ngoài log). Bảng
+phân bố §7.3 cập nhật đúng 27 dòng + `scalars = 263`; test pin vẫn assert `padding ≤ 8` (D2-85c,
+hiện 1 B) nên bảng thiếu dòng sẽ đỏ.
+
+### 12.5 Lệch **có chủ đích chờ đồng bộ** với sim — chuẩn là anti-hang (D2-89)
+
+**D2-89 (2026-11-16) chốt chuẩn**: finalise IPC là **anti-hang** — caller `Cancelled + Ready`,
+Recv/Notification waiter `Cancelled + Ready`, huỷ hàng. Sim K1–K2 **để waiter treo** trên object
+đã finalise (`BlockedOnRecv{ep đã chết}`/`BlockedOnNotification{ntfn đã chết}` — đo được, probe
+`JOURNAL/kt63-nhat-ky.md` §3) là **lỗi mô hình**, **không** phải hành vi chuẩn. Vì vậy core làm
+theo chuẩn; đây là **lệch có chủ đích chờ đồng bộ**, **không** phải "sim không làm nên core làm
+khác", và **cấm** dùng "sim không làm" làm lý do để core treo.
+
+Hệ quả tạm thời: **parity loại trừ đúng đường này** (kịch bản revoke của parity chỉ revoke khi
+waiter nằm trên object **khác** hoặc đã được đánh thức); hành vi core được pin bằng 2 ca core-only
+(`kt63_core_recv_waiter_thuc_khi_endpoint_bi_finalise`,
+`kt63_core_revoke_huy_caller_waiter_hang_va_tra_cancelled`) và **TAP 55** trên QEMU.
+**KT-64a** (QUEUE, 2 h, sau **KT-64**) là **nơi đóng lệch**: sửa **sim** cho khớp chuẩn D2-89 +
+`.scn` đỏ-trước + **đưa đường này trở lại parity**, khi đó **xoá** loại trừ ở đây. Caller
+`BlockedOnReply` thì **giống hệt sim**: `Cancelled + Ready`. Không đổi `spec/`.
+
+### 12.6 TAP QEMU (ảnh `ktest`: 53 → **56** TAP) + `# ipc:` evidence
+
+| TAP | Nhóm | Bằng chứng `# ipc:` (neo) |
+|---|---|---|
+| 53 | **chuyển cap** Endpoint→Recv qua 2 TCB | `# ipc: cap-transfer installed=8 failed=1 unwrap=1 caps4=4 len=2 rights=0xb caps3=3 caps1=1 extra=1 badge=0xa5a5 check_ipc=1 check_caps=1` — 4 cap cài đủ **bỏ** `RIGHT_GRANT`, 1 cap thiếu GRANT thất bại mềm (3 cài), unwrap badge 0xA5A5 không chiếm ô window |
+| 54 | **message mang cap** qua Call/Reply | `# ipc: cap-message direction=call-reply caller_caps=2 reply_caps=2 caller_bound=1 caller_ready=1 rights=0xb reply_caller=0 check_ipc=1 check_reply_links=1` |
+| 55 | **`Revoke` khi có caller/waiter/hàng** | `# ipc: revoke deleted=5 caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready queue=0 queued=1 pending=0 sent=2 dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1` |
+
+Matrix `ktest.sh 1 matrix` ⇒ **9/9** boot sạch (smp 1/2/4 × 3 ảnh; ktest **56/56**, guard **3/3**,
+user **17/17**); log `JOURNAL/kt63-ktest-matrix.log`. Trap lồng dời **53 → 56** (cùng commit sửa
+kernel + manifest + `expected.txt` — luật KT-54). Soak ảnh sản phẩm: `JOURNAL/kt63-soak.log`.
+
+### 12.7 Chạy lại
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt63_core_cap_ipc -- --test-threads=1
+cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt60_core_parity -- --test-threads=1
+bash v2/test/boot/ktest.sh 1 matrix
+bash v2/test/boot/soak.sh 1000 3
 ./v2/bin/v2 gate --fast
 ```

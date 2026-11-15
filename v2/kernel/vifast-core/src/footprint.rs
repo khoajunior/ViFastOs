@@ -4,7 +4,8 @@
 //! pin.
 //!
 //! KT-59 dựng bảng 14 dòng; KT-60 thêm body Endpoint/Reply/Notification + pool message đang
-//! chờ + bảng WaitOnAddress + biến thể `IpcArea` trong TCB. Hàm [`Machine::footprint`] trả
+//! chờ + bảng WaitOnAddress + biến thể `IpcArea` trong TCB; KT-63 thêm **receive window**
+//! (`TcbData.recv_window`, 4 CPTR) + cap nguồn/ảnh chụp trong `Message` + 3 bộ đếm cap. Hàm [`Machine::footprint`] trả
 //! **phân bố byte** để test pin và KT-61 đối chiếu trước khi link; bất biến
 //! `sum(bytes) + scalars + padding == size_of::<Machine>()` được test pin kiểm.
 
@@ -74,9 +75,10 @@ impl Machine {
             size_of::<[u16; WAITADDR_BUCKETS]>(),
             size_of::<[u16; WAITADDR_BUCKETS]>(),
         ];
-        // 20 × usize + 9 × u64 + u16 (current_hart) + u32 (finalise_overflow) + bool.
+        // 20 × usize + 12 × u64 (9 bộ đếm cũ + 3 bộ đếm chuyển cap KT-63) + u16
+        // (current_hart) + u32 (finalise_overflow) + bool.
         let scalars = 20 * size_of::<usize>()
-            + 9 * size_of::<u64>()
+            + 12 * size_of::<u64>()
             + size_of::<u16>()
             + size_of::<u32>()
             + size_of::<bool>();

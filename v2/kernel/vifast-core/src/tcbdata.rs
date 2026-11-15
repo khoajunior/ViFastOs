@@ -6,7 +6,7 @@
 //! Model-only `[TK]`, **không** phải ABI: `Tcb.ReadState` chỉ trả 4 giá trị; các trường còn
 //! lại là model API của sim (oracle) và được parity so từng bước.
 
-use crate::error::{CapId, KError, ObjId};
+use crate::error::{CapId, KError, ObjId, SlotRef};
 use crate::ipc::IpcArea;
 use crate::mcs::ScBudget;
 use crate::tcb::{TcbInfo, TcbState};
@@ -35,6 +35,11 @@ pub(crate) struct TcbData {
     pub(crate) bound_notification: Option<ObjId>,
     /// Vùng nhận IPC: 4 MR thanh ghi + 60 word buffer + message vừa nhận (KT-60).
     pub(crate) ipc: IpcArea,
+    /// **KT-63** — **receive window** (CPTR) của TCB: 4 ô CSpace nhận cap của message vào.
+    /// `None` = **chưa bind** (message có cap cần cài ⇒ `InvalidArgument`); `Some([s0..s3])`
+    /// = đã bind (ô nào đang có cap thì cap tương ứng **thất bại mềm**, D2-53 Q6). Model-only
+    /// `[TK]`, như `TcbData.recv_window` của sim.
+    pub(crate) recv_window: Option<[SlotRef; crate::ipc::MAX_CAPS]>,
     /// Lỗi IPC kernel gán ở lần giao gần nhất (`Cancelled` — D2-53 Q7(b), KT-60).
     pub(crate) last_ipc_error: Option<KError>,
     /// `(sender, FaultKind)` của **fault vừa giao** cho TCB làm bên nhận (KT-26, KT-60).
@@ -58,6 +63,7 @@ impl TcbData {
         donated_sc: None,
         bound_notification: None,
         ipc: IpcArea::new(),
+        recv_window: None,
         last_ipc_error: None,
         last_fault: None,
         notif: None,

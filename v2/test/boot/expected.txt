@@ -15,6 +15,10 @@
 # Notification signal, WaitAddr, biên D2-83, invariants) ⇒ trap lồng dời sang **53** (tổng 53 TAP);
 # ảnh guard 3 TAP và user 7 TAP không đổi. Số TAP core khớp manifest `ktest.sh` + kernel.
 #
+# KT-63: ảnh test chính thêm **3 TAP core** (53..55: chuyển cap qua IPC + message mang cap +
+# finalise IPC khi Revoke) ⇒ trap lồng dời sang **56** (tổng 56 TAP); ảnh guard 3 TAP và user
+# 17 TAP không đổi. Số TAP core khớp manifest `ktest.sh` + kernel.
+#
 # KT-49: ảnh test chính 20 TAP (1..14 = KT-45/46/47/48; 15..19 = SMP KT-49; 20 = trap lồng
 # fatal có chủ đích). KT-50: thêm 5 TAP IPI (20..24). KT-51: thêm 5 TAP TLB/ASID/shootdown
 # (25..29); KT-52: thêm **7 TAP object layer** (30..36: retype vspace, byte invariant, frame 3
@@ -31,7 +35,7 @@
 #   - số TAP ghi ở đây phải **bằng** số TAP runner có tên trong manifest (`ktest.sh`
 #     `manifest_for`) ⇒ thêm/bớt TAP phải sửa cả kernel, manifest và dòng này trong cùng commit.
 # Cách đọc + ý nghĩa từng dòng evidence: `v2/docs/k3-riscv64.md` §17.
-ktest 53 53
+ktest 56 56
 ktest-guard 3 3
 
 # KT-53 → **KT-62**: ảnh test **user** (bin riêng) — U-mode + `init` ELF + **16 syscall đi vào

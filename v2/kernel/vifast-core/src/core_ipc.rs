@@ -12,12 +12,14 @@
 //! `release_donation_of` khi rời `BlockedOnReply`; xung đột `Reply.caller` ⇒
 //! `IllegalOperation`.
 //!
-//! **Biên KT-60:** chưa chuyển cap (receive window/`plan_cap_transfer`) — message có cap bị
-//! từ chối `InvalidArgument`; ghi nợ `docs/k3b-core.md` §8. Mọi bảng có biên tĩnh; đầy ⇒
-//! `NotEnoughMemory` **nguyên tử** (biên triển khai, như `MAX_TCBS`).
+//! **KT-63:** chuyển cap qua IPC (receive window 4 ô + `plan_cap_transfer` + `RIGHT_GRANT`)
+//! và finalise IPC khi `Revoke`/`Delete` (huỷ `Reply.caller` ⇒ caller `Cancelled + Ready`;
+//! đánh thức Recv/Notification waiter của object bị finalise — chống treo; huỷ hàng Endpoint
+//! và đếm `ipc_dropped`). Mọi bảng có biên tĩnh; đầy ⇒ `NotEnoughMemory` **nguyên tử** (biên
+//! triển khai, như `MAX_TCBS`).
 
 use crate::error::{CapId, KError, ObjId, ObjType, SlotRef};
-use crate::ipc::{transfer, IpcArea, Message};
+use crate::ipc::{CapPlan, IpcArea, Message, MAX_CAPS};
 use crate::machine::{Machine, BODY_ENDPOINT, BODY_NOTIFICATION, BODY_REPLY, MAX_QUEUED_MESSAGES};
 use crate::objstate::{
     EndpointData, NotificationData, QueuedMsg, ReplyData, ENDPOINT_QUEUE_CAP, MAX_WAIT_NODES,
@@ -99,7 +101,7 @@ impl Machine {
         Ok(&self.replies[i])
     }
 
-    fn reply_data_mut(&mut self, obj: ObjId) -> Result<&mut ReplyData, KError> {
+    pub(crate) fn reply_data_mut(&mut self, obj: ObjId) -> Result<&mut ReplyData, KError> {
         let i = self.body_slot(obj, ObjType::Reply, BODY_REPLY)?;
         Ok(&mut self.replies[i])
     }
@@ -200,7 +202,7 @@ impl Machine {
         Ok(())
     }
 
-    fn set_last_ipc_error(&mut self, tcb: ObjId, e: KError) -> Result<(), KError> {
+    pub(crate) fn set_last_ipc_error(&mut self, tcb: ObjId, e: KError) -> Result<(), KError> {
         self.tcb_data_mut(tcb)?.last_ipc_error = Some(e);
         Ok(())
     }
@@ -228,6 +230,22 @@ impl Machine {
 
     fn endpoint_full(&self, ep: ObjId) -> Result<bool, KError> {
         Ok(self.endpoint_data(ep)?.send.is_full())
+    }
+
+    /// TCB đang chờ `Recv` trên Endpoint (chỉ **đọc**, không gỡ hàng) — KT-63 dùng để kiểm
+    /// receive window của bên nhận **trước** khi message vào đường IPC (như sim).
+    fn endpoint_recv_waiter_obj(&self, ep: ObjId) -> Result<Option<ObjId>, KError> {
+        Ok(self.endpoint_data(ep)?.recv.map(|(t, _)| t))
+    }
+
+    /// Message **đầu** hàng gửi của Endpoint (chỉ **đọc**, không pop) — KT-63 peek ảnh chụp
+    /// cap để kiểm receive window **trước** khi pop (không giao nửa chừng, như sim).
+    fn endpoint_front_msg(&self, ep: ObjId) -> Result<Option<Message>, KError> {
+        let i = self.body_slot(ep, ObjType::Endpoint, BODY_ENDPOINT)?;
+        let Some(mi) = self.endpoints[i].send.iter().next() else {
+            return Ok(None);
+        };
+        Ok(self.ipc_msgs[mi as usize].msg)
     }
 
     fn endpoint_enqueue(&mut self, ep: ObjId, q: QueuedMsg) -> Result<(), KError> {
@@ -264,28 +282,18 @@ impl Machine {
 
     // ---------------------------------------------------------------- delivery
 
-    /// Nhận message vào đường IPC: biên cap (KT-60: chỉ `caps = 0`), cấp `msg_id` từ
-    /// `ipc_sent` (không tái dùng).
+    /// Nhận message vào đường IPC: biên cap (`≤ 4`, khớp `MessageInfo.caps` + **đủ** ảnh
+    /// chụp), cấp `msg_id` từ `ipc_sent` (không tái dùng) — như `admit_message` của sim.
     fn admit_message(&mut self, mut msg: Message) -> Result<Message, KError> {
-        if msg.info.caps() != 0 {
+        if msg.n_caps as usize > MAX_CAPS
+            || msg.n_caps as usize != msg.info.caps() as usize
+            || msg.n_snaps != msg.n_caps
+        {
             return Err(KError::InvalidArgument);
         }
         self.ipc_sent += 1;
         msg.msg_id = self.ipc_sent;
         Ok(msg)
-    }
-
-    /// Giao message vào vùng nhận của TCB qua **`ipc::transfer`** (đường copy duy nhất).
-    fn deliver_to(&mut self, receiver: ObjId, msg: &Message) -> Result<(), KError> {
-        let t = self.tcb_data_mut(receiver)?;
-        transfer(msg, &mut t.ipc);
-        self.ipc_delivered += 1;
-        self.transfer_calls += 1;
-        Ok(())
-    }
-
-    fn deliver_message(&mut self, receiver: ObjId, msg: &Message) -> Result<(), KError> {
-        self.deliver_to(receiver, msg)
     }
 
     /// Giao message **đã xếp hàng** cho TCB nhận (`recv`/`nb_recv`), xử lý người gửi và
@@ -295,6 +303,7 @@ impl Machine {
         receiver: ObjId,
         q: QueuedMsg,
         reply_obj: Option<ObjId>,
+        plan: Option<CapPlan>,
     ) -> Result<Option<Message>, KError> {
         let mut out = q.msg;
         let mut kernel_no_reply = false;
@@ -303,7 +312,7 @@ impl Machine {
                 m.info = m.info.with_no_reply(true);
                 kernel_no_reply = true;
             }
-            self.deliver_message(receiver, m)?;
+            self.deliver_message(receiver, m, plan.as_ref())?;
         }
         match q.fault {
             Some(kind) => {
@@ -388,6 +397,12 @@ impl Machine {
                 }
             }
         }
+        let mut msg = msg;
+        self.resolve_caps(&mut msg)?;
+        let plan = match self.endpoint_recv_waiter_obj(ep_obj)? {
+            Some(w) => self.prepare_caps(w, &msg.snaps[..msg.n_snaps as usize], Some(ep_obj))?,
+            None => None,
+        };
         let mut msg = self.admit_message(msg)?;
         self.set_endpoint_last_mr(ep_obj, msg.mr[0])?;
         if has_waiter {
@@ -398,7 +413,7 @@ impl Machine {
             if kernel_no_reply {
                 msg.info = msg.info.with_no_reply(true);
             }
-            self.deliver_message(waiter, &msg)?;
+            self.deliver_message(waiter, &mut msg, plan.as_ref())?;
             self.transition_tcb(waiter, TcbState::Ready)?;
             if user_no_reply {
                 self.sched_after_op(true);
@@ -488,13 +503,19 @@ impl Machine {
         if !has_waiter && (self.endpoint_full(ep_obj)? || !self.ipc_msg_available()) {
             return Err(KError::Busy);
         }
-        let msg = self.admit_message(msg)?;
+        let mut msg = msg;
+        self.resolve_caps(&mut msg)?;
+        let plan = match self.endpoint_recv_waiter_obj(ep_obj)? {
+            Some(w) => self.prepare_caps(w, &msg.snaps[..msg.n_snaps as usize], Some(ep_obj))?,
+            None => None,
+        };
+        let mut msg = self.admit_message(msg)?;
         self.set_endpoint_last_mr(ep_obj, msg.mr[0])?;
         if has_waiter {
             let waiter = self
                 .endpoint_take_waiter(ep_obj)?
                 .expect("has_waiter vừa kiểm");
-            self.deliver_message(waiter, &msg)?;
+            self.deliver_message(waiter, &mut msg, plan.as_ref())?;
             self.transition_tcb(waiter, TcbState::Ready)?;
         } else {
             self.endpoint_enqueue(
@@ -559,9 +580,17 @@ impl Machine {
             }
         }
         self.reset_ipc_error(tcb)?;
+        // **KT-63**: kiểm receive window **trước** khi pop (message có cap mà window chưa bind
+        // ⇒ `InvalidArgument`, message **ở lại** hàng — không mất, không giao nửa chừng).
+        let plan = match self.endpoint_front_msg(ep_obj)? {
+            Some(m) if m.n_snaps > 0 => {
+                self.prepare_caps(tcb, &m.snaps[..m.n_snaps as usize], Some(ep_obj))?
+            }
+            _ => None,
+        };
         match self.endpoint_pop(ep_obj)? {
             Some(q) => {
-                let _ = self.deliver_queued(tcb, q, reply_obj)?;
+                let _ = self.deliver_queued(tcb, q, reply_obj, plan)?;
             }
             None => {
                 self.endpoint_data_mut(ep_obj)?.recv = Some((tcb, reply_cap));
@@ -596,9 +625,15 @@ impl Machine {
         }
         let ep_obj = self.require_cap_type(cap, ObjType::Endpoint)?;
         self.reset_ipc_error(tcb)?;
+        let plan = match self.endpoint_front_msg(ep_obj)? {
+            Some(m) if m.n_snaps > 0 => {
+                self.prepare_caps(tcb, &m.snaps[..m.n_snaps as usize], Some(ep_obj))?
+            }
+            _ => None,
+        };
         match self.endpoint_pop(ep_obj)? {
             Some(q) => {
-                let got = self.deliver_queued(tcb, q, None)?;
+                let got = self.deliver_queued(tcb, q, None, plan)?;
                 self.sched_after_op(true);
                 Ok(got)
             }
@@ -627,21 +662,34 @@ impl Machine {
             return Err(KError::IllegalOperation);
         }
         let reply_obj = self.require_type(reply, ObjType::Reply)?;
-        if let Some(m) = msg.as_ref() {
-            if m.info.caps() != 0 {
-                return Err(KError::InvalidArgument);
+        // **KT-63** (như sim): kiểm biên cap + cap nguồn + receive window của **caller**
+        // **trước** khi lấy `caller` — lỗi cứng không được để `Reply.caller = None` trong khi
+        // caller vẫn `BlockedOnReply` (mất đường reply = treo).
+        let caller_peek = self.reply_data(reply_obj)?.caller;
+        let (mut msg, plan) = match msg {
+            Some(mut m) => {
+                if m.n_caps as usize > MAX_CAPS || m.n_caps as usize != m.info.caps() as usize {
+                    return Err(KError::InvalidArgument);
+                }
+                self.resolve_caps(&mut m)?;
+                let plan = match caller_peek {
+                    Some(c) => self.prepare_caps(c, &m.snaps[..m.n_snaps as usize], None)?,
+                    None => None,
+                };
+                (Some(m), plan)
             }
-        }
+            None => (None, None),
+        };
         let caller = self.reply_data_mut(reply_obj)?.caller.take();
         if let Some(donor) = self.donation_donor_of(tcb) {
             if caller == Some(donor) {
                 self.return_donation(tcb)?;
             }
         }
-        if let Some(m) = msg {
-            let m = self.admit_message(m)?;
+        if let Some(m) = msg.as_mut() {
+            let mut m = self.admit_message(*m)?;
             match caller {
-                Some(c) => self.deliver_message(c, &m)?,
+                Some(c) => self.deliver_message(c, &mut m, plan.as_ref())?,
                 None => self.ipc_dropped += 1,
             }
         }
@@ -835,7 +883,7 @@ impl Machine {
                     blocking: true,
                     alive: true,
                 };
-                let _ = self.deliver_queued(w, q, reply_obj)?;
+                let _ = self.deliver_queued(w, q, reply_obj, None)?;
                 if w != tcb {
                     self.transition_tcb(w, TcbState::Ready)?;
                 }
@@ -1153,6 +1201,31 @@ impl Machine {
         n
     }
 
+    /// **KT-63** — số cap **cài được** vào receive window qua đường IPC (`RIGHT_GRANT` đã bỏ).
+    pub fn cap_transfer_installed(&self) -> u64 {
+        self.cap_transfer_installed
+    }
+
+    /// **KT-63** — số cap **thất bại mềm** khi chuyển (thiếu `RIGHT_GRANT`, ô đích đã có cap,
+    /// cap nguồn chết giữa hàng và giao).
+    pub fn cap_transfer_failed(&self) -> u64 {
+        self.cap_transfer_failed
+    }
+
+    /// **KT-63** — số cap **unwrap** thành badge (cap trỏ chính Endpoint đang gọi + badge).
+    pub fn cap_unwrapped(&self) -> u64 {
+        self.cap_unwrapped
+    }
+
+    /// **KT-63** — `(cài được, unwrap, thất bại mềm)`, cùng bộ ba `cap_transfer_stats` của sim.
+    pub fn cap_transfer_stats(&self) -> (u64, u64, u64) {
+        (
+            self.cap_transfer_installed,
+            self.cap_unwrapped,
+            self.cap_transfer_failed,
+        )
+    }
+
     /// Số lần fault đi vào đường fault (cửa sổ nhanh của `check_fault`).
     pub fn fault_events(&self) -> u64 {
         self.fault_events
@@ -1311,6 +1384,36 @@ impl Iterator for SendItems<'_> {
         let q = &self.m.ipc_msgs[slots[self.idx] as usize];
         self.idx += 1;
         Some((q.sender, q.fault))
+    }
+}
+
+impl Machine {
+    /// **KT-63** — bind **receive window** (CPTR 4 ô CSpace) cho TCB — model API `[TK]` như
+    /// sim, **không** thêm chữ ký ABI (`Tcb.Configure` của `spec/abi.toml` chỉ có CSpace).
+    ///
+    /// Mỗi ô phải là slot **có thật** của một CNode còn sống; các ô phải **khác nhau** (hai cap
+    /// cài vào cùng một slot sẽ đè nhau ⇒ `InvalidArgument`). Bind `[s0..s3]` với các ô **rỗng**
+    /// là hợp lệ — khác "chưa bind" (`None`: message có cap cần cài ⇒ `InvalidArgument`).
+    pub fn tcb_set_recv_window(
+        &mut self,
+        tcb: SlotRef,
+        window: [SlotRef; MAX_CAPS],
+    ) -> Result<(), KError> {
+        let tcb_obj = self.require_type(tcb, ObjType::Tcb)?;
+        for (i, w) in window.iter().enumerate() {
+            self.check_cnode_slot(w.cnode, w.slot)?;
+            if window[..i].contains(w) {
+                return Err(KError::InvalidArgument);
+            }
+        }
+        self.tcb_data_mut(tcb_obj)?.recv_window = Some(window);
+        self.sched_after_op(false);
+        Ok(())
+    }
+
+    /// **KT-63** — receive window hiện tại của TCB (`None` = chưa bind).
+    pub fn tcb_recv_window(&self, tcb: ObjId) -> Result<Option<[SlotRef; MAX_CAPS]>, KError> {
+        Ok(self.tcb_data(tcb)?.recv_window)
     }
 }
 
