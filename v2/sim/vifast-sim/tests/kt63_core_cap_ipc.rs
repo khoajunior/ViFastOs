@@ -479,3 +479,92 @@ fn kt63_core_nb_send_xep_hang_roi_cai_cap() {
     assert_eq!(r.m.cap_transfer_stats(), (4, 0, 0));
     r.kiem("xếp hàng rồi cài cap");
 }
+
+#[test]
+fn kt63_core_bang_cap_day_tra_not_enough_memory_nguyen_tu() {
+    // **F1 (reviewer-kt63)** — bảng cap đầy ⇒ `NotEnoughMemory` **trước** `admit`/pop: message
+    // không vào đường IPC, waiter còn `BlockedOnRecv`, không panic giữa message.
+    let mut r = build();
+    let mut cn = [0u32; 6];
+    for c in cn.iter_mut() {
+        *c = r.m.add_cnode(96);
+    }
+    let src = r.m.cap_at(r.c0, 2).expect("cap nguồn");
+    'fill: for c in cn.iter().copied() {
+        for s in 0..96 {
+            if r.m.cap_count() >= kc::MAX_CAPS {
+                break 'fill;
+            }
+            r.m.copy(slot(r.c0, 2), slot(c, s)).expect("copy");
+        }
+    }
+    assert_eq!(r.m.cap_count(), kc::MAX_CAPS, "bảng cap đầy đúng biên");
+    let wcn = r.m.add_cnode(64);
+    r.m.tcb_set_recv_window(
+        r.ts[1],
+        [slot(wcn, 0), slot(wcn, 1), slot(wcn, 2), slot(wcn, 3)],
+    )
+    .expect("bind window");
+    r.m.recv(r.t[1], r.eps[0], None).expect("Recv");
+    let sent = r.m.ipc_sent();
+    let pending = r.m.ipc_pending();
+    assert_eq!(
+        r.m.send(r.t[0], r.eps[0], msg_caps(60, &[1], &[src])),
+        Err(KError::NotEnoughMemory)
+    );
+    assert_eq!(r.m.ipc_sent(), sent, "không cấp msg_id");
+    assert_eq!(r.m.ipc_pending(), pending, "message không vào đường IPC");
+    assert!(matches!(r.st(1), TcbState::BlockedOnRecv { .. }));
+    r.kiem("bảng cap đầy");
+}
+
+#[test]
+fn kt63_core_window_tro_cnode_chet_tra_invalid_capability() {
+    // **F2 (reviewer-kt63)** — receive window trỏ CNode đã finalise ⇒ `InvalidCapability`
+    // **trước** `admit`; không tạo cap mồ côi, message không kẹt nửa đường.
+    let mut r = build();
+    let u2 = r.m.add_untyped(0x8100_0000, 1 << 16);
+    let uc2 = r.m.root_cap(u2);
+    r.m.put_cap(r.c0, 53, uc2).expect("cap Untyped 2");
+    let wcap =
+        r.m.retype(slot(r.c0, 53), ObjType::CNode, 6, 0)
+            .expect("retype CNode");
+    let wcn = r.m.cap_obj(wcap).expect("obj CNode");
+    r.m.put_cap(r.c0, 52, wcap).expect("giữ cap CNode");
+    r.m.tcb_set_recv_window(
+        r.ts[1],
+        [slot(wcn, 0), slot(wcn, 1), slot(wcn, 2), slot(wcn, 3)],
+    )
+    .expect("bind window");
+    r.m.recv(r.t[1], r.eps[0], None).expect("Recv");
+    r.m.revoke(r.c0, Some(53))
+        .expect("revoke Untyped chứa CNode");
+    assert!(!r.m.object_alive(wcn), "CNode window đã chết");
+    let sent = r.m.ipc_sent();
+    assert_eq!(
+        r.m.send(r.t[0], r.eps[0], msg_caps(61, &[1], &[r.src[0]])),
+        Err(KError::InvalidCapability)
+    );
+    assert_eq!(r.m.ipc_sent(), sent);
+    assert!(matches!(r.st(1), TcbState::BlockedOnRecv { .. }));
+    r.kiem("window trỏ CNode chết");
+}
+
+#[test]
+fn kt63_core_cap_nguon_chet_giua_hang_va_giao_thi_that_bai_mem() {
+    // **F3 (reviewer-kt63)** — cap nguồn chết **giữa lúc xếp hàng và lúc giao**: message vẫn
+    // được giao, `info.caps = 0`, `cap_transfer_failed += 1`, **không** mất message.
+    let mut r = build();
+    r.m.tcb_set_recv_window(r.ts[1], r.win[0]).expect("bind");
+    let src = r.m.copy(r.eps[1], slot(r.c0, 50)).expect("copy cap nguồn");
+    r.m.nb_send(r.t[0], r.eps[0], msg_caps(62, &[7], &[src]))
+        .expect("NBSend xếp hàng");
+    r.m.delete(slot(r.c0, 50)).expect("delete cap nguồn");
+    r.m.recv(r.t[1], r.eps[0], None).expect("Recv");
+    let info = r.info(1).expect("message vẫn được giao");
+    assert_eq!(info.caps(), 0, "cap chết ⇒ thất bại mềm");
+    assert_eq!(info.length(), 1);
+    assert_eq!(r.m.cap_transfer_stats(), (0, 0, 1));
+    assert_eq!(r.m.ipc_dropped(), 0);
+    r.kiem("cap nguồn chết giữa hàng");
+}

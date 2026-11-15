@@ -869,7 +869,7 @@ không sửa sim semantics, không đụng `viscript/`; `vifast-core` vẫn `#![
 | `TcbData.recv_window: Option<[SlotRef; 4]>` | `None` = **chưa bind** (message có cap **cần cài** ⇒ `InvalidArgument` **trước** khi giao); `Some` = 4 ô CSpace (bind rỗng hợp lệ); ô đã có cap ⇒ cap tương ứng thất bại mềm (theo **vị trí**, không dồn) |
 | `Machine::tcb_set_recv_window` / `tcb_recv_window` | Model API `[TK]` như sim: slot **có thật** của CNode còn sống, các ô **khác nhau**; **không** thêm chữ ký ABI (`Tcb.Configure` chỉ có CSpace) |
 | `ipc::plan_cap_transfer` / `CapPlan` | (1) cap trỏ **chính Endpoint đang gọi** + có badge ⇒ **unwrap** (badge OR vào `Message.badge`, `extra_caps_unwrapped` tăng, **không** chiếm window); (2) thiếu `RIGHT_GRANT` ⇒ thất bại **mềm**; (3) ô đích đã có cap ⇒ thất bại mềm; (4) còn lại ⇒ cài con **bỏ `RIGHT_GRANT`**, giữ badge |
-| `core_capxfer.rs` | `resolve_caps` (lỗi cứng `InvalidCapability` **trước** `msg_id`), `prepare_caps`, `deliver_caps`, `deliver_message` — gọi ở `call_msg`/`endpoint_send`/`recv`/`nb_recv`/`reply_with`/`deliver_queued` |
+| `core_capxfer.rs` | `resolve_caps` (lỗi cứng `InvalidCapability` **trước** `msg_id`), `prepare_caps` (thêm **F1/F2** sau review: bảng cap đầy ⇒ `NotEnoughMemory`; ô đích thuộc CNode đã chết/slot sai ⇒ `InvalidCapability`/`RangeError` — **tất cả trước** `admit`/pop/take-waiter), `deliver_caps`, `deliver_message` — gọi ở `call_msg`/`endpoint_send`/`recv`/`nb_recv`/`reply_with`/`deliver_queued` |
 | `core_finalise.rs` | `cancel_reply_object`, `clear_dead_reply_in_waiters`, `finalise_endpoint_body`, `finalise_notification_body` — gọi từ `Machine::{delete,revoke_children}` |
 | Bộ đếm `cap_transfer_{installed,failed}`/`cap_unwrapped` | Cùng tên/nghĩa sim; accessor `cap_transfer_stats() -> (installed, unwrapped, failed)` |
 
@@ -887,7 +887,7 @@ Reply con, Reply cap chết trong waiter Q7b, `Revoke` Untyped khi có caller/wa
 `TcbInfo` + `ReadState` + `IpcArea`), **receive window** (4 CPTR + `CapFp{ty,rights,badge}`),
 hàng Endpoint đầy đủ nội dung, `Reply.caller`, Notification, counters IPC + **3 bộ đếm cap**,
 8 cờ bất biến. Log: `JOURNAL/kt63-parity.log` — **16/16** test kt60 parity (11 cũ + 5 mới),
-`JOURNAL/kt63-core-tests.log` — **10/10** test core-only.
+`JOURNAL/kt63-core-tests.log` — **13/13** test core-only (3 ca vá **F1/F2/F3** của reviewer-kt63: bảng cap đầy, window trỏ CNode chết, cap nguồn chết giữa hàng).
 
 ### 12.3 Đỏ trước (D2-05)
 
@@ -903,7 +903,7 @@ không phải test sai. Sau port: 10/10 xanh. Không retry lấy xanh; không n�
 | **196.608 B** (pin D2-84) | `size_of::<Machine>()` | 180.168 | **188.448** (95,9 %; còn **8.160 B**) | ĐẠT — thêm `recv_window` (+4.608 B) + cap trong `Message` (+3.648 B) |
 | **262.144 B** (trần ảnh) | `.data+.sdata+.bss+.sbss` ELF thật | 191.416 / 197.568 / 2.680 / 192.304 | **199.696** (product) / **209.856** (ktest) / **2.680** (guard) / **200.584** (user) | ĐẠT |
 
-File ảnh (byte): product **191.824**, ktest **533.496**, guard **53.808**, user **326.568** — log
+File ảnh (byte): product **191.824**, ktest **533.536**, guard **53.808**, user **330.704** — log
 `JOURNAL/kt63-budget.log` (script `budget.sh` in, tài liệu không chép tay số đo ngoài log). Bảng
 phân bố §7.3 cập nhật đúng 27 dòng + `scalars = 263`; test pin vẫn assert `padding ≤ 8` (D2-85c,
 hiện 1 B) nên bảng thiếu dòng sẽ đỏ.
@@ -921,9 +921,14 @@ Hệ quả tạm thời: **parity loại trừ đúng đường này** (kịch b
 waiter nằm trên object **khác** hoặc đã được đánh thức); hành vi core được pin bằng 2 ca core-only
 (`kt63_core_recv_waiter_thuc_khi_endpoint_bi_finalise`,
 `kt63_core_revoke_huy_caller_waiter_hang_va_tra_cancelled`) và **TAP 55** trên QEMU.
+**D2-90** mở rộng chuẩn anti-hang **phủ cả người gửi**: TCB `BlockedOnSend` trên Endpoint bị
+revoke cũng phải `Cancelled + Ready` + drop **có đếm**. Core KT-63 **giữ hành vi sim** cho
+sender (còn `BlockedOnSend` — **nợ D2-90** ghi tường minh, không chỉ "nợ KT-65"); **KT-64a** phủ
+**cả ba** loại chờ (caller/waiter/sender) và **bỏ mọi loại trừ parity**.
+
 **KT-64a** (QUEUE, 2 h, sau **KT-64**) là **nơi đóng lệch**: sửa **sim** cho khớp chuẩn D2-89 +
-`.scn` đỏ-trước + **đưa đường này trở lại parity**, khi đó **xoá** loại trừ ở đây. Caller
-`BlockedOnReply` thì **giống hệt sim**: `Cancelled + Ready`. Không đổi `spec/`.
+D2-90 + `.scn` đỏ-trước + **đưa cả ba đường trở lại parity**, khi đó **xoá** loại trừ ở đây.
+Caller `BlockedOnReply` thì **giống hệt sim**: `Cancelled + Ready`. Không đổi `spec/`.
 
 ### 12.6 TAP QEMU (ảnh `ktest`: 53 → **56** TAP) + `# ipc:` evidence
 

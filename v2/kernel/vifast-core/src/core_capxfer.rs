@@ -7,8 +7,10 @@
 //! Model-only `[TK]`, không phải ABI. Message **không** copy object — chỉ cap tham chiếu.
 
 use crate::error::{KError, ObjId};
-use crate::ipc::{plan_cap_transfer, transfer, CapPlan, CapSnapshot, Message, MAX_CAPS};
-use crate::machine::Machine;
+use crate::ipc::{
+    plan_cap_transfer, transfer, CapPlan, CapSnapshot, Message, MAX_CAPS as IPC_MAX_CAPS,
+};
+use crate::machine::{Machine, MAX_CAPS};
 use crate::spec::RIGHT_GRANT;
 
 impl Machine {
@@ -47,18 +49,29 @@ impl Machine {
             return Ok(None);
         }
         let window = self.tcb_data(receiver)?.recv_window;
-        let mut occupied = [false; MAX_CAPS];
+        let mut occupied = [false; IPC_MAX_CAPS];
         if let Some(window) = window.as_ref() {
             for (i, w) in window.iter().enumerate() {
                 occupied[i] = self.cnode_slot(w.cnode, w.slot)?.is_some();
             }
         }
-        Ok(Some(plan_cap_transfer(
-            snaps,
-            window.as_ref(),
-            &occupied,
-            endpoint,
-        )?))
+        let plan = plan_cap_transfer(snaps, window.as_ref(), &occupied, endpoint)?;
+        // **F1 (reviewer-kt63)** — bảng cap **đầy** thì lỗi **nguyên tử** `NotEnoughMemory`
+        // **trước** `admit`/pop/take-waiter: `push_cap` không được panic giữa message.
+        // (`derive` cũng cần kiểm tương tự — ghi nợ, không thuộc đường IPC này.)
+        if self.n_caps + plan.installed() > MAX_CAPS {
+            return Err(KError::NotEnoughMemory);
+        }
+        // **F2 (reviewer-kt63)** — ô đích phải thuộc CNode **còn sống** + slot hợp lệ: window
+        // trỏ CNode đã finalise ⇒ `InvalidCapability` **trước** `admit`, không tạo cap mồ côi
+        // rồi `cnode_set_slot` lỗi giữa đường.
+        for &(_, dst) in plan.install() {
+            if !self.object_alive(dst.cnode) {
+                return Err(KError::InvalidCapability);
+            }
+            self.check_cnode_slot(dst.cnode, dst.slot)?;
+        }
+        Ok(Some(plan))
     }
 
     /// **KT-63** — cài cap theo kế hoạch vào receive window và cập nhật `MessageInfo` của
