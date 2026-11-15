@@ -907,27 +907,32 @@ File ảnh (byte): product **191.824**, ktest **533.536**, guard **53.808**, use
 phân bố §7.3 cập nhật đúng 27 dòng + `scalars = 263`; test pin vẫn assert `padding ≤ 8` (D2-85c,
 hiện 1 B) nên bảng thiếu dòng sẽ đỏ.
 
-### 12.5 Lệch **có chủ đích chờ đồng bộ** với sim — chuẩn là anti-hang (D2-89)
+### 12.5 Anti-hang finalise IPC — **đã đồng bộ ở KT-64a** (D2-89 + D2-90), **không còn loại trừ**
 
-**D2-89 (2026-11-16) chốt chuẩn**: finalise IPC là **anti-hang** — caller `Cancelled + Ready`,
-Recv/Notification waiter `Cancelled + Ready`, huỷ hàng. Sim K1–K2 **để waiter treo** trên object
-đã finalise (`BlockedOnRecv{ep đã chết}`/`BlockedOnNotification{ntfn đã chết}` — đo được, probe
-`JOURNAL/kt63-nhat-ky.md` §3) là **lỗi mô hình**, **không** phải hành vi chuẩn. Vì vậy core làm
-theo chuẩn; đây là **lệch có chủ đích chờ đồng bộ**, **không** phải "sim không làm nên core làm
-khác", và **cấm** dùng "sim không làm" làm lý do để core treo.
+**D2-89/D2-90 chốt chuẩn**: finalise IPC là **anti-hang** — caller `BlockedOnReply`,
+waiter `Recv`/`Notification` **và** sender `BlockedOnSend` trên object bị `Revoke/Delete` đều
+`Cancelled + Ready`; hàng gửi bị huỷ và message bị huỷ **đếm** vào `ipc_dropped` (D2-90).
 
-Hệ quả tạm thời: **parity loại trừ đúng đường này** (kịch bản revoke của parity chỉ revoke khi
-waiter nằm trên object **khác** hoặc đã được đánh thức); hành vi core được pin bằng 2 ca core-only
-(`kt63_core_recv_waiter_thuc_khi_endpoint_bi_finalise`,
-`kt63_core_revoke_huy_caller_waiter_hang_va_tra_cancelled`) và **TAP 55** trên QEMU.
-**D2-90** mở rộng chuẩn anti-hang **phủ cả người gửi**: TCB `BlockedOnSend` trên Endpoint bị
-revoke cũng phải `Cancelled + Ready` + drop **có đếm**. Core KT-63 **giữ hành vi sim** cho
-sender (còn `BlockedOnSend` — **nợ D2-90** ghi tường minh, không chỉ "nợ KT-65"); **KT-64a** phủ
-**cả ba** loại chờ (caller/waiter/sender) và **bỏ mọi loại trừ parity**.
+**KT-64a (2026-11-16) đóng lệch** — hai đầu đã về **một nguồn sự thật**:
 
-**KT-64a** (QUEUE, 2 h, sau **KT-64**) là **nơi đóng lệch**: sửa **sim** cho khớp chuẩn D2-89 +
-D2-90 + `.scn` đỏ-trước + **đưa cả ba đường trở lại parity**, khi đó **xoá** loại trừ ở đây.
-Caller `BlockedOnReply` thì **giống hệt sim**: `Cancelled + Ready`. Không đổi `spec/`.
+1. **Sim sửa theo chuẩn** (`sim/vifast-sim/src/kobj.rs::finalise_ipc_waiters`, gọi trong
+   `revoke_children` **trước** khi body về free-list): Endpoint bị finalise ⇒ Recv waiter **và
+   mọi** sender `BlockedOnSend` trong hàng nhận `Cancelled + Ready`; Notification ⇒ waiter
+   `Cancelled + Ready`. `BlockedOnReply` (caller) vốn đúng từ KT-25 nên **không** đổi.
+2. **Core**: KT-63 đã đúng cho caller/Recv/Notification; KT-64a đóng nốt **nợ D2-90 cho sender**
+   trong `core_finalise.rs::finalise_endpoint_body` (cùng một chuẩn — điều khoản "trước KT-64a
+   core được phép giữ hành vi sim (treo sender)" của D2-90 **hết** hiệu lực).
+3. **Parity phủ trọn ba đường, không `skip`**: `kt60_core_parity.rs` có
+   `kt63_parity_revoke_finalise_caller_va_sender` (caller `BlockedOnReply` **và** sender
+   `BlockedOnSend`; chốt thêm pha **trước** `Revoke` sender còn `BlockedOnSend` — không phải
+   kịch bản né), `kt64a_parity_finalise_recv_waiter`, `kt64a_parity_finalise_notification_waiter`.
+   Digest KT-63 thêm `Tcb.last_ipc_error` ⇒ `Cancelled` được so **giữa hai bên** sau từng bước.
+4. **`.scn` đỏ-trước**: `v2/test/scn/27-finalise-ba-loai-cho.scn` (26 ⇒ **27 tệp**, **16 nhóm**
+   không đổi) + runner `sim/vifast-sim/tests/kt64a_scn.rs`; trên sim **cũ** runner đỏ đúng 3
+   assert trạng thái (`JOURNAL/kt64a-red-scn.log`), sau khi sửa xanh. QEMU: TAP 55 (KT-63) vẫn
+   là bằng chứng `# ipc:` cho đường revoke-có-caller/waiter/hàng.
+
+Không đổi `spec/`; không nới ngưỡng.
 
 ### 12.6 TAP QEMU (ảnh `ktest`: 53 → **56** TAP) + `# ipc:` evidence
 
@@ -935,7 +940,12 @@ Caller `BlockedOnReply` thì **giống hệt sim**: `Cancelled + Ready`. Không 
 |---|---|---|
 | 53 | **chuyển cap** Endpoint→Recv qua 2 TCB | `# ipc: cap-transfer installed=8 failed=1 unwrap=1 caps4=4 len=2 rights=0xb caps3=3 caps1=1 extra=1 badge=0xa5a5 check_ipc=1 check_caps=1` — 4 cap cài đủ **bỏ** `RIGHT_GRANT`, 1 cap thiếu GRANT thất bại mềm (3 cài), unwrap badge 0xA5A5 không chiếm ô window |
 | 54 | **message mang cap** qua Call/Reply | `# ipc: cap-message direction=call-reply caller_caps=2 reply_caps=2 caller_bound=1 caller_ready=1 rights=0xb reply_caller=0 check_ipc=1 check_reply_links=1` |
-| 55 | **`Revoke` khi có caller/waiter/hàng** | `# ipc: revoke deleted=5 caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready queue=0 queued=1 pending=0 sent=2 dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1` |
+| 55 | **`Revoke` khi có caller/waiter/hàng** (+ **sender** từ KT-64a) | `# ipc: revoke deleted=5 caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready sender=Ready sender_err=Cancelled queue=0 queued=1 pending=0 sent=2 dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1` |
+
+**KT-64a** — TAP 55 mở rộng **cùng số TAP**: thêm `sender=Ready sender_err=Cancelled` (D2-90:
+sender `BlockedOnSend` trên Endpoint bị finalise được đánh thức — trước KT-64a core **treo**
+nhánh này) + regex evidence trong `ktest.sh` sửa cùng commit (luật KT-54); `expected.txt`
+**không** đổi (số TAP 60 và số mục evidence giữ nguyên — chỉ mở rộng nội dung **một** dòng).
 
 Matrix `ktest.sh 1 matrix` ⇒ **9/9** boot sạch (smp 1/2/4 × 3 ảnh; ktest **56/56**, guard **3/3**,
 user **17/17**); log `JOURNAL/kt63-ktest-matrix.log`. Trap lồng dời **53 → 56** (cùng commit sửa
@@ -992,10 +1002,37 @@ translation cũ theo cách TAP quan sát được, nên **hiệu lực phần c�
 bằng TAP này** — nó được pin ở **KT-51** (TAP 25..29 + conformance 24, mô hình TLB + shootdown
 thật); ghi nợ, không tô hồng (`JOURNAL/kt64-mutation-m2-sfence.log`).
 
-**F3 — vì sao không parity ở tầng này:** sim **có** giao thức shootdown (`tlb_shootdown_begin/
-wait/poll`, `tlb_pending`, mask ack — KT-40), nhưng core **chưa** làm parity phần đó; KT-64 **chỉ**
-pin core-only + TAP. Parity `seq/targets/pending/acked/Busy` đã đưa vào **KT-64a (D2-92c)** —
-câu “sim không mô hình hoá” ở bản trước là **quá rộng** và đã sửa tại đây.
+**F3 — parity `TlbFlush` đã làm ở KT-64a (D2-92c), không còn miễn:** sim **có** giao thức
+shootdown (`tlb_shootdown_begin/wait/poll`, `tlb_pending`, mask ack — KT-40) nên
+`seq/targets/pending/acked/Busy` so được với core. Kịch bản **C** của
+`v2/sim/vifast-sim/tests/kt64_core_parity.rs` (`kt64a_parity_tlb_flush_mot_hart`,
+`kt64a_parity_tlb_flush_hai_hart_busy_va_pending`) so **cùng một định nghĩa**:
+
+| Trường | Sim (KT-40) | Core (KT-64) | Phép so |
+|---|---|---|---|
+| `seq` | `TlbShootdownInfo.seq` / `tlb_shootdown_count` | `tlb_seq()` | **bằng** (1-based, không tăng khi `Busy`) |
+| `targets` | `targets` = `active_on` (quy ước `TlbShootdownInfo` **và** `tlb::last_shootdown` của kernel) | **tập hart bị post**: `mail_len(h)` từng hart + `tlb_remote_posts()`; `TlbFlushReport.targets` chỉ đọc được ở ca **`targets == 0`** (C1) | C1: `report.active_on == info.targets` và `report.targets == tlb::targets(info.targets, caller)` (giá trị **0**). C2 (`targets = {1}`): so **gián tiếp** đúng tập hart bị post + `info.messages == tlb_remote_posts()` — **không** đọc `report.targets` |
+| `pending` | hart gọi: `tlb_pending`; hart đích: **`tlb_pending_ack`** (KT-64a **thêm vào sim**) | `tlb_pending(hart)` (một ô/hart, hai vai) | **bằng** `Some(seq)`/`None` theo từng vai (C1 + C2) |
+| `acked` | `TlbShootdownInfo.acked` (gồm ack ngầm hart gọi, D2-68) | `TlbFlushReport.acked` chỉ ở ca `targets == 0` (C1) | C1: `report.acked == tlb::targets(info.acked, caller)` (giá trị **0**). C2: so **sự kiện** — sim `acked == targets` ⇔ core mọi hart đích hết `tlb_pending` — + `tlb_ack_count()` **bằng** `tlb_serviced()`; **mask `acked ≠ 0` của core chưa quan sát được** ⇒ nợ §13.9 mục 5 |
+| `Busy` | `begin` lần hai khi còn pending (**cùng hart gọi**) | cùng luật | **cùng** mã `Busy` (không ghi đè lệnh chưa ack). **Chỉ** ca cùng hart gọi |
+
+Hai chi tiết **sim thiếu** đã thêm cho khớp chuẩn (không hạ core): (i) `tlb_pending_ack(hart)` —
+vai “hart đích đang nợ ack” của `pending` (core giữ chung một ô/hart); (ii) shootdown **không
+còn hart nào phải ack** (`targets ⊆ {hart gọi}`) **xong ngay ở `begin`** — không giữ ô `pending`
+rỗng (core: `targets == 0` ⇒ không `pending`; kernel KT-51 cũng `completed` ở vòng chờ đầu).
+
+**Phạm vi mô hình (không phải loại trừ) — không tuyên bố “đã kiểm”:** sim còn cho **hai hart
+cùng mở** shootdown (`kt40_tlb::deadlock_hai_hart_cho_nhau_poll_tu_phuc_vu`, chứng minh luật chống
+deadlock §4.10.3 / D2-68), còn core (và `IN_FLIGHT` của kernel KT-51) giữ **một** shootdown toàn
+cục ⇒ `begin` từ hart đang nợ ack trả `Busy` bên core. Parity **chỉ** so `Busy` ở ca **cùng hart
+gọi** (nơi hai bên cùng luật); shootdown **đồng thời** là **phạm vi mô hình** của sim K2 —
+**không** được đọc là “đã kiểm parity” cho đường đó.
+
+**Nợ quan sát (D2-92c, trung thực):** `TlbFlushReport.targets/.acked` với giá trị **≠ 0** của
+core **chưa** đọc được qua `begin`+`wait` (`tlb_flush` nhiều hart luôn `Busy` khi chưa ai chen
+`tlb_service` — D2-92b). Vì vậy ca 2 hart so **đúng tập hart bị post** + `pending` hai vai + bộ
+đếm ack + sự kiện `acked == targets`, **không** so mask `acked` của core. Muốn so mask thật phải
+thêm report cho `wait`/`flush` (đổi API core) — **không** làm trong KT-64a; ghi nợ §13.9 mục 5.
 
 **Biên kernel có chủ đích:** `core_bridge` giữ **một** `Machine` sau spin lock trên BSP
 (D2-88(a): `num_harts` là số hart nền tảng, không phải số hart core chạy). `KernelTlb::active_on`
@@ -1081,8 +1118,9 @@ chỉ đánh thức đúng bound; (B) `resume_with_regs` — fault `BlockedOnSen
 (`KError::id()`) + digest (notification `bound/word/badge/waiter`, trạng thái TCB, thanh ghi,
 `last_fault`, `reply_caller`, `ipc_sent/delivered/dropped`, 3–4 cờ bất biến) **sau từng bước**.
 `Unbind` không có ở sim (core-only, ghi trên); slot-arena không có đối tượng sim tương ứng
-(13.2) ⇒ core-only + TAP. `TlbFlush`: sim **có** giao thức shootdown (KT-40) nhưng parity **chưa**
-làm ở KT-64 — đã chuyển **KT-64a (D2-92c)**.
+(13.2) ⇒ core-only + TAP. `TlbFlush`: **KT-64a (D2-92c)** thêm **kịch bản C** (2 test, §13.1 F3) ⇒
+tệp parity **4/4** (A `Bind`+`Signal`, B `resume_with_regs`, C1 `TlbFlush` 1 hart, C2 `TlbFlush`
+2 hart `Busy`+`pending`). **Không còn mảng nào của KT-64 bị miễn parity.**
 
 ### 13.6 Đỏ trước (D2-05)
 
@@ -1133,8 +1171,13 @@ phẩm: `JOURNAL/kt64-soak.log`.
 3. **`SchedContext.YieldTo`/`Consumed`** chưa port (ngoài phạm vi tầng 3; KT-65 dùng).
 4. **`tcb_resume_with_regs` chưa có đường W^X/VM fault U-mode thật** trong ảnh sản phẩm — nó là
    model API cho procsrv (KT-65); TAP 58 chỉ chứng minh ngữ nghĩa trạng thái.
-5. Nợ **KT-64a** (sửa sim theo D2-89/D2-90 **+ parity TLB `seq/targets/pending/acked/Busy`
-   theo D2-92c**) **vẫn mở** — KT-64 không sửa sim.
+5. **KT-64a ĐÓNG** (D2-89/D2-90 + D2-92c): sim đã theo chuẩn anti-hang (§12.5) và parity
+   `TlbFlush` đã làm (§13.1 F3) — **không** còn loại trừ ở hai đường đó. Còn lại **phạm vi mô
+   hình**: shootdown **đồng thời** trên hai hart (sim cho, core/kernel `Busy` — **không** parity)
+   và `active_on` nhiều hart **thật** trong nhân (mục 1 ở trên). **Nợ quan sát:** mask
+   `TlbFlushReport.targets/.acked ≠ 0` của core chưa đọc được qua `begin`+`wait` ⇒ ca 2 hart so
+   tập hart bị post + `pending` + bộ đếm ack + sự kiện `acked == targets`, **không** so mask
+   (§13.1 F3). TAP 55 trên QEMU nay in **cả** `sender=Ready sender_err=Cancelled` (D2-90).
 6. **Dải slot 192 word/Region (`[TK]`, ≈190 slot/Untyped)** — đủ cho mọi ca hiện tại
    (`Retype` CNode ≤ 96 slot) nhưng **giảm** so với pool 4096 word cũ; nếu procsrv (KT-65) cần
    CNode lớn hơn, phải tách dải theo sức chứa/`MAX_UNTYPEDS` thực dùng (quyết định riêng, không

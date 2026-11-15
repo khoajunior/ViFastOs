@@ -4,16 +4,27 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`954851b8`** (`[KT-64b]` trên `194a09f5` `[KT-64]`, trên `da819ead` D2-92 của
-                Agent 0 — đã **push** `origin/main`, 0 sau); nhánh `main`; worktree có
-                `viscript/`, `review/`, `.agents/`, `out-b.log` của tab khác — **không chạm**;
-                commit chỉ `v2/**` (D2-91: pathspec, index sạch sau commit).
-BUILD_ID      : ảnh kernel KT-64: product **183.272 B / `.data+.bss` 200.120**, ktest
-                **573.136 / 209.856**, guard **53.808 / 2.680**, **user 335.920 / 201.008**
-                (trần 262.144 — `reports/kt64/kt64-budget.log`); core tĩnh
-                `size_of::<Machine>() = 188.872 B` `[ĐO]` ≤ pin **196.608** (còn **7.736 B**).
-                Soak BUILD_ID/sha256 ghi ở `reports/kt64/kt64-soak.log`.
-Task          : **KT-64 (K3.5 tầng 3: `TlbFlush` thật + `SlotPool`→arena + `SchedContext.Bind` +
+HEAD          : **`954851b8`** (`[KT-64b]`) — **KT-64a chưa commit** (chờ review độc lập rồi
+                commit `[KT-64a]` + `[KT-64a-b]` bằng pathspec, chỉ `v2/**`; D2-91: không `git
+                add`). Nhánh `main`; worktree có `viscript/`, `review/`, `.agents/`,
+                `out-b.log` của tab khác — **không chạm**.
+BUILD_ID      : ảnh kernel **KT-64a**: product **187.936 B / `.data+.bss` 200.120**, ktest
+                **573.744 / 209.856**, guard **53.808 / 2.680**, **user 335.928 / 201.008**
+                (trần 262.144; log build ảnh trong `JOURNAL/kt64a-ktest-matrix.log`); core tĩnh
+                `size_of::<Machine>() = 188.872 B` `[ĐO]` ≤ pin **196.608** (không đổi — KT-64a chỉ
+                sửa IPC finalise trong core, không thêm trường). Soak KT-64a
+                `BUILD_ID=6290c3b0198d37ac sha256=f2ccaed7542c892d…` ghi ở `JOURNAL/kt64a-soak.log`.
+Task          : **KT-64a (K3.5 — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` D2-92c)** —
+                **DONE (đề xuất; chờ reviewer + Agent 0)**: sim đánh thức **cả ba** loại chờ
+                (`BlockedOnRecv`/`BlockedOnNotification`/`BlockedOnSend`) khi object bị
+                `Revoke`/`Delete`, `Cancelled + Ready` + huỷ hàng + đếm `ipc_dropped`; core đóng
+                **nợ D2-90** cho sender (cùng chuẩn, không nới); parity phủ trọn 3 đường
+                (`kt60_core_parity` **18/18**, digest thêm `last_ipc_error`) + **parity TlbFlush**
+                (`kt64_core_parity` **4/4**, `seq/targets/pending/acked/Busy`); `.scn` **27 tệp**/
+                16 nhóm, đỏ-trước trên sim cũ; gate **647/83**; QEMU TAP **60/60 + 3/3 + 17/17**
+                (9/9 boot); soak **0/1000**. **Không còn loại trừ parity** (§12.5/§13.1 đã viết lại).
+
+                *(bối cảnh cũ)* **KT-64 (K3.5 tầng 3: `TlbFlush` thật + `SlotPool`→arena + `SchedContext.Bind` +
                 `tcb_resume_with_regs`)** — **DONE (đề xuất; đã sửa DRIFT vòng 1; chờ reviewer
                 confirm + Agent 0 lật QUEUE)**: `TlbEnv` hook (flush cục bộ luôn + post `active_on` + chờ đủ ack +
                 `dispatch` **Busy** trên hart còn pending); slot CNode **trong arena** tại
@@ -30,7 +41,15 @@ Task          : **KT-64 (K3.5 tầng 3: `TlbFlush` thật + `SlotPool`→arena +
                 → KT-64a (D2-92c); F4 `wait` **không ack hộ** ⇒ `Busy` reachable + test; F5 bất
                 biến 1:1 `ScData.bound` trong `check_notifications` + test `revoke`; F6 ghi rõ
                 assert/flush sai hart nếu multi-hart lọt vào kernel.
-Bước          : 10/10 (KT-64 xong, đã push): baseline 625/80 → red-before `E0432` (`JOURNAL/kt64-red-before.log`) →
+Bước          : 6/6 (KT-64a): đọc D2-89/90/92c + §12.5/§13.1/§13.9 → baseline gate **642/82**
+                `.scn` 26/16 → viết `.scn` 27 + runner + parity mới → **đỏ trước** trên HEAD cũ
+                (`JOURNAL/kt64a-red-scn.log`, `JOURNAL/kt64a-red-parity.log`) → sửa sim
+                (`finalise_ipc_waiters`) + core (`finalise_endpoint_body` D2-90) + 2 chi tiết sim
+                cho parity TLB (`tlb_pending_ack`, trivial-complete) → `cargo test -p vifast-sim`
+                **454/0** → gate **647/83** → matrix **9/9** (TAP 60/60) → soak **0/1000** → docs
+                §12.5/§13.1/§13.5/§13.9 + journal → **chờ review độc lập** → commit + push.
+
+                *(bối cảnh cũ)* Bước KT-64: 10/10: baseline 625/80 → red-before `E0432` (`JOURNAL/kt64-red-before.log`) →
                 slot arena + Bind + resume + TLB trong core → **12/12** → TAP 56..59 +
                 manifest/expected 60/60 → matrix 9/9 → gate **639/82** → soak **0/1000** →
                 budget 4 ảnh → docs §13 + journal → **review vòng 1: DRIFT** (F1 chặn + F2/F4/F5)
@@ -38,17 +57,76 @@ Bước          : 10/10 (KT-64 xong, đã push): baseline 625/80 → red-before
                 + log mutation đầy đủ) → gate **642/82**, matrix **9/9**, soak **0/1000** lại →
                 commit `[KT-64]` `194a09f5` + `[KT-64b]` `954851b8` → **push** `origin/main`.
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 642 test/82 suite, 0 failed**, L1 1.000 seed
-                (879 ms) (`JOURNAL/kt64-gate.log`); `ktest.sh 1 matrix` **9/9** boot, TAP
-                **60/60 + 3/3 + 17/17** (`JOURNAL/kt64-ktest-matrix.log`); `soak.sh 1000 3`
-                **0/1000** (`JOURNAL/kt64-soak.log`); budget 4 ảnh **200.120 / 209.856 /
-                2.680 / 201.008** ≤ 262.144 (`JOURNAL/kt64-budget.log`); core `size_of`
-                **188.872** ≤ 196.608; `v2 check` PASS; kernel clippy `-D warnings` sạch.
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 647 test/83 suite, 0 failed**, L1 1.000 seed
+                (833 ms) (`JOURNAL/kt64a-gate.log`); `.scn` **27 tệp/16 nhóm**/0 blocked
+                (`check_scn.py` PASS); `ktest.sh 1 matrix` **9/9** boot, TAP **60/60 + 3/3 +
+                17/17** — TAP 55 in **`sender=Ready sender_err=Cancelled`** (D2-90 trên nhân
+                thật) (`JOURNAL/kt64a-ktest-matrix.log`); `soak.sh 1000 3` **0/1000** (wall 224 s,
+                `dirty-kernel-paths=1`, `BUILD_ID=6290c3b0…`) (`JOURNAL/kt64a-soak.log`);
+                `cargo test -p vifast-sim` **454/0** (`JOURNAL/kt64a-sim.log`). Không đổi `spec/`,
+                không đổi trace conformance.
 ```
 
 
 
 
+
+## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
+
+**Vào**: KT-64 DONE; HEAD `954851b8`; `HEAD..origin/main` = 0; baseline `gate --fast` **PASS
+642/82**, `.scn` 26 tệp/16 nhóm.
+
+**Đỏ trước (D2-05)** — chạy test **mới** trên **mã nguồn HEAD cũ** (`git worktree` tại `99cf1c2e`,
+chỉ chép tệp test + `.scn`): `kt64a_scn` **0/1** (cả ba TCB còn `BlockedOn{Recv,Notification,Send}`
+trên object **đã chết** — `JOURNAL/kt64a-red-scn.log`); `kt60_core_parity` **15/18** (3 ca finalise
+đỏ: sender còn `BlockedOnSend`, digest lệch `last_ipc_error = None` vs core `Cancelled`);
+`kt64_core_parity` **không biên dịch** (`E0599` `tlb_pending_ack` — chi tiết sim KT-64a thêm vào).
+Log gộp: `JOURNAL/kt64a-red-parity.log`.
+
+**Sửa** — (1) **sim** `kobj.rs`: `finalise_ipc_waiters` + `wake_cancelled`, gọi trong
+`revoke_children` trước khi body về free-list ⇒ Recv waiter, Notification waiter **và** sender
+`BlockedOnSend` nhận `Cancelled + Ready`; hàng huỷ, message **đếm** `ipc_dropped` (D2-90);
+`BlockedOnReply` giữ nguyên (KT-25). (2) **core** `core_finalise.rs`: đóng **nợ D2-90** — sender
+trong hàng gửi của Endpoint bị finalise cũng `Cancelled + Ready` (cùng chuẩn; điều khoản "trước
+KT-64a core được phép treo sender" hết hiệu lực). (3) **parity**: `kt60_core_parity` **18/18**
+(digest thêm `Tcb.last_ipc_error`; `kt63_parity_revoke_finalise_caller_va_sender` chốt cả pha
+**trước** `Revoke` sender còn `BlockedOnSend`; 2 ca waiter mới); `kt64_core_parity` **4/4** —
+**kịch bản C `TlbFlush`** so `seq/targets/pending/acked/Busy` (1 hart: `TlbFlushReport` ↔
+`TlbShootdownInfo`; 2 hart: `pending` hai vai, `Busy`, `process_mail` ↔ `tlb_service`, số flush
+theo hart). (4) **sim thêm 2 chi tiết** cho parity TLB: `tlb_pending_ack(hart)` (vai "hart đích nợ
+ack") và shootdown `targets ⊆ {hart gọi}` **xong ngay ở `begin`** (không giữ `pending` rỗng — như
+core `targets == 0` và kernel KT-51). Hệ quả: **một** assert của `kt40_tlb::loi_bien_hart_va_vspace`
+đổi theo ngữ nghĩa mới; luật `Busy` chống ghi đè **vẫn pin** trong cùng test bằng shootdown **có**
+hart đích.
+
+**`.scn`** — `27-finalise-ba-loai-cho.scn` (tag `cap-revoke`+`notification`), **26 → 27 tệp**,
+**16 nhóm**; `check_scn.py` siết hằng số 26 → 27; runner `tests/kt64a_scn.rs` đọc nguyên tệp, so
+từng bước + 6 bất biến/bước + `Ready`/`Cancelled`/`ipc_dropped == 1`.
+
+**Cổng** — `gate --fast` **PASS 647/83** (L1 1.000 seed/999 trace, 833 ms; `.scn` 27/16; gen-check
+ON) `JOURNAL/kt64a-gate.log`; `cargo test -p vifast-sim` **454/0** `JOURNAL/kt64a-sim.log`;
+`ktest.sh 1 matrix` **9/9** boot, TAP **60/60 + 3/3 + 17/17** `JOURNAL/kt64a-ktest-matrix.log`;
+`soak.sh 1000 3` **0/1000** (`dirty-kernel-paths=1` ⇒ core đã sửa; wall 224 s; `BUILD_ID=
+6290c3b0198d37ac`) `JOURNAL/kt64a-soak.log`. Ảnh: product **187.936 / 200.120**, ktest
+**573.744 / 209.856**, guard **53.808 / 2.680**, user **335.928 / 201.008**; `size_of::<Machine>()`
+**188.872** (không đổi). Trace conformance **không đổi** (`.scn` 22..26 + kernel trace không chạm).
+
+**QEMU TAP 55 (đóng D2-90 trên nhân thật)** — thêm `t2_free` (sender `BlockedOnSend` trên Endpoint
+bị finalise ⇒ `Ready` + `Cancelled`) vào `ok55` + evidence `sender=Ready sender_err=Cancelled`;
+**cùng số TAP**, sửa regex `ktest.sh` cùng commit (`expected.txt` **không** đổi); matrix lại
+**9/9**.
+
+**Vòng review `reviewer-kt64a` — 5 mục DRIFT đã đóng:** (1) **hạ claim** parity TLB: C1 chỉ đọc
+`TlbFlushReport.targets/.acked` literal với giá trị **0**; C2 so **tập hart bị post** + `pending`
++ `tlb_ack_count`⇔`tlb_serviced` + sự kiện `acked == targets` — **mask `acked ≠ 0` của core chưa
+quan sát được** ⇒ **nợ quan sát** (bỏ assert chỉ dùng dữ liệu sim, thêm chú thích trong test);
+(2) **regenerate** `kt64a-red-scn.log` theo mã hiện tại (panic `kt64a_scn.rs:237`, khớp tệp);
+(3) TAP 55 thêm sender (trên); (4) BUILD_ID/ảnh KT-64a (trên); (5) số liệu chỉ chép **sau khi
+log PASS** (ghi thời điểm PASS trong `JOURNAL/kt64a-nhat-ky.md` §6). Chi tiết: nhật ký §7.
+
+**Không còn loại trừ parity** — §12.5 ("anti-hang finalise IPC — đã đồng bộ ở KT-64a") và §13.1 F3
+("parity `TlbFlush` đã làm ở KT-64a") viết lại; §13.5 (4/4 kịch bản) + §13.9 mục 5 (KT-64a ĐÓNG) +
+ghi **phạm vi mô hình** shootdown đồng thời (sim cho, core/kernel `Busy`).
 
 ## KT-64 — K3.5 tầng 3: `TlbFlush` thật + `SlotPool`→arena + `SchedContext.Bind` + `tcb_resume_with_regs`
 
@@ -2732,6 +2810,7 @@ ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |
 |---|---|---|---|---|---|---|
+| 2026-11-16 | **KT-64a** | 6/6 | chờ commit `[KT-64a]`/`[KT-64a-b]` | product/ktest/guard/user **không đổi** (chỉ sim + core IPC; `size_of` **188.872** ≤ 196.608) | `gate --fast` PASS **647/83** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + `cargo test -p vifast-sim` **454/0** + `.scn` **27 tệp/16 nhóm** | **Đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` D2-92c — xoá hai loại trừ parity, một nguồn sự thật**: sim `finalise_ipc_waiters` đánh thức `BlockedOnRecv`/`BlockedOnNotification`/`BlockedOnSend` ⇒ `Cancelled + Ready` + huỷ hàng + `ipc_dropped`; core đóng **nợ D2-90** cho sender; parity `kt60` **18/18** (digest thêm `last_ipc_error`, 3 đường finalise phủ trọn, chốt pha trước `Revoke`) + `kt64` **4/4** (kịch bản C `TlbFlush`: `seq/targets/pending/acked/Busy`, `tlb_pending_ack` + trivial-complete thêm vào sim; **nợ quan sát** `targets/acked ≠ 0` của core ghi §13.9); `.scn` 26→**27 tệp**/16 nhóm đỏ-trước trên sim cũ; TAP 55 QEMU in `sender=Ready sender_err=Cancelled` (D2-90 trên nhân thật); **không còn loại trừ** §12.5/§13.1 |
 | 2026-11-16 | **KT-63** | 9/9 | `5380164b` + `[KT-63]` | product 191.824 / 199.696; ktest 533.536 / 209.856; guard 53.808 / 2.680; user 330.704 / 200.584 | `gate --fast` PASS **625/80** + `ktest.sh 1 matrix` **9/9** (TAP **56/56 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch + `v2 check` PASS | **K3.5 tầng 2 — chuyển cap qua IPC + finalise IPC khi Revoke**: `Message` mang cap nguồn/ảnh chụp + `TcbData.recv_window` + `plan_cap_transfer` nguyên sim (bỏ `RIGHT_GRANT`, unwrap badge, thất bại mềm, lỗi cứng trước giao); `delete`/`revoke` huỷ caller ⇒ `Cancelled + Ready`, Recv/Notification waiter thức (**chuẩn anti-hang D2-89**; sim treo = lỗi mô hình, KT-64a đóng lệch), hàng huỷ + `ipc_dropped`; parity **16/16** (5 kịch bản), core-only **13/13** (F1/F2/F3 review), TAP **53..55** (`# ipc:`), `size_of` **188.448** ≤ **196.608**, ảnh **200.584** ≤ **262.144**; nợ: MR>4 (KT-64), sender treo khi revoke (**D2-90**, KT-64a) |
 | 2026-11-16 | **KT-62** | 9/9 | `ebae897e` + `[KT-62]` | product 185.736 / 191.416; ktest 484.704 / 197.568; user 323.296 / 192.304 | `gate --fast` PASS **607/79** + `ktest.sh 1 matrix` **9/9** (TAP **53/53 + 3/3 + 17/17**, `harts` pin **1/2/4**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch | **K3.5 tầng 1 — 16 syscall `0..15` đi vào `Machine` thật**: `vifast-core/src/syscall.rs` (bảng 16 + `SyscallEnv` + `SyscallOutcome`), ngoài dải ⇒ **19 RangeError** (D2-79); façade plat-common xoá shim 3-syscall; `init` U-mode gọi `DebugGetInfo`/`Yield`/`Exit` qua core, `Exit` có `fault_ep` ⇒ `BlockedOnSend{call:false, fault=Exit{42}}` **không Reply**; TAP `ktest-user` **17** + evidence `# sys:` (`src=core`), host test **8** sim + **9** façade; `size_of` **180.168** ≤ **196.608**, ảnh **192.304** ≤ **262.144** (link `Machine` vào ảnh test user); nợ: cap transfer (KT-63), MR>4, invocation, scheduler U-mode, trace 32 B |
 | 2026-11-15 | **KT-61** | 9/9 | `1e2455c8` + `[KT-61]` | product 185.464 / 191.416; ktest 484.600 / 197.568 | `gate --fast` PASS **598/78** (L1 1.000 seed **849 ms**) + `ktest.sh 1 matrix` **9/9** (TAP **53/53 + 3/3 + 7/7**) + `soak.sh 1000 3` **0/1000** (wall 227 s, BUILD_ID `34dc594e0f651ed3`) + conformance **61/61 / 5/5** (`build=aab21609a80ca7a1`) + L1 100k **một phần** (smp 1: 100k, 3 cấu hình dừng vì ngân sách) + kernel clippy `-D warnings` sạch | **K3b cổng — core `no_std` chạy trên nhân thật**: `core_bridge` (static `.bss` + `init_zeroed` từ nhãn PA, lock, boot smoke) + TAP **43..52** trên QEMU (link/untyped/retype TCB/configure+resume+suspend/sched 2 TCB/IPC một vòng/Notification/WaitAddr/D2-83/invariants) + ảnh sản phẩm chạy vòng đời TCB mỗi boot; **hai ngưỡng**: `size_of` **180.168** ≤ **196.608**, ảnh **191.416/197.568/2.680/11.752** ≤ **262.144**; `.bss` **không** vào file (`filesz` 7.760/7.912; bản `.data` từng 365.632/664.824 — bỏ); D2-83 một chiều (VM ở obj layer, core `NotSupported` 3/3 atomic, WaitAddr nhãn PPN); `SlotPool` giữ nguyên + nợ K3.5 §9.6; **không claim kernel đầy đủ** (procsrv/shell/cap transfer/finalise IPC/TlbFlush/Bind = K3.5, DOD §11) |
