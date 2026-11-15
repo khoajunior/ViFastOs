@@ -1,8 +1,8 @@
-== v2 check (HEAD 0b8c1268) ==
+== v2 check (HEAD 4dd5014f) ==
 --- fmt
 --- fmt: OK
 --- clippy
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
 --- clippy: OK
 --- luật cấu trúc R1..R5
 --- luật cấu trúc: OK
@@ -61,6 +61,6 @@ ok 4 - abi_version đổi thì đầu ra đổi
 # gen fixtures: PASS
 --- gen fixtures: OK
 --- build (L0 compile)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.28s
 --- build (L0 compile): OK
 v2 check: PASS (L1 chạy trong gate --fast)

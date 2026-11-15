@@ -7,8 +7,8 @@
   matrix **9/9**, soak **0/1000**.
 - **Ra**: `size_of::<Machine>()` **188.448 B** ≤ **196.608** (pin **không** nâng); ảnh
   **199.696 / 209.856 / 2.680 / 200.584** ≤ **262.144**; parity **16/16** (5 kịch bản mới);
-  core-only **10/10**; TAP `ktest` **56/56**, matrix **9/9**; soak **0/1000**; gate --fast
-  **PASS 622 test / 80 suite** (607 + 15: 5 parity mới trong `kt60_core_parity` + 10 test
+  core-only **13/13**; TAP `ktest` **56/56**, matrix **9/9**; soak **0/1000**; guard **3/3**; gate --fast
+  **PASS 625 test / 80 suite** (607 + 18: 5 parity mới trong `kt60_core_parity` + 13 test
   `kt63_core_cap_ipc`).
 
 ## 1. Red-before (D2-05)
@@ -17,7 +17,7 @@ Viết test trước khi port: `v2/sim/vifast-sim/tests/kt63_core_cap_ipc.rs` g�
 `Message::with_cap_ids`, `Machine::{tcb_set_recv_window,tcb_recv_window,cap_transfer_stats,
 cap_transfer_installed,cap_transfer_failed,cap_unwrapped}` — core HEAD cũ **không** có ⇒
 `JOURNAL/kt63-red-before.log` (`E0599`, exit 101): đúng "tính năng chưa có", không phải test
-sai. Sau port: **10/10** xanh (`kt63-core-tests.log`). Không retry; không nới ngưỡng.
+sai. Sau port: **13/13** xanh (`kt63-core-tests.log`). Không retry; không nới ngưỡng.
 
 ## 2. Port từ sim (giữ nguyên ngữ nghĩa)
 
@@ -95,8 +95,8 @@ TAP 55; §12.5 docs ghi rõ KT-64a là nơi đóng lệch.
 - `ktest.sh 1 matrix`: **9/9** boot sạch (smp 1/2/4 × ktest/guard/user; 56/3/17 TAP) —
   `kt63-ktest-matrix.log`. Trap lồng dời **53 → 56**; `expected.txt` = `ktest 56 56`;
   manifest +3 TAP; evidence `# core:` 11 → 11 + `# ipc:` 3 (68 mục ảnh chính).
-- Ảnh: product **191.824 file / 199.696 data+bss**, ktest **533.496 / 209.856**, guard
-  **53.808 / 2.680**, user **326.568 / 200.584** — `kt63-budget.log` (`budget.sh`).
+- Ảnh: product **191.824 file / 199.696 data+bss**, ktest **533.536 / 209.856**, guard
+  **53.808 / 2.680**, user **330.704 / 200.584** — `kt63-budget.log` (`budget.sh`).
 
 ## 6. Dấu chân (D2-84/D2-85a) — **không** nâng pin
 
@@ -111,12 +111,41 @@ Test pin vẫn assert `padding ≤ 8` (hiện 1 B) ⇒ bảng thiếu dòng là 
 
 ## 7. Gate / soak
 
-- `gate --fast`: **PASS 622 test / 80 suite**, 0 failed, L1 1.000 seed (1.089 ms) — `kt63-gate.log`.
+- `gate --fast`: **PASS 625 test / 80 suite**, 0 failed, L1 1.000 seed (879 ms) — `kt63-gate.log`.
 - `ktest.sh 1 matrix`: **9/9** — `kt63-ktest-matrix.log`.
 - `soak.sh 1000 3`: **0/1000**, BUILD_ID + sha256 ghi trong `kt63-soak.log`.
 - `v2 check` (fmt + clippy + 5 luật cấu trúc + gen-check): PASS — `kt63-check.log`.
 
-## 8. Nợ / khác biệt còn lại
+## 8. Vá reviewer-kt63 (DRIFT trung bình → hết)
+
+Reviewer xác nhận `plan_cap_transfer` **khớp từng nhánh** (unwrap trước, thiếu GRANT/ô bận ⇒
+mềm, window `None` + cap cần cài ⇒ `InvalidArgument`, ≤ 4, `rights & !GRANT` giữ badge), lỗi cứng
+**trước** `msg_id`/pop, finalise **trước** free-list, `ipc_dropped` khớp `check_ipc`, D2-89 đạt,
+footprint 188.448/padding 1. Ba lỗi **nguyên tử thật** ở đường mới đã vá:
+
+- **F1** — `deliver_caps` gọi `push_cap` (assert `n_caps < MAX_CAPS`) mà không kiểm sức chứa; chuỗi
+  “bind window → send 4 cap → delete cap window” lặp ~129 lần ⇒ panic **giữa message** sau `admit`
+  và sau `take_waiter` ⇒ mất message/treo waiter. **Vá**: `prepare_caps` kiểm
+  `n_caps + plan.installed() <= MAX_CAPS` ⇒ `NotEnoughMemory` **trước** `admit`; ca
+  `kt63_core_bang_cap_day_tra_not_enough_memory_nguyen_tu` (512 cap thật; message không vào
+  đường IPC, waiter còn `BlockedOnRecv`). `derive` cùng lỗ ⇒ **nợ riêng** §12.8.
+- **F2** — receive window trỏ CNode đã chết: `cnode_slot` trả `Ok(None)` ⇒ plan cài;
+  `push_cap` rồi `cnode_set_slot` lỗi ⇒ cap mồ côi, message đã `admit` nhưng không giao/drop,
+  waiter đã take. **Vá**: từng ô đích phải `object_alive(dst.cnode)` + `check_cnode_slot` ⇒
+  `InvalidCapability`/`RangeError` **trước** `admit`; ca
+  `kt63_core_window_tro_cnode_chet_tra_invalid_capability` (retype CNode từ Untyped → bind window
+  → `revoke` Untyped → send cap).
+- **F3** — thiếu ca “cap nguồn chết giữa lúc xếp hàng và lúc giao”: thêm
+  `kt63_core_cap_nguon_chet_giua_hang_va_giao_thi_that_bai_mem` ⇒ message **vẫn giao**,
+  `info.caps = 0`, `cap_transfer_failed = 1`, `ipc_dropped = 0`.
+- **D2-90** (lead chốt): anti-hang **phủ cả sender** `BlockedOnSend` trên Endpoint bị revoke.
+  Core KT-63 **giữ hành vi sim** cho sender (còn treo) = **nợ D2-90** ghi tường minh; **KT-64a**
+  phủ **cả ba** loại chờ + **bỏ mọi loại trừ parity** (docs §12.5/§12.8).
+
+Sau vá: core-only **13/13**, parity **16/16**, gate **625/80**, matrix **9/9** (56/3/17), soak
+**0/1000** (BUILD_ID `09647ba1765e054d`), budget **199.696 / 209.856 / 2.680 / 200.584**.
+
+## 9. Nợ / khác biệt còn lại
 
 - **Lệch có chủ đích chờ đồng bộ** (D2-89): waiter Recv/Notification **thức** khi object bị
   finalise — chuẩn là anti-hang; sim để treo là lỗi mô hình, **KT-64a** đóng lệch (sửa sim +
