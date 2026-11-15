@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-88`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-89`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-88: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-89: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -145,4 +145,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-87** **K3.5 roadmap** (từ nợ D2-86/DOD §11, mỗi task ≤ 3 h): **KT-62** syscall `0..15` đi vào `Machine` thật + `init` U-mode dùng core (xoá đường tạm KT-53); **KT-63** chuyển cap qua IPC (receive window/`plan_cap_transfer`/`RIGHT_GRANT`/badge) + finalise IPC khi Revoke (huỷ caller/waiter/hàng); **KT-64** `TlbFlush` thật + `SlotPool`→arena (một nguồn sự thật cap) + `SchedContext.Bind` + `tcb_resume_with_regs` + WaitAddr toàn phần; **KT-65** procsrv U-mode (Rust, `Recv` FaultKind, `wait`/`kill`) + shell tối thiểu trên UART; **KT-66** cổng K3.5 (TAP 100 %, soak 0/1000, L1 100k × smp 1/2/4/8 = 400.000 lượt, conformance 5/5, `K35-DOD`). **Luật**: mỗi task phải chứng minh trên QEMU (TAP), không “host-only”; không mở lại `spec/` trừ khi D2 mới; L1 400k đủ 4 cấu hình là **DoD cổng** (KT-66), không phải task thường.| soak v2 | **N = 1.000**, máy **ps**, 3 luồng, `n ≥ 3/p`, p = 0,3 % | QD §5.3 |
 
 - **D2-88** KT-62 — ba chốt ngữ nghĩa: (a) **`DebugGetInfo.num_harts` = số hart nền tảng đang online** (từ `smp::hart_count()`, ≤ `MAX_HARTS` 8), **không** phải số hart mà core model đang chạy; `core_bridge::init` phải truyền số thật, TAP pin trên smp 1/2/4 phải thấy **1/2/4**; (b) **nguồn thời gian**: độ phân giải ns lấy từ **`rdtime`** (`timer::now_ticks`), **không** phải SBI `time` — SBI TIME chỉ dùng cho **ngắt timer** (D2-76 nói về IPI, không phải clock reads); tài liệu/comment phải ghi đúng nguồn, **cấm** mô tả sai; (c) **hằng số syscall phải sinh từ `spec/abi.toml`** (`SYS_*` theo `[syscall]`), không chép tay — D2-11 áp cho cả tên/nr, không chỉ `ABI_VERSION`/`MIN_COMPAT`; nếu generator chưa sinh thì **mở rộng generator** (không sửa spec).| L1 trong `--fast` | **1.000** seed (nightly **100.000**) | QD §5.2 |
-| số kịch bản ABI | **21** `.scn` = 20 ca gốc (QD §4) + ca "Exit khi procsrv chưa Recv" (DUYET §1.3) | D2-27 |
+
+- **D2-89** Finalise IPC khi object bị `Revoke/Delete` — **chuẩn là anti-hang**: waiter `Recv`/`Notification` phải được đánh thức với `Cancelled` + `Ready`, caller `BlockedOnReply` nhận `Cancelled` + `Ready`, hàng chờ bị huỷ. Sim K1–K2 hiện **để waiter treo** (`BlockedOnRecv{ep chết}`) — đó là **lỗi mô hình**, không phải hành vi chuẩn. KT-63 được phép cài anti-hang ở core và **loại trừ** đường này khỏi parity (pin bằng core-only + TAP) **với điều kiện**: (a) ghi rõ §12.5 là **lệch có chủ đích chờ đồng bộ**; (b) mở **KT-64a** buộc sửa **sim** cho khớp chuẩn + `.scn` đỏ-trước + đưa đường này trở lại parity; (c) **cấm** coi “sim không làm” là lý do để core treo. Sau KT-64a, parity phải phủ đường finalise có waiter và không còn loại trừ nào ở đây.| số kịch bản ABI | **21** `.scn` = 20 ca gốc (QD §4) + ca "Exit khi procsrv chưa Recv" (DUYET §1.3) | D2-27 |
