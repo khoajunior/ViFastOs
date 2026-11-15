@@ -170,7 +170,7 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-63 | **K3.5** chuyển cap qua IPC + finalise IPC khi Revoke | KT-62 | 3 h | DONE | 489b0883; cap transfer + finalise IPC; 3 vá nguyên tử (F1/F2/F3); gate 625; TAP 56; soak 0/1000 |
 | KT-64 | **K3.5** `TlbFlush` thật + `SlotPool`→arena + `Bind` + `resume_with_regs` | KT-63 | 3 h | DONE | 194a09f5; 4/4 mảng; slot (region,offset) chống alias; Busy reachable; gate 642; TAP 60; soak 0/1000 |
 | KT-64a | **K3.5** đồng bộ sim theo D2-89: finalise có waiter ⇒ `Cancelled`+`Ready` | KT-64 | 2,5 h | DONE | 519d2e55; sim anti-hang D2-89/90; `.scn` 27; parity 18/18 + 4/4; TAP 55 sender trên QEMU; gate 647 |
-| KT-65 | **K3.5** procsrv (U-mode, Rust) + shell tối thiểu | KT-64 | 3 h | READY | `Recv` FaultKind, `wait`/`kill`; shell chạy lệnh thật trên UART |
+| KT-65 | **K3.5** procsrv (U-mode, Rust) + shell tối thiểu | KT-64a | 3 h | READY | `Recv` FaultKind, `wait`/`kill`; shell chạy lệnh thật trên UART |
 | KT-66 | **K3.5** cổng: TAP + soak + L1 400k + `K35-DOD` | KT-65 | 3 h | BLOCKED | TAP 100 %; soak 0/1000; L1 100k × smp 1/2/4/8; conf 5/5 |
 
 
