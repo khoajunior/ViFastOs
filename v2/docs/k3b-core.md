@@ -259,10 +259,10 @@ công thức `donated_priority` bằng unit test core, parity phủ trạng thá
 1. **Bảng tĩnh thay `Vec`.** `MAX_OBJECTS = 256`, `MAX_CAPS = 512`, `MAX_UNTYPEDS = 16`,
    `MAX_SLOT_WORDS = 4096` (`[TK]`). Retype/copy khi bảng đầy trả `NotEnoughMemory` **nguyên
    tử** (sim không có giới hạn này vì heap không biên). Đây là biên triển khai, không phải ABI.
-2. **Slot CNode trong `.bss`, chưa nằm trong arena vật lý.** Byte slot vẫn được Untyped kế
-   toán đúng spec (`cnode_base + slots*48`), nhưng `CapId` lưu ở `SlotPool`. **KT-61 quyết định
-   giữ nguyên** `SlotPool` (không chuyển nửa vời sang arena — tránh hai nguồn sự thật cho cùng
-   cap); nợ **K3.5** với tiêu chí đo ở §9.6. Pool có free-list để `Revoke`/finalise trả word.
+2. ~~**Slot CNode trong `.bss`, chưa nằm trong arena vật lý.**~~ — **ĐÓNG KT-64** (§13.2): byte
+   slot CNode **Retype từ Untyped** nằm trong byte arena tại `offset + cnode_base`
+   (`kernel/vifast-core/src/slotmem.rs`); `SlotPool` bị xoá; tiêu chí §9.6 đã đạt. (Trước KT-64:
+   `CapId` lưu ở `SlotPool` ⇒ hai nguồn cho cùng cap; KT-61 giữ nguyên có chủ đích.)
 3. **Body đã có cho TCB/SchedContext/Endpoint/Reply/Notification** (KT-59/60) trong bảng
    `.bss` có free-list; `Frame`/`PageTable`/`VSpace` vẫn model-only (D2-83). Vì vậy
    `finalise_tcb` đã port (kèm hook donation/KT-34), nhưng **finalise IPC object khi Revoke**
@@ -293,10 +293,9 @@ công thức `donated_priority` bằng unit test core, parity phủ trạng thá
    và `Suspend`/`Exit`/`finalise` gọi `release_donation_of`. `check_sc_refs` cho phép **donor**
    (chủ SC) giữ `sched_context` khi SC đang donate (KT-60 sửa điều kiện KT-59 vốn cấm mọi
    `sched_context` trên SC đang donate).
-10. **`TlbFlush` trong hộp thư là placeholder.** Core chưa sở hữu TLB (object layer K2); message
-    giữ đúng hình dạng (`seq/ack/generation/asid/va`), handler no-op. **KT-61 chưa nối TLB
-    thật vào core** (KT-61 chỉ nối core vào `Machine`/TAP; TLB thật là `vifast-plat-*` KT-51) —
-    nợ K3.5, không đổi enum.
+10. ~~**`TlbFlush` trong hộp thư là placeholder.**~~ — **ĐÓNG KT-64** (§13.1): `TlbFlush` **thật**
+    qua trait `TlbEnv` (arch `sfence.vma`), post tới `active_on`, chờ đủ ack, `dispatch` **chặn**
+    trên hart còn flush chưa phục vụ; TAP 59 chứng minh bằng page fault thật sau `unmap`.
 11. **Nhật ký hộp thư có biên** `MAX_MAIL_LOG = 32`/hart (sim `Vec` không biên; D2-85b giảm 64→32). Quá biên:
     message vẫn xử lý đúng một lần, bất biến hàng đợi giữ nguyên, chỉ **nhật ký** dừng ghi và
     `mail_log_overflow` tăng. Không phải mất message.
@@ -555,7 +554,7 @@ core_ipc/core_sync` trước/sau (`sha256sum -c` OK).
 4. Nối syscall/`init`/ảnh kernel + đo lại ảnh (chưa làm — KT-61).
 5. **Xoá/revoke cap Reply** khi caller `BlockedOnReply`: sim `Cancelled + Ready`; core hiện giữ
    caller treo tới khi có hook finalise (nợ §8.6.2) — **lệch đã biết**.
-6. **`tcb_resume_with_regs`** chưa port (như KT-59 ghi); **Reply cap trong `Endpoint.recv`**
+6. ~~**`tcb_resume_with_regs`** chưa port~~ — **ĐÓNG KT-64** (§13.4); **Reply cap trong `Endpoint.recv`**
    (cap Reply chết ⇒ coi như `Recv` không Reply) và **WaitAddr bucket/FIFO toàn phần** (mọi
    bucket, mọi thứ tự) chưa có ca parity riêng — nợ phủ, không phải nợ hành vi đã biết.
 7. **F1/F2/F3 reviewer-kt60 đã vá + có ca:** suspend donee trả SC + đánh thức client; donor
@@ -948,6 +947,210 @@ kernel + manifest + `expected.txt` — luật KT-54). Soak ảnh sản phẩm: `
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt63_core_cap_ipc -- --test-threads=1
 cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt60_core_parity -- --test-threads=1
+bash v2/test/boot/ktest.sh 1 matrix
+bash v2/test/boot/soak.sh 1000 3
+./v2/bin/v2 gate --fast
+```
+
+## 13. KT-64 — `TlbFlush` thật + `SlotPool`→arena + `SchedContext.Bind` + `tcb_resume_with_regs` (K3.5 tầng 3)
+
+**Trạng thái:** KT-64 **DONE (đề xuất; chờ review độc lập + Agent 0 lật QUEUE)**. Phạm vi: bốn
+mảng của nợ D2-86/D2-87 — (1) `TlbFlush` **thật** qua hook arch, chặn TCB chạy lại trên TLB cũ;
+(2) slot CNode **từ arena** (bỏ pool `.bss`); (3) `SchedContext.Bind`/`Unbind` (hết “trường chết”
+`bound_sc`); (4) `tcb_resume_with_regs` (resume sau fault một cửa). **Không** đổi `spec/`,
+không sửa sim semantics, không đụng `viscript/`; `vifast-core` vẫn `#![forbid(unsafe_code)]` —
+`TlbEnv` là **trait**, arch cài `sfence.vma` (D2-17).
+
+### 13.1 `TlbFlush` thật (một nguồn: `kernel/vifast-core/src/tlb.rs`)
+
+Core **không** sở hữu `Frame`/`PageTable`/`VSpace` (D2-83) và **không** chạm `sfence.vma`; object
+layer (KT-52) sinh `FlushRequest` khi `map`/`unmap`/`protect`/teardown. Cầu nối **một chiều**:
+
+| Thành phần | Ngữ nghĩa |
+|---|---|
+| `trait TlbEnv` | `active_on()` = bitmask hart **đang chạy** VSpace bị đổi; `generation()` = thế hệ ASID; `flush_local(hart, scope, asid, va)` = `sfence.vma` **thật** |
+| `Machine::tlb_shootdown_begin(env, scope, asid, va)` | flush **cục bộ** trên hart gọi **trước**, rồi post `MailboxMsg::TlbFlush{seq, ack, generation, asid, va}` tới `active_on & !hart_bit(caller)`; **không** chờ |
+| `Machine::tlb_shootdown_wait(env, hart)` | chờ **đủ** ack: mỗi vòng hart chờ **chỉ** rút hộp thư của mình (luật chống deadlock §4.10.3); ack của hart đích chỉ đến khi hart đó chạy `tlb_service` (**không** ack hộ — D2-92b); quá `MAILBOX_CAP+2` vòng ⇒ `Busy` (**không** treo, **không** `Ok` giả, `pending` giữ nguyên) |
+| `Machine::tlb_flush(env, scope, asid, va)` | one-call = begin + wait; trả `TlbFlushReport{seq, active_on, targets, acked, local=true}`. Dùng được khi `targets == 0` (kernel hiện tại) hoặc khi caller đã cho hart đích chạy; ngược lại `wait` ⇒ `Busy` (không tự ack hộ) |
+| `Machine::tlb_service(env, hart)` | hart đích flush thật + ack (+ rút `TlbFlush` khỏi hộp thư); trả 0/1 |
+| `Machine::dispatch(hart)` | **từ chối** `Busy` khi `tlb_pending[hart]` còn active — TCB **không** chạy lại trên TLB cũ cho tới khi `tlb_service` |
+
+Bất biến: (a) **luôn** flush cục bộ, kể cả 1 hart; (b) chỉ post/chờ hart trong `active_on` khác
+hart gọi (cùng công thức `tlb::targets`, D2-78); (c) hart gọi **ngoài** `active_on` ⇒
+`IllegalOperation`; (d) đang có shootdown chưa ack ⇒ `begin` thứ hai `Busy`; (e) post **sau** khi
+kiểm `hộp thư đích còn chỗ` ⇒ không nửa chừng. (f) **không ack hộ**: `wait` không flush/ack thay
+hart khác ⇒ ack không tới là `Busy` **thật** (có test `kt64_tlb_ack_khong_toi_tra_busy_khong_treo`,
+D2-92b), không phải nhánh chết.
+
+**Bằng chứng (TAP 59 + mutation):** map → ghi/đọc qua VA (phần cứng dịch) → `protect`/`unmap`/
+**đổi root** mỗi bước đi qua `tlb_flush` ⇒ một **load thật** sau `unmap` fault `scause=13` tại
+đúng VA, và sau khi về root kernel cũng `13` ⇒ **không còn trang cũ đọc được**. **Mutation M1**
+(bỏ hẳn đường core `tlb_flush`) ⇒ TAP 59 **ĐỎ** (`requests=0`, 58/60) — chứng minh TAP **phụ
+thuộc** đường flush, không tự chứng minh (`JOURNAL/kt64-mutation-m1-core.log`). **Mutation M2**
+(`KernelTlb::flush_local` không `sfence.vma`) ⇒ TAP 59 **vẫn xanh**: QEMU TCG không giữ
+translation cũ theo cách TAP quan sát được, nên **hiệu lực phần cứng của `sfence` không đo được
+bằng TAP này** — nó được pin ở **KT-51** (TAP 25..29 + conformance 24, mô hình TLB + shootdown
+thật); ghi nợ, không tô hồng (`JOURNAL/kt64-mutation-m2-sfence.log`).
+
+**F3 — vì sao không parity ở tầng này:** sim **có** giao thức shootdown (`tlb_shootdown_begin/
+wait/poll`, `tlb_pending`, mask ack — KT-40), nhưng core **chưa** làm parity phần đó; KT-64 **chỉ**
+pin core-only + TAP. Parity `seq/targets/pending/acked/Busy` đã đưa vào **KT-64a (D2-92c)** —
+câu “sim không mô hình hoá” ở bản trước là **quá rộng** và đã sửa tại đây.
+
+**Biên kernel có chủ đích:** `core_bridge` giữ **một** `Machine` sau spin lock trên BSP
+(D2-88(a): `num_harts` là số hart nền tảng, không phải số hart core chạy). `KernelTlb::active_on`
+= `tlb::active_on() & (1 << hart đang chạy)` ⇒ trong nhân **targets = 0**: flush cục bộ là bắt
+buộc và đủ; đường multi-hart (post + chờ ack + `dispatch` chặn) pin bằng test host, còn
+shootdown nhiều hart **thật** của kernel vẫn là `tlb::shootdown` KT-51 (TAP 25..29, conformance
+24). Nối IPI cho đường core multi-hart là việc của KT-65+ (context switch U-mode); ghi nợ, không
+gọi là “đã chạy đa hart trong core”. **Nếu** đường multi-hart lọt vào kernel hiện tại
+(`active_on` có hart khác hart đang chạy core) thì `KernelTlb::flush_local` `debug_assert_eq!` sẽ
+nổ/`sfence` sai hart ⇒ **lỗi lập trình lộ ngay**, không im lặng “đúng”.
+
+### 13.2 Slot CNode → **arena** (một nguồn sự thật; `kernel/vifast-core/src/slotmem.rs`)
+
+`SlotPool` (bump + free-list riêng, `.bss` 16.656 B) bị **xoá**. Byte slot của CNode **Retype từ
+Untyped** nằm **trong byte arena** tại `offset + cnode_base`; `CapId` của slot được lưu ngay
+trong cửa sổ đó. **Không** còn allocator thứ hai: chỉ số word là **hàm thuần của offset arena**
+
+```text
+word(offset, slot) = (offset + CNODE_BASE_BYTES) / SLOT_BYTES + slot
+```
+
+**F1 (D2-92a) — cửa sổ phải là hàm của `(Region, offset)`, không chỉ `offset`:** `Region` nào
+cũng bắt đầu `cursor = 0`, nên nếu chỉ dùng `offset` thì hai Untyped khác nhau có **cùng** word ⇒
+cap của CSpace này ghi đè CSpace kia, **im lặng** (đọc ra cap sai quyền). Bản sửa: vùng A
+(3072 word) chia **đều** cho `MAX_UNTYPEDS = 16` ⇒ [`REGION_SLOT_WORDS`] = **192 word/Region**,
+`word(region, offset, slot) = region·192 + (offset + 64)/48 + slot`. Test hồi quy
+`kt64_slot_hai_untyped_cung_offset_khong_alias` (hai CNode từ **hai** Untyped, cùng offset 0 ⇒
+cap **không** chồng, đọc đúng của mình) pin. Trong **cùng** Region, hai CNode liên tiếp không
+chồng (block sau bắt đầu sau `64 + 48·s` byte, căn 64 ⇒ chỉ số đầu `≥ index + s + 1`); test
+`kt64_slot_hai_cnode_khong_chong` pin. Cửa sổ word `MAX_SLOT_WORDS = 4096` chia hai vùng rời:
+**A arena** (3072 word ⇒ offset arena < **147.456 B**, 192 word/Region ≈ **190 slot**) và
+**B harness** (**1024** word cuối, ánh xạ **lùi**) cho CNode do kernel cấp
+(`add_cnode`/`add_kernel_object` — như `add_cnode` của sim, **không** tiêu byte arena). Công thức
+harness là `base = MAX_SLOT_WORDS − index − slots` (bỏ `−1` từng có); `index + slots ≤ 1024` ⇒
+`base ≥ 3072` — **không** trùng word 3071 (word cuối vùng A của Region 15). Test biên: harness đầy
+**đúng** 1024 word ⇒ `base = 3072`; vượt 1 word ⇒ `None` (fail-closed). Retype
+CNode vượt dải của Region mình ⇒ `NotEnoughMemory` **trước** khi cấp (`Region::probe`,
+fail-closed). Biên `192 word/Region` là `[TK]`, **không** ABI — ghi nợ §13.9.
+`Revoke` Untyped đặt `Region::reset` ⇒ byte slot trả lại arena (không còn free-list), cửa sổ
+`fill_zero` khi CNode chết/tái dùng. **Tiêu chí §9.6:** (i) slot nằm trong byte arena thật —
+`cnode_slot_span` trả `(region.base + offset + cnode_base, slots*48)`, TAP 56 chứng minh span
+**trong** `untyped_arena`; (ii) `Revoke` trả byte (`used` về mốc); (iii) `check_bytes`/
+`check_all_bytes` không đổi kết quả; (iv) TAP 45/52 vẫn xanh. Hai nguồn sự thật cho byte arena
+đã hết: **`Region.cursor` là nguồn duy nhất**.
+
+### 13.3 `SchedContext.Bind`/`Unbind` (`core_sync.rs`, `tcbdata.rs`)
+
+`ScData.bound: Option<CapId>` (trường **mới**; trước KT-64 `Notification.bound_sc` là trường
+**chết** §8.6.0). `sched_context_bind(sched, target)` port nguyên sim KT-27: `target` phải là cap
+**Reply/Notification** (khác ⇒ `WrongObjectType`; cap chết ⇒ `InvalidCapability`; slot rỗng ⇒
+`SlotEmpty` — kiểm `cap_at` trước, đúng sim); notification đã bind **SC khác** ⇒
+`IllegalOperation` **trước** mọi mutation; SC đổi target ⇒ gỡ binding cũ phía notification
+(1:1 hai chiều). `sched_context_unbind(sched)` (spec method 1; **sim không mô hình hoá** ⇒
+core-only + test) xoá cả hai chiều, idempotent. `Machine::delete` cap Notification và finalise
+Notification khi `Revoke` gọi `drop_sched_binding_to_cap`/`_to_obj` ⇒ không `bound_sc` mồ côi.
+**D2-92d — bất biến 1:1 hai chiều vào `check_notifications`** (chạy sau **mỗi** public op):
+`ScData.bound` phải trỏ cap Reply/Notification **còn sống**; nếu là Notification thì
+`Notification.bound_sc` phải trỏ **lại đúng** SC đó, và ngược lại. Test
+`kt64_bind_revoke_go_binding_mo_coi` pin `Revoke` Untyped chứa Notification ⇒ hook gỡ `SC.bound`,
+bất biến xanh trước/sau.
+**`Signal` chỉ đánh thức TCB đúng bound**: nhánh `bound_tcb_blocked_on_recv` chỉ chọn TCB có
+`bound_notification == ntfn`, TCB bound notification khác vẫn `BlockedOnRecv` (test + TAP 57);
+parity so đường này từng bước.
+
+### 13.4 `tcb_resume_with_regs` (`core_tcb.rs`)
+
+Port sim KT-26: chỉ nhận **bốn** trạng thái — `BlockedOnReply{reply}` **đúng caller** (Reply của
+người khác ⇒ `IllegalOperation`), `BlockedOnSend{call:true, fault:Some(k≠Exit)}`, `Ready`,
+`Sleeping{..}` (giữ nguyên reason). Thứ tự: kiểm trạng thái đích → gỡ mọi hàng chờ/`Reply.caller`
+→ ghi `regs` qua **một** cửa `ipc::transfer` (`resolve_caps` + `admit` + `deliver`) **trước** khi
+đổi trạng thái → bỏ `suspended` → `transition_tcb(Ready)` (trừ `Sleeping`/`Ready`). Giữ
+`exit_code`; không phát lại IPC cũ; message mang cap ⇒ `InvalidArgument`. **Không mở đường cho
+user tự resume:** đây là model API — 16 syscall `0..15` (D2-88(c)) **không** có mục nào gọi nó;
+`Running`/`Inactive`/`Dead` bị từ chối (test + TAP 58 in `user_nr_max=15 user_path=0`). Dùng cho
+U-mode fault recovery **test-only** trong KT-56/Giai đoạn sau (procsrv KT-65 gọi model API này).
+
+### 13.5 Parity sim↔core — 2 kịch bản mới, so mã lỗi + digest từng bước
+
+`v2/sim/vifast-sim/tests/kt64_core_parity.rs` (mới, **2/2**): (A) `Bind` + `Signal` — bind 1:1,
+vi phạm 1:1, rebind gỡ phía cũ, target sai kiểu, hai TCB bound hai notification chờ Recv, signal
+chỉ đánh thức đúng bound; (B) `resume_with_regs` — fault `BlockedOnSend` → resume ghi regs,
+`BlockedOnReply` → resume, `Running` cấm, message mang cap `InvalidArgument`. So **mã lỗi ABI**
+(`KError::id()`) + digest (notification `bound/word/badge/waiter`, trạng thái TCB, thanh ghi,
+`last_fault`, `reply_caller`, `ipc_sent/delivered/dropped`, 3–4 cờ bất biến) **sau từng bước**.
+`Unbind` không có ở sim (core-only, ghi trên); slot-arena không có đối tượng sim tương ứng
+(13.2) ⇒ core-only + TAP. `TlbFlush`: sim **có** giao thức shootdown (KT-40) nhưng parity **chưa**
+làm ở KT-64 — đã chuyển **KT-64a (D2-92c)**.
+
+### 13.6 Đỏ trước (D2-05)
+
+`JOURNAL/kt64-red-before.log`: test viết **trước** khi port (`kt64_core_tlb_bind_resume.rs`) ⇒
+core HEAD-cũ **không biên dịch**: `E0432 unresolved imports TlbEnv, TlbScope`; `git grep` tại
+HEAD `2e2631fa` cho `sched_context_bind`/`sched_context_unbind`/`tcb_resume_with_regs`/
+`cnode_slot_span`/`TlbEnv` ⇒ **0 kết quả** (tính năng chưa có, không phải test sai). Sau port:
+**15/15** test core + **2/2** parity xanh. Không retry lấy xanh; không nới ngưỡng.
+**Mutation sau port** (`JOURNAL/kt64-mutation.log`): M1 bỏ core `tlb_flush` ⇒ TAP 59 **đỏ**
+(`requests=0`); M2 bỏ `sfence.vma` ⇒ TAP 59 **không** đỏ (giới hạn TCG — nêu ở 13.1/13.9).
+
+### 13.7 Hai ngưỡng (D2-85a) — vẫn **không** nâng pin
+
+| Ngưỡng | Áp cho | KT-63 | KT-64 | Kết quả |
+|---|---|---|---|---|
+| **196.608 B** (pin D2-84) | `size_of::<Machine>()` | 188.448 | **188.872** (còn **7.736 B**) | ĐẠT |
+| **262.144 B** (trần ảnh) | `.data+.sdata+.bss+.sbss` ELF thật | 199.696 / 209.856 / 2.680 / 200.584 | **200.120 / 209.856 / 2.680 / 201.008** (product / ktest / guard / user) | ĐẠT |
+
+Bảng phân bố §7.3 cập nhật: `slot_pool` 16.656 → **`slot_mem` 16.384 + `harness_region` 24**;
+thêm **`tlb_pending[8]`** (384 B); `ScData` 56 → **64 B** (`bound`, +256 B); 4 bộ đếm TLB ⇒
+`scalars` 263 → **295**; tổng **29 dòng** (27 → 29). Dải slot **theo Region** là hằng compile-time
+(192 word), **không** thêm trường ⇒ pin không đổi sau F1. Log `JOURNAL/kt64-budget.log`; test pin vẫn
+assert `padding ≤ 8` (D2-85c, hiện 1 B) nên bảng thiếu dòng là đỏ.
+
+### 13.8 TAP QEMU (ảnh `ktest`: 56 → **60** TAP) + evidence riêng
+
+| TAP | Nhóm | Bằng chứng (neo) |
+|---|---|---|
+| 56 | **slot arena** | `# slot: arena=0x…+65536 span=0x… bytes=768 within=1 used0=8192 used1=9024 used2=0 grown=1 slot_ok=1 revoke_back=1 check=1` — span nằm trong arena, `Retype` +768 B, `Revoke` trả hết byte; dải word theo Region (F1) pin thêm ở test host |
+| 57 | **bind** | `# bind: sc=… ntfn=… two_way=1 second=IllegalOperation rebind_clears=1 wrong_target=1 signal_wake=1 other_blocked=1 unbind=1 delete_clears=1 check=1` |
+| 58 | **resume** | `# resume: fault=1 state=Ready regs=0xaa/0xbb running=IllegalOperation regs_kept=1 reply=1 reply_caller=0 cap=InvalidArgument inactive=IllegalOperation exit_kept=1 user_nr_max=15 user_path=0 check=1` |
+| 59 | **`TlbFlush` thật** | `# tlb: core asid=1 requests=3 seq=3 local=3 targets=0 acked=0 pending=0 stale_load=13 stval_ok=1 protect_read=1 restore=1 root_fault=13 harts=1 check=1` |
+
+Matrix `ktest.sh 1 matrix` ⇒ **9/9** boot sạch (smp 1/2/4 × 3 ảnh; ktest **60/60**, guard
+**3/3**, user **17/17**; file ảnh 183.272 / 573.136 / 53.808 / 335.920 B); log
+`JOURNAL/kt64-ktest-matrix.log`. Trap lồng dời **56 → 60** (cùng
+commit sửa kernel + manifest + `expected.txt` — luật KT-54). TAP 59 chạy **ngoài** khoá
+`core_bridge` (lock không re-entrant; nó tự `with_machine` cho từng `FlushRequest`). Soak ảnh sản
+phẩm: `JOURNAL/kt64-soak.log`.
+
+### 13.9 Nợ còn lại (không tô hồng)
+
+1. **Core multi-hart chưa nối IPI:** `active_on` của kernel giao với hart đang chạy core ⇒
+   targets = 0 trong nhân; đường post + chờ ack **chỉ** có test host (QEMU không chạy đường này).
+   Nối vào IPI khi core chạy TCB trên hart khác (KT-65+).
+2. **`TlbFlush` theo `Generation`** (cạn ASID) vẫn là việc của `tlb::shootdown` KT-51 (core chỉ
+   có `Page`/`Asid`/`All` như `FlushRequest`); không mở thêm mức ở đây.
+3. **`SchedContext.YieldTo`/`Consumed`** chưa port (ngoài phạm vi tầng 3; KT-65 dùng).
+4. **`tcb_resume_with_regs` chưa có đường W^X/VM fault U-mode thật** trong ảnh sản phẩm — nó là
+   model API cho procsrv (KT-65); TAP 58 chỉ chứng minh ngữ nghĩa trạng thái.
+5. Nợ **KT-64a** (sửa sim theo D2-89/D2-90 **+ parity TLB `seq/targets/pending/acked/Busy`
+   theo D2-92c**) **vẫn mở** — KT-64 không sửa sim.
+6. **Dải slot 192 word/Region (`[TK]`, ≈190 slot/Untyped)** — đủ cho mọi ca hiện tại
+   (`Retype` CNode ≤ 96 slot) nhưng **giảm** so với pool 4096 word cũ; nếu procsrv (KT-65) cần
+   CNode lớn hơn, phải tách dải theo sức chứa/`MAX_UNTYPEDS` thực dùng (quyết định riêng, không
+   nới ngầm).
+7. **Hiệu lực phần cứng của `sfence.vma` không đo được bằng TAP 59 trên QEMU TCG** (mutation M2
+   vẫn xanh — 13.1/13.6); nó dựa vào KT-51 (TAP 25..29 + conformance 24). Ghi để người đọc không
+   tưởng TAP 59 chứng minh `sfence` chạy đúng.
+
+### 13.10 Chạy lại
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt64_core_tlb_bind_resume -- --test-threads=1
+cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt64_core_parity -- --test-threads=1
+cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt60_core_parity -- --test-threads=1
+cargo clippy --manifest-path v2/kernel/Cargo.toml --workspace --no-deps --target riscv64gc-unknown-none-elf -- -D warnings
 bash v2/test/boot/ktest.sh 1 matrix
 bash v2/test/boot/soak.sh 1000 3
 ./v2/bin/v2 gate --fast
