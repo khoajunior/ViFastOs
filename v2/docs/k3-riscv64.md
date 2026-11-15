@@ -125,10 +125,10 @@ stack hart này đè guard hart khác).
 
 | Ảnh | Bin | Feature | TAP | Runner |
 |---|---|---|---|---|
-| **Sản phẩm** | `vifast-kbin-riscv64` | — (mặc định) | `ok 1 - k3 boot` + `# k3 halt`, kèm bằng chứng `# plic:`/`# uart irq:`/`# timer arm:`/`# timer:`/`# smp:` (PLIC + UART IRQ thật, timer 100 Hz + ≥1 tick, **SMP bring-up `N` hart**, đều **không icount**) | `v2/test/boot/run.sh` |
-| **Test chính** | `vifast-kbin-ktest` | `ktest` | **38** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** + **5 TAP IPI KT-50** + **5 TAP TLB/ASID KT-51** + **7 TAP object layer KT-52** (Retype VSpace, bất biến byte, Frame 3 cỡ, W^X 2 ca, map/unmap 4 KiB, 0 rò) + **1 TAP conformance KT-55 (37, 5 `.scn` × sim/QEMU)** + trap lồng fatal cuối (TAP 38) | `v2/test/boot/ktest.sh` |
+| **Sản phẩm** | `vifast-kbin-riscv64` | — (mặc định) | `ok 1 - k3 boot` + `# k3 halt`, kèm bằng chứng `# conf image: build=<16 hex> text=<len>` (**KT-57/D2-80** — kernel tự in hash ảnh để `soak.sh` đối chiếu ELF), `# plic:`/`# uart irq:`/`# timer arm:`/`# timer:`/`# smp:` (PLIC + UART IRQ thật, timer 100 Hz + ≥1 tick, **SMP bring-up `N` hart**, đều **không icount**) | `v2/test/boot/run.sh`, `v2/test/boot/soak.sh` |
+| **Test chính** | `vifast-kbin-ktest` | `ktest` | **43** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** + **5 TAP IPI KT-50** + **5 TAP TLB/ASID KT-51** + **7 TAP object layer KT-52** (Retype VSpace, bất biến byte, Frame 3 cỡ, W^X 2 ca, map/unmap 4 KiB, 0 rò) + **1 TAP conformance KT-55 (37, 5 `.scn` × sim/QEMU)** + **5 TAP `FaultKind`/W^X KT-56 (38..42)** + trap lồng fatal cuối (**TAP 43**) | `v2/test/boot/ktest.sh` |
 | **Test guard** | `vifast-kbin-ktest-guard` | `ktest` | **3** — guard image + load `scause=13` (resume probe) + store `scause=15` fatal | `v2/test/boot/ktest.sh` |
-| **Test user** | `vifast-kbin-ktest-user` | `ktest,user` | **5** — **KT-53**: nạp `init` ELF W^X + U-mode (`sret`) + `DebugPutStr` (12) + `Exit` (42) + syscall lạ (mã 5) + U-mode đọc địa chỉ kernel ⇒ `scause=13` + `PANIC: u-mode fault` (boot kết thúc có chủ đích) | `v2/test/boot/ktest.sh` |
+| **Test user** | `vifast-kbin-ktest-user` | `ktest,user` | **7** — **KT-53**: 5 TAP (nạp `init` ELF W^X + U-mode (`sret`) + `DebugPutStr` (12) + `Exit` (42) + syscall lạ (mã 5) + U-mode đọc địa chỉ kernel ⇒ `scause=13` recover); **KT-56** thêm 2 TAP (6 `faultkind exit`, 7 `faultkind wx from u` — U-mode thực thi trang RW NX ⇒ `scause=12`, `Vm{Execute,Wx}`); boot kết thúc bằng `PANIC: u-mode fault scause=0xc …` có chủ đích | `v2/test/boot/ktest.sh` |
 
 - Cùng crate `v2/kernel/vifast-kbin-riscv64`, cùng `linker.ld`; các bin test khai
   `required-features = ["ktest"]` (riêng ảnh user: `["ktest", "user"]`) nên **build mặc định không
@@ -150,14 +150,16 @@ stack hart này đè guard hart khác).
   **luôn fatal** (`report_guard_fault` + halt).
 - `PanicHandler` + trait `Platform` + logic trap/MMU thuần nằm ở `vifast-plat-common` nên **các ảnh
   dùng chung một handler**, không chép đôi code.
-- KT-53: ảnh test **user** thêm **5 TAP** (`expected.txt`: `ktest-user 5 5`), boot kết thúc bằng
-  `PANIC: u-mode fault scause=0xd stval=0x80200000 …`; runner chỉ chấp nhận đúng dòng PANIC này.
+- KT-53: ảnh test **user** thêm **5 TAP** (`expected.txt` khi đó `ktest-user 5 5`); **KT-56** thêm 2
+  TAP (6 `faultkind exit`, 7 `faultkind wx from u`) ⇒ **7 TAP**, boot kết thúc bằng
+  `PANIC: u-mode fault scause=0xd stval=0x80200000 …` (hoặc PANIC Wx ở TAP 7); runner chỉ chấp nhận
+  đúng mẫu PANIC của ảnh.
 - KT-49/50/51/52: ảnh test chính **37 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24; KT-51 thêm 5
   TAP TLB/ASID 25..29; KT-52 thêm 7 TAP object 30..36, trap lồng dời sang **37**); **KT-55** thêm
-  TAP conformance **37** (5 `.scn` × sim/QEMU) ⇒ trap lồng dời sang **38** (**38 TAP**) — `expected.txt`
-  đọc kế hoạch/số `ok`; `ktest.sh` chạy
-  **matrix `-smp 1|2|4`** (`bash ktest.sh 50 matrix`, log riêng từng N); harness TAP đầy đủ cho
-  **toàn bộ** `.scn`/conformance vẫn là **KT-54/55**.
+  TAP conformance **37** (5 `.scn` × sim/QEMU) ⇒ trap lồng dời sang **38**; **KT-56** thêm 5 TAP
+  `FaultKind`/W^X (38..42) ⇒ trap lồng dời sang **43** (**43 TAP**) — `expected.txt` đọc kế hoạch/số
+  `ok`; `ktest.sh` chạy **matrix `-smp 1|2|4`** (`bash ktest.sh 50 matrix`, log riêng từng N);
+  harness TAP đầy đủ cho **toàn bộ** `.scn`/conformance vẫn là **KT-54/55**.
 - KT-47: ảnh **sản phẩm** arm timer + chờ **≥1 tick** (timeout 1 s) rồi in `# timer: ticks=…` —
   bằng chứng **boot thật, không icount** (D2-74 điều kiện (b)); ảnh test đo drift **tất định** dưới
   `-icount shift=6` (D2-74, §10.5).
@@ -174,9 +176,12 @@ stack hart này đè guard hart khác).
 ```bash
 bash v2/test/boot/run.sh 1        # ảnh sản phẩm, 1 boot, 1 hart (D2-72 Q2, KHÔNG icount)
 bash v2/test/boot/run.sh 50       # 50 boot 0 lỗi (DoD KT-46/47)
-bash v2/test/boot/ktest.sh 1 1    # 3 ảnh test: 38 TAP chính + 3 TAP guard + 5 TAP user (`-icount shift=6`)
+bash v2/test/boot/ktest.sh 1 1    # 3 ảnh test: 43 TAP chính + 3 TAP guard + 7 TAP user (`-icount shift=6`)
 bash v2/test/boot/ktest.sh 1 matrix  # matrix smp 1/2/4 (KT-49), log riêng từng (ảnh, N, boot)
 bash v2/test/boot/ktest.sh 50 matrix # 50 boot **mỗi** N (DoD KT-49); KT-54: 450 boot
+bash v2/test/boot/soak.sh 1000 3      # KT-57: 1.000 boot ảnh sản phẩm × 3 luồng, KHÔNG icount (D2-24/D2-72 Q10/D2-74 c)
+bash v2/test/boot/soak.sh 999 3       # PHẢI bị từ chối (exit 2): N < n ≥ 3/p = 1.000 — không nới (D2-24)
+bash v2/test/boot/soak.sh --smoke 3 3 # chỉ để đỏ trước/kiểm marker; luôn exit 1 (không phải bằng chứng cổng)
 bash v2/test/boot/ktest.sh --check-log ktest /tmp/k3-ktest/ktest-smp2-1.log 2  # kiểm 1 log, không boot
 bash v2/test/boot/ktest.sh --print-expected    # bảng expected.txt + số tên TAP runner biết (§17.2)
 bash v2/test/boot/selftest.sh      # tự kiểm runner bằng mutation harness (§17.6, 10 ca đỏ)
@@ -232,6 +237,10 @@ Cổng đo (do script thực thi, không phải người):
   ngoài kernel), `# smp: … harts=N … timeout=0`, `# harts alive: n=N … tickets=1`, số dòng
   `# hart h alive`/`# stack hart=h`/`# timer hart=h`/`# plic hart=h` = N; `run.sh` kiểm
   `# smp: … harts=N … timeout=0` trên ảnh sản phẩm.
+- **Soak** — `soak.sh` (KT-57): N ≥ `n ≥ 3/p` (p = 0,3 % ⇒ **1.000**), **3 luồng**, timeout
+  **20 s/boot**, **không icount**; mỗi boot đòi `TAP version 13`/`1..1`/`ok 1 - k3 boot`/`# k3 halt`
+  + `# k3 image=product` + `# conf image: build=…` khớp **ELF** (D2-80) + `# smp: … harts=1 …
+  timeout=0`; `N < 1.000` bị **từ chối** (exit 2) — không nới (D2-24).
 - **Cổng repo** — `./v2/bin/v2 gate --fast` **không** build kernel
   (`v2/Cargo.toml` `exclude = ["kernel"]`); kernel kiểm bằng build + `ktest.sh`/`run.sh` + host test
   `cargo test --manifest-path v2/kernel/Cargo.toml -p vifast-plat-common`.
@@ -1278,7 +1287,7 @@ không đổi object/byte/cap/PTE nào.
 | 35 | `map/unmap 4 KiB` | `# map: va=0x40000000 level=0 pa=0x… satp=1 asid=… sum=1 write=1 read=1 protect=1 unmapped=1 flush=… walk_after=0 kernel=1` |
 | 36 | `0 ro` | `# leak: cap=… used=0 free=… holes=0 frames=0 pts=0 vspaces=0 maps=0 orphans=0 check=1` (`check=1` chỉ khi `check_objmem` trả `Ok` — không cờ tự khai) |
 
-Trap lồng fatal dời sang **TAP 38** (KT-55 thêm TAP conformance 37); ảnh guard vẫn 3 TAP. Log đỏ trước, log TAP xanh, log 50
+Trap lồng fatal dời sang **TAP 43** (KT-55 thêm TAP conformance 37; KT-56 thêm 38..42); ảnh guard vẫn 3 TAP. Log đỏ trước, log TAP xanh, log 50
 boot × `smp 1/2/4`, log gate và log budget nằm ở `v2/agent/JOURNAL/kt52-*.log`.
 
 ### 15.8 `check_objmem` — tương đương `check_vm` của K2, chạy `no_std`
@@ -1503,12 +1512,14 @@ error (0 = OK), `a1` = value.
 | 4 | `syscall la ma loi` | `# user badsys: nr=99 err=19 calls=2 panic=0` |
 | 5 | `u-mode kernel read fault` | `ok 5` in **trước**, rồi `# u-mode read: … addr=0x80200000 expect=scause=0xd stval=0x80200000`, `# u-mode fault: scause=0xd stval=0x80200000 … from_u=1 kernel_addr=1 fatal=1`, `PANIC: u-mode fault scause=0xd stval=0x80200000 … from_u=1` |
 
-- `expected.txt` thêm `ktest-user 5 5`; `ktest.sh` build ảnh user riêng (`--features ktest,user`),
+- `expected.txt` thêm `ktest-user 5 5` (số **khi đó**; KT-56 nâng lên **7 7** — xem §19.5);
+  `ktest.sh` build ảnh user riêng (`--features ktest,user`),
   kiểm budget + chuỗi `ktest`, boot `-machine virt,aia=none,aclint=on -cpu rv64 -m 128M -smp N
   -icount shift=6`, đòi `Platform HART Count` của OpenSBI khớp N, TAP 100 %, **chỉ** dòng PANIC
   `u-mode fault` được phép. Mỗi vòng `NBOOT` boot **3 ảnh test** × matrix `1/2/4`; summary
   `N_BOOT*3`.
-- Ảnh chính giữ **TAP 1..36** (KT-55 sau này thêm TAP 37 ⇒ 38), ảnh guard **3 TAP** — không đổi số/không renumber (feature `user` chỉ
+- Ảnh chính giữ **TAP 1..36** (KT-55 sau này thêm TAP 37 ⇒ 38; KT-56 thêm 38..42 ⇒ **43**),
+  ảnh guard **3 TAP** — không đổi số/không renumber (feature `user` chỉ
   bật ở ảnh user).
 
 ### 16.7 Ngân sách và tệp
@@ -1631,16 +1642,16 @@ bash v2/test/boot/ktest.sh --help
 
 ```
 # Cú pháp: <nhãn> <kế hoạch TAP> <số dòng `ok` kỳ vọng>
-ktest 38 38
+ktest 43 43
 ktest-guard 3 3
-ktest-user 5 5
+ktest-user 7 7
 ```
 
 Runner **đọc số từ tệp** (`expected_field`), không hardcode. Luật kiểm khi nạp tệp (fail-closed):
 
 1. mỗi dòng không phải chú thích phải **đúng 3 trường**; trường 2/3 là số nguyên `>= 1`;
 2. **kế hoạch = số dòng `ok`** (runner không có khái niệm "TAP đỏ được phép" — `not ok` là FAIL);
-3. **không nhãn lặp**, **không nhãn lạ** (một dòng `ktes 38 38` do gõ nhầm phải đỏ, không bị bỏ qua);
+3. **không nhãn lặp**, **không nhãn lạ** (một dòng `ktes 43 43` do gõ nhầm phải đỏ, không bị bỏ qua);
 4. **đủ** ba nhãn mà runner biết (`ktest ktest-guard ktest-user`) — thiếu một ảnh ⇒ đỏ;
 5. **kế hoạch khớp số TAP runner biết tên**: runner có manifest tên cho từng TAP (`manifest_for`);
    lệch ⇒ đỏ `expected.txt: ảnh [x] kế hoạch A nhưng runner kiểm B TAP`. Nhờ vậy **không thể**
@@ -1668,7 +1679,7 @@ Ngoài ra runner kiểm **môi trường** (QEMU `>= 9.2` D2-72 Q2, OpenSBI có 
 ### 17.4 Cách đọc kết quả
 
 - Mỗi boot in **một** dòng TAP của runner:
-  `ok - ktest smp=2 boot 7 (38 TAP, 11s) log /tmp/k3-ktest/ktest-smp2-7.log` hoặc
+  `ok - ktest smp=2 boot 7 (43 TAP, 11s) log /tmp/k3-ktest/ktest-smp2-7.log` hoặc
   `not ok - ktest smp=2 boot 7: thiếu tap12 ev7, log …` (danh sách token như bảng §17.3; mẫu
   evidence/TAP hỏng được in chi tiết ra **stderr** với tiền tố `#   `).
 - **Bảng tổng kết** in cuối (`image × smp × boot`): cột `TAP` = số dòng `ok` thực / kế hoạch trong
@@ -1688,12 +1699,12 @@ Ngoài ra runner kiểm **môi trường** (QEMU `>= 9.2` D2-72 Q2, OpenSBI có 
 Mỗi dòng `#` là **số đo do chính boot in ra** (QD §9 Q12: tài liệu không chép tay số đo); runner
 chỉ đòi **sự có mặt + hình dạng**, còn giá trị do kernel tính. Nhóm theo ảnh:
 
-**Ảnh chính `ktest` (38 TAP)**
+**Ảnh chính `ktest` (43 TAP)**
 
 | Dòng evidence (mẫu) | Nghĩa | TAP |
 |---|---|---|
 | `# ktest image: …` / `# ktest: …` | định danh ảnh test + địa chỉ nạp, `TAP version` của harness trong ảnh | 1 |
-| `# breakpoint: …`, `# ecall sbi: …`, `# nested trap: …` | trap `ebreak` thật (`scause=3`) resume đúng `sepc`; `ecall-S` đi SBI (D2-73: không delegate) và resume; trap lồng fatal có chủ đích | 2,3,4 / 38 |
+| `# breakpoint: …`, `# ecall sbi: …`, `# nested trap: …` | trap `ebreak` thật (`scause=3`) resume đúng `sepc`; `ecall-S` đi SBI (D2-73: không delegate) và resume; trap lồng fatal có chủ đích | 2,3,4 / 43 |
 | `# mmu: satp=… mode=8 …`, `# mmu map: … guard_none=1`, `# mmu on: … readback=… alias=1 …` | `satp` Sv39 đã bật, root/arena trong RAM, alias nửa cao, UART/kernel_low/kernel_high cùng nhìn thấy | 5 |
 | `# mmu layout: … none_low=1 none_high=1 none_physmap=1 …`, `… physmap_2m_nx=1 … all_harts=1` | guard page **NONE** ở cả ba bảng (không cửa sau), physmap 2 MiB NX, PLIC/UART map thiết bị, layout phủ **mọi** hart | 6 |
 | `# walk khop: pre=post=1 software=8/8 …` | walk phần cứng khớp walk phần mềm 8/8 mức | 7 |
@@ -1729,7 +1740,7 @@ chỉ đòi **sự có mặt + hình dạng**, còn giá trị do kernel tính. 
 | `# conf image: build=<16 hex> text=<len>` | **D2-80** — BUILD_ID (FNV-1a 64) của `.text` **đã nạp**; runner băm lại từ ELF và từ chối log lệch/không có | 37 |
 | `# conf: scn=22 name=vm-map steps=16 ok=1` … `scn=26 name=vm-shared …` | mỗi ca conformance khai **số bước trace** và `ok=1`; `scn=24` là `steps=0 skipped=smp1` trên `-smp 1` | 37 |
 | `# trace: <scn> <step> <op> k=v… => kết quả` | dòng trace **chuẩn hoá** từng bước (chỉ trường quan sát: `va/frame/rights/attrs/size/maps/w/x/n/reason/targets/acked/completed`); sim in **cùng** định dạng | 37 |
-| `PANIC: nested trap (KT-45: trap trong handler = fatal, khong resume)` | trap lồng fatal **có chủ đích** — boot kết thúc sạch (đúng 1 PANIC) | 38 |
+| `PANIC: nested trap (KT-45: trap trong handler = fatal, khong resume)` | trap lồng fatal **có chủ đích** — boot kết thúc sạch (đúng 1 PANIC) | 43 |
 | `OpenSBI v…`, `Platform HART Count : N` | bằng chứng **ngoài kernel**: firmware thật + số hart thật của máy ảo = `-smp N` | tất cả |
 
 **Ảnh guard `ktest-guard` (3 TAP)**
@@ -1742,7 +1753,7 @@ chỉ đòi **sự có mặt + hình dạng**, còn giá trị do kernel tính. 
 | `# guard store: hart=… ghi 0x… — kỳ vọng scause=0xf …`, `PANIC: guard page fault scause=0xf stval=… sepc=…` | store vào guard page ⇒ fault `scause=15` **fatal** + dump + halt (đúng 1 PANIC) | 3 |
 | `# mmu map: … guard_none=1`, `OpenSBI v…`, `Platform HART Count : N` | guard **NONE** trong bảng thật; firmware + số hart khớp `-smp` | 1..3 |
 
-**Ảnh user `ktest-user` (5 TAP)**
+**Ảnh user `ktest-user` (7 TAP)**
 
 | Dòng evidence | Nghĩa | TAP |
 |---|---|---|
@@ -1752,8 +1763,10 @@ chỉ đòi **sự có mặt + hình dạng**, còn giá trị do kernel tính. 
 | `# user put_str: calls=2 bytes=51 sum_off=1` + byte user `U: init hello from u-mode` | `DebugPutStr` (12) đúng số byte, `SUM` tắt lại sau mỗi khối | 2 |
 | `# user exit: code=42 state=Exited exits=1` | `Exit` (14) lưu mã, không quay lại U-mode | 3 |
 | `# user badsys: nr=99 err=19 calls=2 panic=0` + `U: bad syscall err=19 ok` | syscall ngoài `0..15` ⇒ **19 `RangeError`** (D2-79), không panic | 4 |
-| `# u-mode read: hart=… addr=0x80200000 expect=scause=0xd …`, `# u-mode fault: … from_u=1 kernel_addr=1 fatal=1`, `PANIC: u-mode fault scause=0xd stval=0x80200000 … from_u=1` | U-mode đọc địa chỉ kernel ⇒ page fault 13 **thật**, fault cách ly, boot kết thúc sạch (đúng 1 PANIC) | 5 |
-| `OpenSBI v…`, `Platform HART Count : N` | firmware + số hart khớp `-smp` | 1..5 |
+| `# u-mode read: hart=… addr=0x80200000 expect=scause=0xd …`, `# u-mode fault: scause=0xd … from_u=1 kernel_addr=1 recover=1 faultkind=Vm{vspace=…, va=…, access=Read, reason=Permission}` | U-mode đọc địa chỉ kernel ⇒ page fault 13 **thật**, cách ly đúng, phân loại `FaultKind::Vm`; KT-56 cho **recover** đúng một lần để chạy TAP 6/7 trong cùng boot (chính sách thường vẫn fatal) | 5 |
+| `# u-mode exitkind: code=42 kind=Exit{42} ok=1`, `# user exit: code=42 state=Exited exits=1` | `Exit` (14) ⇒ `FaultKind::Exit{42}` (KT-56) | 6 |
+| `# u-mode wx: hart=… exec=data_page expect=scause=0xc reason=Wx fatal=1`, `# u-mode fault: scause=0xc … access=Execute, reason=Wx`, `PANIC: u-mode fault scause=0xc stval=0x40002000 …` | U-mode **thực thi** trang `.data` RW NX ⇒ `scause=12` (insn page fault), `Vm{Execute,Wx}` (KT-56); fault fatal kết thúc boot sạch (đúng 1 PANIC) | 7 |
+| `OpenSBI v…`, `Platform HART Count : N` | firmware + số hart khớp `-smp` | 1..7 |
 
 ### 17.6 Chứng minh runner **bắt lỗi** — mutation của harness
 
@@ -1767,13 +1780,13 @@ thật sự áp dụng** (nếu không, `die` ngay — test không được "xan
 | Ca | Mutation (harness, **không** phải kernel) | Token lý do phải có | Bắt được gì |
 |---|---|---|---|
 | 1 | log thật (không sửa) | — (**xanh**) | không báo động giả |
-| 2 | `expected.txt` thật: `ktest 38 38 → 37 37` | `kế hoạch 37 nhưng runner kiểm 38 TAP` | nguồn sự thật: bớt 1 TAP là đỏ |
-| 3 | `expected.txt` (bản sao): xoá dòng `ktest-user 5 5` | `thiếu dòng cho ảnh [ktest-user]` | thiếu hẳn một ảnh |
+| 2 | `expected.txt` thật: `ktest 43 43 → 42 42` | `kế hoạch 42 nhưng runner kiểm 43 TAP` | nguồn sự thật: bớt 1 TAP là đỏ |
+| 3 | `expected.txt` (bản sao): xoá dòng `ktest-user 7 7` | `thiếu dòng cho ảnh [ktest-user]` | thiếu hẳn một ảnh |
 | 4 | log: dòng `ok` đầu → `not ok` | `not-ok=1` | có `not ok` là FAIL |
 | 5 | log: xoá 1 dòng `ok` | `tap-day-1..` | dãy `ok` không liên tục |
-| 6 | log: nhân đôi 1 dòng `ok` | `ok-count=39/` | trùng số TAP |
+| 6 | log: nhân đôi 1 dòng `ok` | `ok-count=44/` | trùng số TAP |
 | 7 | log: xoá evidence `# obj init:` | `ev1` | thiếu dòng bằng chứng |
-| 8 | log: xoá dòng kế hoạch `1..N` | `plan-1..38=0` | thiếu dòng kế hoạch |
+| 8 | log: xoá dòng kế hoạch `1..N` | `plan-1..43=0` | thiếu dòng kế hoạch |
 | 9 | log: thêm PANIC thứ hai (đúng mẫu) | `panic-tong=2/1` | "đúng **1** PANIC" |
 | 10 | log: PANIC đúng mẫu **thêm đuôi lạ** | `panic-khac=1` | mẫu PANIC neo **cả dòng** |
 | 11 | log: PANIC **lạ** thay PANIC có chủ đích | `panic-khac=1` | PANIC ngoài danh sách |
@@ -1798,7 +1811,7 @@ thật sự áp dụng** (nếu không, `die` ngay — test không được "xan
    do TAP đánh giá.
 3. **Timeout 20 s** là 200 lát `0,1 s` đếm bằng vòng poll (không phải đồng hồ tuyệt đối) ⇒ cắt thực
    tế ≈ 20 s + overhead poll. Boot `smp=4` của ảnh chính là ca **sát trần nhất** (thời gian wall mỗi
-   boot do runner in trong dòng `ok - … (38 TAP, Ns)`, đọc ở log của từng lần chạy — không chép số
+   boot do runner in trong dòng `ok - … (43 TAP, Ns)`, đọc ở log của từng lần chạy — không chép số
    vào tài liệu); D2-72 Q10 giữ 20 s — **không nới**, máy quá tải ⇒ `TIMEOUT` là tín hiệu, không
    phải bỏ qua.
 4. Runner chạy **tuần tự một QEMU** tại một thời điểm (soak 3 luồng là KT-57) ⇒ `ktest.sh 50 matrix`
@@ -1928,7 +1941,7 @@ trước khi so — nên đổi địa chỉ PA/tick/hart không làm đỏ, đ�
   (chống ghép dòng trace từ nguồn khác vào log QEMU).
 - TAP 37: `-smp ≥ 2` in `ok 37 - conformance 5/5`; `-smp 1` in
   `ok 37 - conformance 4/5 + 1 skipped` (ca 24 cần 2 hart thật) — nhãn TAP trong manifest phụ thuộc
-  `smp` (`conf37_name`), **không** claim 5/5 khi một ca vắng. Trap lồng fatal dời sang **38** (số TAP
+  `smp` (`conf37_name`), **không** claim 5/5 khi một ca vắng. Trap lồng fatal dời sang **43** (KT-56 thêm 38..42; số TAP
   1..36 của KT-45..52 **không đổi**). `expected.txt` + manifest + `# conf:` đổi trong cùng commit.
 
 ### 18.5 Sim đo gì
@@ -2137,3 +2150,90 @@ Kết quả đo cuối (log trong `JOURNAL/`, không chép tay vào bảng): `kt
 trace sim↔QEMU **61/61 dòng/5 ca** (`kt56-trace-compare.log`), `selftest.sh` **17/17**
 (`kt56-selftest.log`), `gate --fast` **PASS 574** (`kt56-gate.log`), budget 3 ảnh ≤ trần
 (`kt56-budget.log`).
+
+
+## 20. Cổng K3 — soak 1.000 × 3 luồng, matrix, 100k L1, perf, K3-DOD (KT-57)
+
+Nguồn: **K3-PLAN §5.2** (9 điều kiện cổng K3, không nới) + KT-57 (§4.1); **D2-24** (máy `ps`,
+N = 1.000, 3 luồng, `n ≥ 3/p`, p = 0,3 %), **D2-72 Q10** (`soak.sh 1000 3`, timeout 20 s/boot,
+0/1000, không retry), **D2-74** (soak **không** icount), **D2-80** (log neo hash ảnh do kernel tự
+in), **D2-72 Q5** (budget 262.144 B), **D2-07** (không retry lấy xanh). Bằng chứng đầy đủ + bảng
+D1..D11: [`../agent/reports/K3-DOD.md`](../agent/reports/K3-DOD.md).
+
+### 20.1 Phạm vi thay đổi của KT-57 (evidence-only)
+
+- **Tệp mới** `v2/test/boot/soak.sh` (soak + luật neo ảnh D2-80; không sửa `run.sh`/`ktest.sh`).
+- **Một dòng evidence** trong `v2/kernel/vifast-kbin-riscv64/src/main.rs`: gọi
+  `vifast_plat_riscv64::report_image_digest()` (hàm **có sẵn** của KT-55) ngay đầu `rust_main` ảnh
+  sản phẩm ⇒ mỗi boot sản phẩm in `# conf image: build=<16 hex> text=<len>` (FNV-1a 64 trên `.text`
+  đã nạp). Lý do: D2-80 buộc log soak (0/1000) phải **do kernel tự in** hash và script phải **băm
+  lại ELF** để đối chiếu; trước KT-57 chỉ ảnh ktest in dòng này (pha conformance), ảnh sản phẩm
+  **không** in ⇒ soak 1.000 boot không thể neo ảnh. Thay đổi **không** đổi ngữ nghĩa/thứ tự
+  bring-up, **không** thêm `unsafe`/dependency. Ngân sách: `.data+.bss` product **11.248 B trước và
+  sau** (không đổi); file 89.848 → 90.696 B; `.text` 19.302 → 20.210 B; BUILD_ID product
+  `072cf7807b5d4a94` → `e09ec255c17715ae` (log `JOURNAL/kt57-*`).
+- Không đụng `spec/`, sim semantics, `.scn`, QUEUE/DECISIONS/AGENTS, `viscript/`.
+
+### 20.2 `soak.sh` — cách chạy và bất biến
+
+```bash
+bash v2/test/boot/soak.sh 1000 3        # cổng K3: 1.000 boot ảnh sản phẩm, 3 luồng, 20 s/boot, KHÔNG icount
+bash v2/test/boot/soak.sh 999 3         # PHẢI exit 2: N < n ≥ 3/p = 1.000 (không nới, D2-24)
+bash v2/test/boot/soak.sh --smoke 3 3   # chỉ đỏ trước/kiểm marker; LUÔN exit 1 (không phải bằng chứng cổng)
+```
+
+- Công thức (in trong log): p = **3/1000** (0,3 %) ⇒ `n ≥ 3/p = ceil(3·1000/3) = 1.000`; tính
+  bằng số nguyên để tránh sai số dấu phẩy động. `LANES` ngoài `[1,3]` bị chặn (AGENTS §9: tối đa 3
+  QEMU song song).
+- Mỗi boot **fail-closed**: đúng 1 `TAP version 13`, đúng 1 `1..1`, đúng 1 `ok 1 - k3 boot`, đúng 1
+  `# k3 halt`, `# k3 image=product`, **đúng 1** `# conf image: build=<16 hex> text=<len>` khớp
+  BUILD_ID/text băm từ **chính** ELF (`test/conformance/image_digest.py`), `# smp: boot=0 harts=1 …
+  timeout=0` + `Platform HART Count : 1` (bằng chứng ngoài kernel), **không** dòng `PANIC`.
+- Quá **20 s** ⇒ `kill` **đúng PID** do script tạo (AGENTS §9), boot đó đỏ; **không retry** (D2-07).
+  Ảnh đổi giữa soak (sha256 đầu ≠ cuối) ⇒ soak **FAIL** (bằng chứng không còn neo, D2-80).
+- **Đỏ trước** (D2-05): `soak.sh 999` bị từ chối (`JOURNAL/kt57-soak-red-threshold.log`); trước khi
+  thêm dòng evidence ở §20.1, `soak.sh --smoke 3 3` đỏ **3/3** boot vì thiếu `# conf image:`
+  (`JOURNAL/kt57-soak-red.log`).
+
+### 20.3 Kết quả đo (log trong `JOURNAL/`, không chép tay vào bảng này — xem K3-DOD §2..§6)
+
+| Hạng mục | Log | Kết quả |
+|---|---|---|
+| Soak ảnh sản phẩm | [`kt57-soak.log`](../agent/JOURNAL/kt57-soak.log) + [`kt57-soak-results.txt`](../agent/JOURNAL/kt57-soak-results.txt) | **1000/1000** boot sạch, **0 lỗi**, 3 luồng, wall **219 s** (`real 220,59 s`), BUILD_ID `e09ec255c17715ae`, sha256 `509d5adc…` |
+| Matrix TAP `smp 1/2/4` × 3 ảnh | [`kt57-ktest-matrix.log`](../agent/JOURNAL/kt57-ktest-matrix.log) | **9/9** boot sạch: `ktest` **43/43**, `ktest-guard` **3/3**, `ktest-user` **7/7** |
+| Runner tự kiểm | [`kt57-selftest.log`](../agent/JOURNAL/kt57-selftest.log) | **17/17** ca đúng kỳ vọng |
+| Conformance 5 `.scn` | [`kt57-trace-compare.log`](../agent/JOURNAL/kt57-trace-compare.log) | **61/61 dòng, 5/5 ca**, `build=3e6ae37a278300df` khớp ảnh ktest |
+| Sim L1 100k × smp 1/2/4/8 | [`kt57-l1-100k.log`](../agent/JOURNAL/kt57-l1-100k.log) | **400.000 lượt**, **0 vi phạm**, wall **1.299 s** (PASS) |
+| Budget 4 ảnh | [`kt57-budget.log`](../agent/JOURNAL/kt57-budget.log) | product **11.248 B**, ktest **17.344 B**, guard **2.680 B**, user **11.752 B** (trần 262.144) |
+| `gate --fast` | [`kt57-gate.log`](../agent/JOURNAL/kt57-gate.log) | **PASS 574 test/75 suite**, 0 failed; L1 1.000 seed **824 ms** (lần cuối; lần trước 743 ms) |
+| Perf `[ĐO]` | [`kt57-perf.log`](../agent/JOURNAL/kt57-perf.log), [`kt57-perf-boot.log`](../agent/JOURNAL/kt57-perf-boot.log), [`kt57-perf-build.log`](../agent/JOURNAL/kt57-perf-build.log) | build 4 ảnh (sau `cargo clean`) 3,35 + 5,51 + 2,75 s; boot→halt (wall host, 100 boot) median **389.084.167 ns**, p95 **484.941.500 ns**; tick drift dưới icount `min_ns` 9.999.900–10.000.000 / `max_ns` 10.019.900–10.020.100; `max_late_ticks` 200–201 (**20,0–20,1 µs**) |
+| Mutation (4 ca §5.2 #7) | [`kt57-mutation-X-*`](../agent/JOURNAL/kt57-mutation-X-run.log), [`kt57-mutation-Y-*`](../agent/JOURNAL/kt57-mutation-Y-run.log) + KT-51 | KT-51 M1 (bỏ `sfence.vma`) / M2 (bỏ chờ ack) đỏ; KT-57 chạy lại **2 ca còn thiếu ở mức kernel**: bỏ flush cục bộ ⇒ `local_verify_wrong=50`, TAP 25/28 đỏ; bỏ drain hộp thư ⇒ TAP 20/21/23 đỏ + treo tới timeout 20 s (đúng lỗ D2-68). Khôi phục: sha nguồn + sha ảnh khớp trước mutation |
+
+### 20.4 Perf — ngữ nghĩa phép đo (không ngưỡng)
+
+Plan K3 §5.2 #8 **chưa đặt ngưỡng perf**, chỉ baseline `[ĐO]`; mọi số dưới đây do script/tiến
+trình đo, không viết tay:
+
+- `boot→halt` = **wall host** `perf_counter_ns` quanh tiến trình QEMU (gồm khởi động QEMU + OpenSBI
+  + shutdown). Kèm hai mốc kernel đo được: `entry_ns` = CSR `time` (10 MHz) lúc kernel vào (sau
+  firmware) và `kernel_tail_ns` = (tick cuối − entry) — **cận dưới** của kernel entry→halt.
+- **Tick drift** đo **dưới `-icount shift=6`** (D2-74): `# timer drift:` in `min_ns/max_ns`; đo được
+  Δ ∈ [9.999.900, 10.020.100] ns ⇒ trong ngưỡng [9, 11] ms **giữ nguyên**, không nới.
+- **IRQ/trap latency thô**: `max_late_ticks` (deadline→handler) **200–201 tick @10 MHz = 20,0–20,1 µs**
+  dưới icount. Không icount, `# timer: delta_ns` lớn (14,7–210,8 ms đo được) vì QEMU chỉ phục vụ
+  timer ảo theo main loop — **không** phải toán deadline của kernel (D2-74/§10.5), nên **không**
+  dùng làm ngưỡng.
+- **IPI/shootdown**: 100/100 IPI delivered, 100/100 vòng shootdown `Ok`; `wait_ticks` in trong log là
+  **thời gian ảo** dưới icount (không phải wall) — đo latency thật (không icount) là task riêng
+  (D2-74 điều kiện (d)), không tự nhận.
+
+### 20.5 Giới hạn (không giấu)
+
+1. Soak chạy trên **máy `ps` của dự án** (QEMU 11.1.3 / OpenSBI v1.8.1, 12 nhân); wall phụ thuộc
+   tải máy — ghi trong log, không phải ngưỡng. `0/1000` là **trần** (QD §5.3), không phải bảo đảm.
+2. `boot→halt` ở §20.4 là **wall host**, gồm cả QEMU/OpenSBI; muốn số thuần kernel cần thêm mốc
+   thời gian ở halt trong kernel (task riêng — không thêm vào K3 để giữ phạm vi evidence-only).
+3. Soak chỉ đo **đường boot sản phẩm 1 hart**; matrix TAP đo 3 ảnh test × smp 1/2/4 (mỗi cấu hình 1
+   boot ở cổng KT-57; 50 boot/cấu hình đã có từ KT-54/56, log `kt5*-boot50*`).
+4. K3 **không** phải ABI đầy đủ (Q13): core CNode/TCB/IPC/sched vẫn model-only ⇒ **K3b**; nợ chi
+   tiết ở K3-DOD **§12**.

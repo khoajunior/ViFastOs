@@ -1,0 +1,34 @@
+# runner KT-54: expected.txt = nguồn sự thật duy nhất; TAP 1..N liên tục; đúng 1 PANIC theo mẫu
+# qemu 11.1.3 (sàn 9.2, D2-72 Q2) — icount shift=6 (D2-74)
+# opensbi /opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin
+# expected[ktest]: plan=43 ok=43 ten-TAP=43
+# expected[ktest-guard]: plan=3 ok=3 ten-TAP=3
+# expected[ktest-user]: plan=7 ok=7 ten-TAP=7
+# smp-list: 2 — NBOOT=1 — timeout=20 s/boot — logdir=/tmp/k3-ktest-mutY
+# build ảnh test chính+guard (riscv64gc-unknown-none-elf, release, --features ktest)
+# build ảnh test user (riscv64gc-unknown-none-elf, release, --features ktest,user)
+# image=ktest path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=327096 data+bss=17336 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=97902 .rodata=32744 .data=7912 .bss=9424 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7912 .bss=9424 
+# image=ktest-guard path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=53056 data+bss=2296 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=11040 .rodata=2872 .bss=2296 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .bss=2296 
+# image=ktest-user path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=151200 data+bss=11368 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=33946 .rodata=21624 .data=7704 .bss=3664 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7704 .bss=3664 
+# image=ktest ktest-strings=140
+# image=ktest-guard ktest-strings=6
+# image=ktest-user ktest-strings=13
+not ok - ktest smp=2 boot 1: quá 20 s (treo, đã kill pid), log /tmp/k3-ktest-mutY/ktest-smp2-1.log
+# ================= BẢNG TỔNG KẾT (image × smp × boot) =================
+# image       smp  boot  TAP       kết quả log
+# ktest       2    1     -         TIMEOUT  /tmp/k3-ktest-mutY/ktest-smp2-1.log
+# ktest-guard 2    1     -         SKIP     -
+# ktest-user  2    1     -         SKIP     -
+# ------------------------- gộp theo (image, smp) -------------------------
+# ktest       smp=2  0/1 boot sạch (FAIL=0 TIMEOUT=1)
+# ktest-guard smp=2  0/1 boot sạch (FAIL=0 TIMEOUT=0)
+# ktest-user  smp=2  0/1 boot sạch (FAIL=0 TIMEOUT=0)
+# =======================================================================
+# KTEST: 0/1 boot sạch (smp=2, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user)
+# KTEST: FAIL (1 lỗi)

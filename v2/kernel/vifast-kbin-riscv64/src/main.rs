@@ -42,6 +42,10 @@ static PANIC: PanicHandler<Riscv64Virt> = PanicHandler::new(Riscv64Virt);
 pub extern "C" fn rust_main() -> ! {
     PLATFORM.put_str("TAP version 13\n1..1\n");
     PLATFORM.put_str("# k3 image=product (kernel thật trên QEMU virt, không phải model)\n");
+    // KT-57 / D2-80 — bằng chứng neo **ảnh**: in `# conf image: build=<16 hex> text=<len>`
+    // (FNV-1a 64 trên `.text` đã nạp, hàm tái dùng của KT-55) để `soak.sh` băm lại từ ELF và từ
+    // chối log không có/lệch hash. Đây là **dòng bằng chứng**, không đổi ngữ nghĩa/threshold.
+    vifast_plat_riscv64::report_image_digest();
     // KT-45: cài vector trap direct-mode trước mọi việc khác; in lại stvec để runner thấy giá trị
     // thật (không phải hằng số viết tay trong tài liệu — QD §9 Q12). Trap sống trước MMU để lỗi
     // mapping lúc bật `satp` được dump thay vì treo im lặng.

@@ -1,0 +1,18 @@
+# KT-57 budget — D2-72 Q5: .data+.sdata+.bss+.sbss ≤ 262.144 B cho CẢ 4 ảnh; 2026-11-15T08:02:52Z
+# image=product path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 file=90696 data+bss=11248 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=20210 .rodata=5408 .data=7760 .bss=3488 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7760 .bss=3488 
+# image=ktest path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=332176 data+bss=17344 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=98680 .rodata=32776 .data=7912 .bss=9432 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7912 .bss=9432 
+# image=ktest-guard path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=53800 data+bss=2680 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=11282 .rodata=2896 .bss=2680 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .bss=2680 
+# image=ktest-user path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=152048 data+bss=11752 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=34188 .rodata=21648 .data=7704 .bss=4048 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7704 .bss=4048 
+# budget: PASS 4/4 ảnh ≤ 262144 B
+509d5adc6695432431c51b9ca59cdcb9105200b5f570e599cf0a5c00645948d7  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+31a4e7927a70e6ef8e5afe94b12f424bb4de006e419cb755a435aee12b43be71  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest
+535a856d69070486f499874c628d4785df051b905c01e077e440f4961d783f17  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard
+d7a5fbc71be8aea1dead4e8d335fba68ecfe775690a78d24bcbb499c2117a750  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user

@@ -1,0 +1,41 @@
+# runner KT-54: expected.txt = nguồn sự thật duy nhất; TAP 1..N liên tục; đúng 1 PANIC theo mẫu
+# qemu 11.1.3 (sàn 9.2, D2-72 Q2) — icount shift=6 (D2-74)
+# opensbi /opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin
+# expected[ktest]: plan=43 ok=43 ten-TAP=43
+# expected[ktest-guard]: plan=3 ok=3 ten-TAP=3
+# expected[ktest-user]: plan=7 ok=7 ten-TAP=7
+# smp-list: 2 — NBOOT=1 — timeout=20 s/boot — logdir=/tmp/k3-ktest-mutX
+# build ảnh test chính+guard (riscv64gc-unknown-none-elf, release, --features ktest)
+# build ảnh test user (riscv64gc-unknown-none-elf, release, --features ktest,user)
+# image=ktest path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=332176 data+bss=17344 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=98650 .rodata=32776 .data=7912 .bss=9432 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7912 .bss=9432 
+# image=ktest-guard path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=53800 data+bss=2680 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=11282 .rodata=2896 .bss=2680 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .bss=2680 
+# image=ktest-user path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=152048 data+bss=11752 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=34188 .rodata=21648 .data=7704 .bss=4048 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7704 .bss=4048 
+# image=ktest ktest-strings=142
+# image=ktest-guard ktest-strings=6
+# image=ktest-user ktest-strings=13
+#   thiếu TAP #25 [100 vong shootdown Ok] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #28 [rollover flush] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #43 [trap nested panic] (thấy 0 dòng, cần đúng 1)
+#   thiếu evidence#39: ^# shootdown rounds: mode=cross rounds=100 ok=100 acked_ok=100 sent=100 sent_expected=100 self_slot_wrong=0 local_verify_wrong=0 barrier_bad=0 targets=0x[0-9a-f]+ active_on=0x[0-9a-f]+ wait_ticks=[0-9]+$
+#   thiếu evidence#47: ^# rollover: generation=1 exhaustions=1 rollover=1 flush=Ok asid=0 satp_asid=0 stale_seen=1 fresh_ok=1 free=255 issued=1 asid_ok=0x3 online=0x3 primed=0x4b51c000000000c2 wrong=0$
+not ok - ktest smp=2 boot 1: thiếu ok-count=40/43 not-ok=2 tap-day-1..43 panic-tong=0/1 tap25 tap28 tap43 ev39 ev47, log /tmp/k3-ktest-mutX/ktest-smp2-1.log
+ok - ktest-guard smp=2 boot 1 (3 TAP, 0s) log /tmp/k3-ktest-mutX/ktest-guard-smp2-1.log
+ok - ktest-user smp=2 boot 1 (7 TAP, 0s) log /tmp/k3-ktest-mutX/ktest-user-smp2-1.log
+# ================= BẢNG TỔNG KẾT (image × smp × boot) =================
+# image       smp  boot  TAP       kết quả log
+# ktest       2    1     40/43     FAIL     /tmp/k3-ktest-mutX/ktest-smp2-1.log
+# ktest-guard 2    1     3/3       PASS     /tmp/k3-ktest-mutX/ktest-guard-smp2-1.log
+# ktest-user  2    1     7/7       PASS     /tmp/k3-ktest-mutX/ktest-user-smp2-1.log
+# ------------------------- gộp theo (image, smp) -------------------------
+# ktest       smp=2  0/1 boot sạch (FAIL=1 TIMEOUT=0)
+# ktest-guard smp=2  1/1 boot sạch (FAIL=0 TIMEOUT=0)
+# ktest-user  smp=2  1/1 boot sạch (FAIL=0 TIMEOUT=0)
+# =======================================================================
+# KTEST: 2/3 boot sạch (smp=2, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user)
+# KTEST: FAIL (1 lỗi)

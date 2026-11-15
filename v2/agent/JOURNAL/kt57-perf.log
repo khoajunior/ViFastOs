@@ -1,0 +1,45 @@
+# KT-57 perf — [ĐO] baseline cổng K3 §5.2 #8 (chỉ số đo; plan K3 §5.2 KHÔNG đặt ngưỡng perf)
+# Tệp này do script trích từ log đo (không chép tay số — QD §9 Q12).
+
+## 1) Thời gian build — cargo clean rồi build 4 ảnh release (wall, /usr/bin/time -p)
+# lệnh 1: build ảnh sản phẩm (cargo clean vừa xong) — real 3.35 s
+# lệnh 2: build ktest + ktest-guard (--features ktest) — real 5.51 s
+# lệnh 3: build ktest-user (--features ktest,user) — real 2.75 s
+# (máy: 12 nhân; ảnh build tất định — sha 4 ảnh sau clean-build khớp trước, xem kt57-image-sha-*.log)
+
+## 2) boot→halt ảnh sản phẩm — KHÔNG icount (D2-72 Q2/D2-74 c), 100 boot tuần tự, python perf_counter_ns
+# wall_ns: n=100 min=175066000 median=389084167 p95=484941500 max=556697500 mean=366572645
+# entry_ns: n=100 min=63563000 median=109080000 p95=153396000 max=272615000 mean=114055410
+# kernel_tail_ns: n=100 min=20501000 median=182972000 p95=214310000 max=223098000 mean=157112630
+# timer_delta_ns: n=100 min=14668000 median=177272000 p95=208098000 max=210830000 mean=150770660
+# ticks: boots=100 late_boots=96 missed_boots=96 uart_irqs>=8=100 bad=0 build=e09ec255c17715ae
+# kết luận: PASS (100/100 boot sạch)
+
+## 3) tick drift + IRQ/trap latency dưới -icount shift=6 (ảnh ktest; D2-74)
+# smp1:
+#   # timer ticks: ticks=100 min_delta_ticks=99999 max_delta_ticks=100200 non_monotonic=0 late=0 missed=0 max_late_ticks=200 first=7051383 last=17051583 deadline=17151383
+#   # timer drift: min_ns=9999900 max_ns=10020000 min_us=9999 max_us=10020 tick_ns=10000000 min_bound_ns=9000000 max_bound_ns=11000000 in_range=1
+# smp2:
+#   # timer ticks: ticks=100 min_delta_ticks=100000 max_delta_ticks=100199 non_monotonic=0 late=0 missed=0 max_late_ticks=200 first=8723764 last=18723964 deadline=18823764
+#   # timer drift: min_ns=10000000 max_ns=10019900 min_us=10000 max_us=10019 tick_ns=10000000 min_bound_ns=9000000 max_bound_ns=11000000 in_range=1
+# smp4:
+#   # timer ticks: ticks=100 min_delta_ticks=99999 max_delta_ticks=100201 non_monotonic=0 late=0 missed=0 max_late_ticks=201 first=13031942 last=23032142 deadline=23131942
+#   # timer drift: min_ns=9999900 max_ns=10020100 min_us=9999 max_us=10020 tick_ns=10000000 min_bound_ns=9000000 max_bound_ns=11000000 in_range=1
+
+## 4) IPI/shootdown baseline (ảnh ktest smp=2/4; thời gian ẢO dưới icount — KHÔNG phải wall, D2-74(d))
+# smp2:
+#   # ipi delivered: mode=cross target=100 sent=100 delivered=100 traps=100 coalesced=0 spurious=0 kinds=34/33/33 timeout=0
+#   # ipi phase1 wait_ticks=50000138
+#   # shootdown rounds: mode=cross rounds=100 ok=100 acked_ok=100 sent=100 sent_expected=100 self_slot_wrong=0 local_verify_wrong=0 barrier_bad=0 targets=0x3 active_on=0x3 wait_ticks=99987953
+# smp4:
+#   # ipi delivered: mode=cross target=100 sent=100 delivered=100 traps=100 coalesced=0 spurious=0 kinds=34/33/33 timeout=0
+#   # ipi phase1 wait_ticks=50000152
+#   # shootdown rounds: mode=cross rounds=100 ok=100 acked_ok=100 sent=300 sent_expected=300 self_slot_wrong=0 local_verify_wrong=0 barrier_bad=0 targets=0xf active_on=0xf wait_ticks=99987941
+
+## 5) Ngữ nghĩa phép đo (không giấu)
+# - wall_ns = perf_counter_ns quanh tiến trình QEMU (gồm khởi động QEMU + OpenSBI + shutdown).
+# - entry_ns = CSR time (10 MHz) kernel in ở dòng "# hart=" (mốc kernel vào sau firmware).
+# - kernel_tail_ns = (last - entry) của tick cuối trước halt — cận dưới kernel entry→halt.
+# - timer_delta_ns (không icount) = max_delta kernel đo giữa arm và tick; phần lớn là độ trễ main-loop
+#   của QEMU (D2-74) nên KHÔNG dùng làm ngưỡng; dưới icount cùng đại lượng là max_ns ở mục 3.
+# - IPI/shootdown "wait_ticks" là thời gian ảo dưới icount; đo latency thật (không icount) là task riêng (D2-74 d).

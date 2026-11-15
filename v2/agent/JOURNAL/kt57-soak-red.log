@@ -1,0 +1,41 @@
+# soak: SMOKE N=3 < 1000 — KHÔNG phải bằng chứng cổng K3 (D2-24), luôn exit 1
+# soak KT-57 — 2026-11-15T07:26:22Z
+# qemu 11.1.3 (sàn 9.2, D2-72 Q2); opensbi /opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin
+# cấu hình: -machine virt,aia=none,aclint=on -cpu rv64 -m 128M -smp 1 -no-reboot; KHÔNG icount (D2-74 c)
+# N=3 lanes=3 timeout=20s/boot; p=3/1000 (0,3 %) ⇒ n ≥ 3/p = 1000 (D2-24)
+# git HEAD=d543352db3047250a250328fa868d4299d621d57 dirty-kernel-paths=0
+# build ảnh sản phẩm (riscv64gc-unknown-none-elf, release)
+# image=product path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 file=89848 data+bss=11248 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=19302 .rodata=5048 .data=7760 .bss=3488 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7760 .bss=3488 
+# image=product ktest-strings=0
+# image=product bytes=89848 sha256=1cf457b419a39c9eab6f48cf572fba880b89a24a6983b042dcef8ad04430bb08
+# BUILD_ID (D2-80) = build=072cf7807b5d4a94 text=19302
+# log: /tmp/k3-soak/run-20261115-162623-28238/boot-<i>.log (mỗi boot một tệp; kết quả: /tmp/k3-soak/run-20261115-162623-28238/results.txt)
+# soak: bắt đầu N=3 lanes=3 07:26:23Z
+boot 1/3 FAIL: image-line=0/1 image-build=none/072cf7807b5d4a94 image-text=none/19302 log=/tmp/k3-soak/run-20261115-162623-28238/boot-1.log
+    # timer arm: now=1720300 first_deadline=1820300 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+    # timer: ticks=1 delta_ns=174371000 late=1 missed=16 non_monotonic=0 last=3464010 deadline=3520300 sret_sie=1
+    # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x15000
+    ok 1 - k3 boot
+    # k3 halt
+boot 2/3 FAIL: image-line=0/1 image-build=none/072cf7807b5d4a94 image-text=none/19302 log=/tmp/k3-soak/run-20261115-162623-28238/boot-2.log
+    # timer arm: now=1707370 first_deadline=1807370 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+    # timer: ticks=1 delta_ns=175065000 late=1 missed=16 non_monotonic=0 last=3458020 deadline=3507370 sret_sie=1
+    # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x15000
+    ok 1 - k3 boot
+    # k3 halt
+boot 3/3 FAIL: image-line=0/1 image-build=none/072cf7807b5d4a94 image-text=none/19302 log=/tmp/k3-soak/run-20261115-162623-28238/boot-3.log
+    # timer arm: now=1682510 first_deadline=1782510 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+    # timer: ticks=1 delta_ns=177742000 late=1 missed=16 non_monotonic=0 last=3459930 deadline=3482510 sret_sie=1
+    # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x15000
+    ok 1 - k3 boot
+    # k3 halt
+# soak: xong wall=0s (3 boot/s); ok=0 fail=3 tổng=3/3
+# soak: danh sách boot đỏ (lý do):
+#   fail 1 ,image-line=0/1,image-build=none/072cf7807b5d4a94,image-text=none/19302
+#   fail 2 ,image-line=0/1,image-build=none/072cf7807b5d4a94,image-text=none/19302
+#   fail 3 ,image-line=0/1,image-build=none/072cf7807b5d4a94,image-text=none/19302
+# soak: BUILD_ID=072cf7807b5d4a94 sha256=1cf457b419a39c9eab6f48cf572fba880b89a24a6983b042dcef8ad04430bb08 git=d543352db3047250a250328fa868d4299d621d57
+# soak: 0/3 lỗi=3 — 0/N chỉ là trần (QD §5.3); không retry (D2-07)
+# soak: SMOKE N=3 < 1000 — KHÔNG phải bằng chứng cổng K3
