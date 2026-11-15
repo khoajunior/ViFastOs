@@ -4,9 +4,11 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `25251719` ([KT-56] FaultKind thật + W^X + spec 1 hunk) + `[KT-56b]` — **đã push**,
-                `HEAD..origin/main = 0`; parent `62474cc8` ([KT-00] D2-81: KT-56 được commit
-                `docs/abi.md` golden cùng hunk `FaultKind`). Worktree có `viscript/` của tab khác —
+HEAD          : `25251719` ([KT-56] FaultKind thật + W^X + spec 1 hunk) + `[KT-56b]` +
+                `[KT-56c]` — **đã push**, `HEAD..origin/main = 0`; parent **thật** của `25251719`
+                là `c1587398` ([ST-00] ST-118 DONE của **dòng ViScript** chen giữa trong lúc làm —
+                worktree dùng chung), không phải `62474cc8` (D2-81 — base lúc mở KT-56; commit này
+                vẫn là tổ tiên). Worktree có `viscript/` của tab khác —
                 **không chạm**; commit KT-56 = `v2/**` + `spec/abi.toml` (1 hunk) + `docs/abi.md`.
 BUILD_ID      : ảnh **đổi** so KT-55 (fault.rs + probe + TAP 38..42; W^X Device toàn cục):
                 product 89.848 B / data+bss 11.248, ktest 332.176 / **17.344**,
