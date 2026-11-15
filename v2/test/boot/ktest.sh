@@ -3,7 +3,7 @@
 # KT-44/45/46/47/48/49 — boot ảnh **TEST** riscv64 K3 (crate `vifast-kbin-riscv64`, feature `ktest`).
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng.
-# KT-49/50: **hai** ảnh test (mỗi boot chỉ kết thúc được một lần bằng PANIC có chủ đích):
+# KT-49/50: **ba** ảnh test (mỗi boot chỉ kết thúc được một lần bằng PANIC có chủ đích):
 #   - `vifast-kbin-ktest`       : 37 TAP — KT-45 (image + 3 trap) + KT-46 (mmu on, map layout,
 #                                 walk khop) + KT-48 (3 TAP PLIC + UART IRQ thật) + KT-47 (4 TAP
 #                                 timer SBI: 100 tick đơn điệu, 1.000 tick không mất, irq thật,
@@ -19,6 +19,11 @@
 #                                 4 KiB phần cứng, 0 rò) + trap lồng fatal (TAP 37).
 #   - `vifast-kbin-ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume)
 #                                 rồi store `scause=15` fatal `PANIC: guard page fault`.
+#   - `vifast-kbin-ktest-user`  : 5 TAP — **KT-53** U-mode: nạp `init` ELF (parse `vifast-elf` +
+#                                 map W^X), `sret` vào U-mode, 3 syscall (DebugPutStr 12, DebugHalt
+#                                 13, Exit 14), syscall lạ trả mã lỗi ABI, rồi U-mode đọc địa chỉ
+#                                 kernel ⇒ page fault `scause=13` + `PANIC: u-mode fault` (boot kết
+#                                 thúc có chủ đích, giống ảnh guard).
 # Số TAP kỳ vọng đọc từ `expected.txt` (không hardcode hai nơi).
 #
 # D2-72 Q2/Q4/Q5/Q10: `-machine virt,aia=none,aclint=on -cpu rv64 -m 128M -smp N`, matrix
@@ -37,6 +42,7 @@ EXPECTED_FILE="$HERE/expected.txt"
 TARGET="riscv64gc-unknown-none-elf"
 IMG_MAIN="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-ktest"
 IMG_GUARD="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-ktest-guard"
+IMG_USER="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-ktest-user"
 N_BOOT="${1:-1}"
 SMP_ARG="${2:-1}"
 case "$SMP_ARG" in
@@ -98,29 +104,42 @@ PLAN_MAIN="$(expected_field ktest 2)"
 OK_MAIN="$(expected_field ktest 3)"
 PLAN_GUARD="$(expected_field ktest-guard 2)"
 OK_GUARD="$(expected_field ktest-guard 3)"
+PLAN_USER="$(expected_field ktest-user 2)"
+OK_USER="$(expected_field ktest-user 3)"
 case "${PLAN_MAIN:-}" in '' | *[!0-9]*) die "expected.txt: thiếu kế hoạch TAP cho 'ktest'" ;; esac
 case "${OK_MAIN:-}" in '' | *[!0-9]*) die "expected.txt: thiếu số ok cho 'ktest'" ;; esac
 case "${PLAN_GUARD:-}" in '' | *[!0-9]*) die "expected.txt: thiếu kế hoạch TAP cho 'ktest-guard'" ;; esac
 case "${OK_GUARD:-}" in '' | *[!0-9]*) die "expected.txt: thiếu số ok cho 'ktest-guard'" ;; esac
-echo "# expected: ktest plan=$PLAN_MAIN ok=$OK_MAIN; ktest-guard plan=$PLAN_GUARD ok=$OK_GUARD"
+case "${PLAN_USER:-}" in '' | *[!0-9]*) die "expected.txt: thiếu kế hoạch TAP cho 'ktest-user'" ;; esac
+case "${OK_USER:-}" in '' | *[!0-9]*) die "expected.txt: thiếu số ok cho 'ktest-user'" ;; esac
+echo "# expected: ktest plan=$PLAN_MAIN ok=$OK_MAIN; ktest-guard plan=$PLAN_GUARD ok=$OK_GUARD; ktest-user plan=$PLAN_USER ok=$OK_USER"
 
-echo "# build 2 ảnh test ($TARGET, release, --features ktest)"
+echo "# build ảnh test chính+guard ($TARGET, release, --features ktest)"
 if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
     --bin vifast-kbin-ktest --bin vifast-kbin-ktest-guard \
     --features ktest --target "$TARGET" --release >/tmp/k3-ktest-build.log 2>&1; then
     tail -20 /tmp/k3-ktest-build.log >&2
     die "build ảnh test FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build.log)"
 fi
-for IMAGE in "$IMG_MAIN" "$IMG_GUARD"; do
+# KT-53: ảnh user bật thêm feature `user` (module U-mode chỉ có trong ảnh này).
+echo "# build ảnh test user ($TARGET, release, --features ktest,user)"
+if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
+    --bin vifast-kbin-ktest-user --features ktest,user \
+    --target "$TARGET" --release >/tmp/k3-ktest-build-user.log 2>&1; then
+    tail -20 /tmp/k3-ktest-build-user.log >&2
+    die "build ảnh test user FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-user.log)"
+fi
+for IMAGE in "$IMG_MAIN" "$IMG_GUARD" "$IMG_USER"; do
     [ -f "$IMAGE" ] || die "không thấy ảnh test $IMAGE — CHƯA có ảnh test"
 done
 
 # Budget: mỗi ảnh test cũng phải ≤ 262.144 B (D2-72 Q5, không tách ngân sách riêng).
 bash "$BUDGET" "$IMG_MAIN" ktest || die "budget ảnh test VƯỢT trần"
 bash "$BUDGET" "$IMG_GUARD" ktest-guard || die "budget ảnh test guard VƯỢT trần"
+bash "$BUDGET" "$IMG_USER" ktest-user || die "budget ảnh test user VƯỢT trần"
 
 # Ảnh test phải mang chuỗi `ktest` (D2-08: tách khỏi ảnh sản phẩm).
-for PAIR in "ktest:$IMG_MAIN" "ktest-guard:$IMG_GUARD"; do
+for PAIR in "ktest:$IMG_MAIN" "ktest-guard:$IMG_GUARD" "ktest-user:$IMG_USER"; do
     LABEL="${PAIR%%:*}"
     IMAGE="${PAIR#*:}"
     if command -v strings >/dev/null 2>&1; then
@@ -208,7 +227,9 @@ for SMP in $SMP_LIST; do
         if out="$(boot_once main "$IMG_MAIN" "$SMP" "$i")"; then :; else
             echo "not ok - ktest smp=$SMP boot $i: quá $((TIMEOUT_DS / 10)) s (treo), log $out"
             fails=$((fails + 1))
-            smp_fails=$((smp_fails + 1))
+            # ảnh guard + user của vòng này không được chạy ⇒ cũng không sạch (summary N*3).
+            smp_fails=$((smp_fails + 3))
+            total_boots=$((total_boots + 2))
             i=$((i + 1))
             continue
         fi
@@ -408,7 +429,9 @@ for SMP in $SMP_LIST; do
         if out="$(boot_once guard "$IMG_GUARD" "$SMP" "$i")"; then :; else
             echo "not ok - guard ktest smp=$SMP boot $i: quá $((TIMEOUT_DS / 10)) s (treo), log $out"
             fails=$((fails + 1))
-            smp_fails=$((smp_fails + 1))
+            # ảnh user của vòng này không được chạy ⇒ không sạch (summary N*3).
+            smp_fails=$((smp_fails + 2))
+            total_boots=$((total_boots + 1))
             i=$((i + 1))
             continue
         fi
@@ -445,9 +468,58 @@ for SMP in $SMP_LIST; do
             fails=$((fails + 1))
             smp_fails=$((smp_fails + 1))
         fi
+
+        # ------------------------------------------------- ảnh user: 5 TAP, U-mode + fault fatal
+        total_boots=$((total_boots + 1))
+        if out="$(boot_once user "$IMG_USER" "$SMP" "$i")"; then :; else
+            echo "not ok - user ktest smp=$SMP boot $i: quá $((TIMEOUT_DS / 10)) s (treo), log $out"
+            fails=$((fails + 1))
+            smp_fails=$((smp_fails + 1))
+            i=$((i + 1))
+            continue
+        fi
+        missing="$(common_tap_ok "$out" "$PLAN_USER" "$OK_USER" '^PANIC: u-mode fault scause=0xd stval=0x80200000 ')"
+        grep -q '^ok 1 - init u-mode$' "$out" || missing="$missing ok1-init-u-mode"
+        grep -q '^ok 2 - syscall debug_put_str$' "$out" || missing="$missing ok2-put-str"
+        grep -q '^ok 3 - syscall exit$' "$out" || missing="$missing ok3-exit"
+        grep -q '^ok 4 - syscall la ma loi$' "$out" || missing="$missing ok4-bad-syscall"
+        grep -q '^ok 5 - u-mode kernel read fault$' "$out" || missing="$missing ok5-kernel-read"
+        # Bằng chứng U-mode thật: load ELF W^X, entry/sret, 3 syscall, exit đúng mã, fault cách ly.
+        grep -Eq '^# user image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 root=0x[0-9a-f]+ obj_arena=0x[0-9a-f]+-0x[0-9a-f]+ untyped=2$' "$out" ||
+            missing="$missing user-image-evidence"
+        grep -Eq '^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$' "$out" ||
+            missing="$missing init-load-evidence"
+        grep -Eq '^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=5 exits=1 exit=42$' "$out" ||
+            missing="$missing init-run-evidence"
+        grep -Eq '^# u sstatus: enter=0x[0-9a-f]+ trap=0x[0-9a-f]+ spp=0 spie=0 sie=0 sum=0 uxl=2$' "$out" ||
+            missing="$missing u-sstatus-evidence"
+        grep -Eq '^# user put_str: calls=2 bytes=51 sum_off=1$' "$out" ||
+            missing="$missing user-putstr-evidence"
+        grep -Eq '^# user exit: code=42 state=Exited exits=1$' "$out" ||
+            missing="$missing user-exit-evidence"
+        grep -Eq '^# user badsys: nr=99 err=19 calls=2 panic=0$' "$out" ||
+            missing="$missing user-badsys-evidence"
+        # DebugPutStr in đúng **byte user** (không phải chuỗi kernel tự bịa ra).
+        grep -q '^U: init hello from u-mode$' "$out" || missing="$missing user-marker"
+        grep -q '^U: bad syscall err=19 ok$' "$out" || missing="$missing user-badsys-marker"
+        grep -Eq '^# u-mode read: hart=[0-9]+ addr=0x80200000 expect=scause=0xd stval=0x80200000$' "$out" ||
+            missing="$missing u-mode-read-line"
+        grep -Eq '^# u-mode fault: scause=0xd stval=0x80200000 sepc=0x[0-9a-f]+ from_u=1 kernel_addr=1 fatal=1$' "$out" ||
+            missing="$missing u-mode-fault-line"
+        grep -Eq '^PANIC: u-mode fault scause=0xd stval=0x80200000 sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' "$out" ||
+            missing="$missing u-mode-panic"
+        grep -q "^Platform HART Count *: *$SMP" "$out" || missing="$missing opensbi-hart-count"
+        if [ -z "$missing" ]; then
+            echo "ok - user smp=$SMP boot $i (5 TAP: init u-mode + 3 syscall + u-mode fault 13)"
+            clean_boots=$((clean_boots + 1))
+        else
+            echo "not ok - user smp=$SMP boot $i: thiếu$missing, log $out"
+            fails=$((fails + 1))
+            smp_fails=$((smp_fails + 1))
+        fi
         i=$((i + 1))
     done
-    echo "# smp=$SMP: $((N_BOOT * 2 - smp_fails))/$((N_BOOT * 2)) boot ảnh test sạch"
+    echo "# smp=$SMP: $((N_BOOT * 3 - smp_fails))/$((N_BOOT * 3)) boot ảnh test sạch"
     [ "$smp_fails" -eq 0 ] || echo "# smp=$SMP: FAIL ($smp_fails lỗi)"
 done
 

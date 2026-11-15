@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "vifast-elf"
+version = "0.1.0"
+
+[[package]]
 name = "vifast-kbin-riscv64"
 version = "0.1.0"
 dependencies = [
@@ -21,6 +25,7 @@ dependencies = [
 name = "vifast-plat-riscv64"
 version = "0.1.0"
 dependencies = [
+ "vifast-elf",
  "vifast-plat-common",
 ]
 

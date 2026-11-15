@@ -70,6 +70,11 @@ pub mod plic;
 pub mod smp;
 pub mod timer;
 pub mod tlb;
+/// KT-53: U-mode + nạp `init` ELF — chỉ biên dịch cho ảnh **test U-mode** (`feature = "user"`,
+/// kéo theo `ktest`); ảnh sản phẩm và ảnh test chính/guard không có đường `sret` xuống U-mode,
+/// nên không link module này (giữ nguyên 37+3 TAP cũ, procsrv/shell là K3.5).
+#[cfg(feature = "user")]
+pub mod user;
 
 /// UART0 của QEMU `virt` (16550A) — dữ kiện nền tảng, D2-72 Q7.
 pub const UART0_BASE: usize = 0x1000_0000;
@@ -341,11 +346,22 @@ pub fn read_trap_vector() -> usize {
 pub extern "C" fn trap_dispatch(tf: &mut TrapFrame) {
     // KT-49: mỗi hart ghi trapframe gần nhất vào slot **của mình**; TAP `per-hart stack/guard`
     // kiểm frame nằm trong `.trap_stack` của chính hart đã trap (chứng minh `sscratch` per-hart).
-    let hart = Riscv64Virt.hart_id();
-    smp::note_trap_frame(hart, tf as *const TrapFrame as usize);
+    // KT-53: trap từ U-mode có `tp = 0` (không lộ hart id/kernel pointer cho user); handler U-mode
+    // không dùng PerHart nào nên **không** ghi `note_trap_frame` (hart_id đọc `tp` sẽ là 0).
+    if tf.from_supervisor() {
+        let hart = Riscv64Virt.hart_id();
+        smp::note_trap_frame(hart, tf as *const TrapFrame as usize);
+    }
     let saved = *tf;
     match decode_trap(&saved) {
         Event::Exception(exc) => {
+            // KT-53: trap từ **U-mode** (SPP=0) đi đường riêng: `ecall` (scause=8) ⇒ dispatch
+            // 3 syscall ABI; fault U-mode ⇒ log + halt (không rơi vào chính sách guard/S-mode).
+            #[cfg(feature = "user")]
+            if !exc.from_supervisor {
+                user::on_u_exception(tf, &exc);
+                return;
+            }
             // KT-46: guard page fault là page fault **thật** (scause 12/13/15, stval trong guard
             // page). Chính sách mặc định fatal dump+halt; probe test load-guard được resume một
             // lần để kiểm cả scause 13 và 15 trong một boot (xem `mmu::handle_guard_fault`).

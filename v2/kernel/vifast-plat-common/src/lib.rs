@@ -55,8 +55,10 @@
 //! gọi ack ngầm — D2-68), hart **ngoài `active_on` không bị chờ**, bộ đếm
 //! `sent/received/flushes/acks/timeouts/errors` PerHart.
 //!
-//! **Không** thuộc KT-49/50/51: object layer (KT-52), U-mode (KT-53), preemption/hotplug — xem
-//! `v2/docs/k3-riscv64.md` §12/§13/§14.
+//! KT-52 mở module [`obj`] (object layer nội bộ). KT-53 mở module [`user`] — **ngữ nghĩa**
+//! U-mode/syscall: 3 syscall ABI (DebugPutStr 12, DebugHalt 13, Exit 14), 19 mã lỗi, state
+//! "TCB-like" tối thiểu, kiểm dải user; phần trapframe/asm/`SUM` ở arch. Không CNode/TCB/IPC
+//! (K3b), không procsrv/shell (K3.5) — xem `v2/docs/k3-riscv64.md` §12..§16.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -68,6 +70,7 @@ pub mod smp;
 pub mod timer;
 pub mod tlb;
 pub mod trap;
+pub mod user;
 
 use core::fmt::{self, Write};
 use core::panic::PanicInfo;

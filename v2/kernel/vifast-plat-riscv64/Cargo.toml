@@ -12,6 +12,12 @@ default = []
 # Chỉ ảnh test (`vifast-kbin-ktest*`, feature `ktest`) bật: probe guard load resume-một-lần.
 # Ảnh sản phẩm **không** có probe/chuỗi test; chính sách guard fault của nó luôn fatal.
 ktest = []
+# KT-53: chỉ ảnh `vifast-kbin-ktest-user` bật (user ⇒ ktest): nạp `init` ELF, U-mode, 3 syscall.
+# Ảnh test chính/guard và ảnh sản phẩm **không** link module U-mode (giữ nguyên 37+3 TAP cũ).
+user = ["ktest"]
 
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }
+# KT-53: parse/validate ELF64 user (`PT_LOAD`, W^X) — crate nội bộ `no_std`,
+# `forbid(unsafe_code)`, không dependency ngoài (D2-21); loader/map vẫn ở crate arch.
+vifast-elf = { path = "../../lib/vifast-elf" }

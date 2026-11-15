@@ -184,6 +184,46 @@ pub fn copy_kernel_root(dst_pa: u64) -> bool {
     true
 }
 
+/// Chép **nửa thấp** root kernel (index `0..256`, trừ `skip_index`) vào root VSpace user —
+/// **không** chép nửa cao (kernel high alias + physmap).
+///
+/// KT-53: root VSpace user chỉ giữ mapping **cần cho kernel chạy tại chỗ** khi `satp` trỏ root
+/// user: root index 0 (UART/PLIC MMIO) và root index 2 (kernel image + NOLOAD/arena) — đều `U=0`.
+/// **Nửa cao** (root index ≥ 256: kernel high alias `0xFFFF_FFC0_4000_0000`, physmap
+/// `0xFFFF_FFC0_0000_0000`) **không** được chép, nên U-mode không có đường PTE nào tới đó (kể cả
+/// nếu một leaf kernel bị đặt `U=1` do lỗi tương lai, high alias vẫn không tồn tại trong VSpace
+/// user). `skip_index` = root index của cửa sổ user (KT-53: `1` cho `0x4000_0000..0x8000_0000`)
+/// để VSpace tự dựng bảng cấp dưới.
+///
+/// Hệ quả: sau khi đổi `satp` sang root user, kernel **không** được chạm physmap/high alias;
+/// `user::UserMemAccess` vì vậy kiểm con trỏ bằng **bảng dải user ghi lúc nạp** thay vì `walk`
+/// (walk đọc PTE qua physmap). Trả `false` nếu PA đích không thuộc RAM/không căn 4 KiB.
+#[cfg(feature = "ktest")]
+pub fn copy_kernel_low_root(dst_pa: u64, skip_index: usize) -> bool {
+    if dst_pa & 0xfff != 0 || skip_index >= 256 {
+        return false;
+    }
+    let Some(dst) = mmu::physmap_alias(dst_pa) else {
+        return false;
+    };
+    let src = mmu::root_phys();
+    if src == 0 {
+        return false;
+    }
+    for i in 0..256usize {
+        if i == skip_index {
+            continue;
+        }
+        // SAFETY: `src` là root kernel 4 KiB; `dst` là alias physmap của root VSpace vừa retype
+        // (PA đã kiểm qua physmap). Chỉ đọc/ghi 8 B trong hai bảng 4 KiB.
+        unsafe {
+            let entry = core::ptr::read_volatile((src as *const u64).add(i));
+            core::ptr::write_volatile((dst as *mut u64).add(i), entry);
+        }
+    }
+    true
+}
+
 /// Ghi `satp = Sv39(root_pa, asid)` cho hart hiện tại + `sfence.vma` toàn bộ.
 ///
 /// Chỉ dùng khi root đích đã có đủ mapping kernel ([`copy_kernel_root`]) — nếu không, lệnh kế
@@ -216,8 +256,11 @@ pub fn restore_kernel_root() -> bool {
 }
 
 /// Bật/tắt `sstatus.SUM` (S-mode được đọc/ghi trang `U=1`; privileged spec).
+///
+/// `pub(crate)` từ KT-53 để `user::UserMemAccess` đọc byte user của syscall `DebugPutStr` bằng
+/// cùng cơ chế đã kiểm ở TAP 35 (không mở `unsafe` ra ngoài crate arch, D2-17).
 #[cfg(feature = "ktest")]
-fn set_sum(on: bool) {
+pub(crate) fn set_sum(on: bool) {
     const SUM: u64 = 1 << 18;
     // SAFETY: chỉ đổi bit SUM của CSR `sstatus` của hart hiện tại, không đụng bộ nhớ.
     unsafe {

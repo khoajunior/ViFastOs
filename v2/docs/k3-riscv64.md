@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 # K3 — kernel riscv64 thật trên QEMU `virt` (mốc mở bằng KT-44)
 
-Trạng thái: **KT-52** — **object layer `no_std` + Retype nội bộ**: Untyped boot (arena RAM sau
-`__kernel_end` + cửa sổ PA 1 GiB), object `Untyped`/`Frame`/`PageTable`/`VSpace`, cap/key tối
-thiểu, `Retype`/`Revoke` **nội bộ** (không ABI, không `spec/`), Frame 4 KiB/2 MiB/1 GiB, PageTable
-3 cấp Sv39 (`vifast-pte`), VSpace map/unmap/protect qua PTE + `sfence.vma` KT-51 + **W^X toàn cục**
-(D2-67), bất biến byte Untyped và `check_objmem` tương đương `check_vm` chạy `no_std` (§15). Trên
-nền trap KT-45 + MMU Sv39 KT-46 + timer SBI KT-47 + PLIC/UART IRQ KT-48 + SMP KT-49 + IPI KT-50 +
-ASID/`sfence`/shootdown KT-51. Tài liệu hằng số nền tảng + quy trình build/boot/trap/MMU/timer/
-PLIC/SMP/IPI/TLB/object của K3.
+Trạng thái: **KT-53** — **U-mode + 3 syscall + nạp `init` ELF**: `vifast-elf` parse/map `PT_LOAD`
+theo quyền (**W^X**), stack user + guard, trapframe U-mode, `sret` (`sstatus.SPP=0`, `sscratch`
+giữ trap stack per-hart), `ecall` `scause=8` dispatch `DebugPutStr` (12) / `DebugHalt` (13) /
+`Exit` (14), syscall lạ trả mã lỗi ABI (19 mã, không panic), `Exit` ⇒ trạng thái `Exited` + không
+quay lại U-mode, fault U-mode ⇒ log + `PANIC` + halt sạch (§16). Trên nền trap KT-45 + MMU Sv39
+KT-46 + timer SBI KT-47 + PLIC/UART IRQ KT-48 + SMP KT-49 + IPI KT-50 + ASID/`sfence`/shootdown
+KT-51 + object layer KT-52. Tài liệu hằng số nền tảng + quy trình build/boot/trap/MMU/timer/
+PLIC/SMP/IPI/TLB/object/U-mode của K3.
 Nguồn quyết định: **D2-72** (`v2/agent/DECISIONS.md`) chốt Q1..Q13 của
 [`review/agent0/K3-PLAN.md`](../../review/agent0/K3-PLAN.md) §3; chi tiết task ở §4/§4.1 cùng tệp.
 Nhãn số liệu theo QD §2.2: `[TK]` thiết kế mới, `[GT]` giả thuyết nền tảng, `[ĐO]` chỉ trong log
@@ -24,8 +24,8 @@ do lệnh sinh ra. **Tài liệu này không chứa số đo viết tay** (QD §
   TLB/shootdown (KT-51), object layer (KT-52), U-mode (KT-53).
 - K3 **không** phải kernel ABI đầy đủ (D2-72 **Q13**): core CNode/TCB/IPC/scheduler vẫn model-only;
   port core `no_std` là phase **K3b**, mở bằng task port core đầu tiên (KT-58) trước `procsrv`/shell.
-- Cổng `.data + .bss ≤ 256 KiB` `[TK]` (QD §3.5) **giữ nguyên** ở K3, áp cho **cả ba** ảnh
-  (sản phẩm + 2 ảnh test; D2-72 Q5) — không nới, không tách ngân sách riêng cho ảnh test.
+- Cổng `.data + .bss ≤ 256 KiB` `[TK]` (QD §3.5) **giữ nguyên** ở K3, áp cho **cả bốn** ảnh
+  (sản phẩm + **3** ảnh test; D2-72 Q5) — không nới, không tách ngân sách riêng cho ảnh test.
 
 ## 2. Hằng số nền tảng (không mở `spec/kernel.toml` — D2-72 Q1)
 
@@ -65,6 +65,8 @@ do lệnh sinh ra. **Tài liệu này không chứa số đo viết tay** (QD §
 | PageTable | 4 KiB = 512 PTE × 8 B trong arena Untyped, zeroed lúc Retype; hình 3 cấp + `walk_shape`/`PAGE_SIZE_BITS`/`PTE_LEVELS` từ `vifast-pte`; cờ PTE từ `vifast-plat-common::mmu` (không chép bit) | `[TK]` | KT-52 §15.5 |
 | VSpace | root PageTable 4 KiB (object nội bộ, không cap) + ASID nhãn 1..255; `map` tự cấp bảng trung gian từ Untyped của VSpace; `unmap`/`protect` đổi PTE rồi đẩy yêu cầu `sfence` cho arch chạy `sfence.vma` (KT-51); W^X **toàn cục** theo Frame (`maps/w/x`, D2-67) | `[TK]` | D2-67, KT-52 §15.5/§15.6 |
 | Bất biến object | `Σ byte object sống + Σ hole == watermark ≤ capacity` mỗi Untyped (mọi byte trong watermark là object hoặc hole — đệm căn lề cũng là hole, **không** có gap tự khai); `Σ cỡ Frame + Σ PA hole == pa_used`; không Frame mồ côi; walk PTE khớp mapping; W^X toàn cục — [`check_objmem`] tương đương `check_vm` K2, chạy `no_std` | `[TK]` | KT-52 §15.8 |
+| U-mode user | Cửa sổ user **`[0x4000_0000, 0x8000_0000)`** (root index 1 Sv39 — kernel không dùng); stack top `0x4001_0000`, **8 trang** `U|R|W|NX`, **guard** `0x4000_7000` **không map**; `sret` với `sstatus.SPP=0`; **`sscratch` luôn giữ đỉnh trap stack per-hart** (KT-45/49), trap `csrrw sp, sscratch, sp` ⇒ stack kernel + `x2` = sp user; không lộ địa chỉ kernel cho user | `[TK]` | D2-72 Q9, KT-53 §16.3 |
+| Nạp `init` ELF | `vifast-elf::parse` (ELF64 LE, `ET_EXEC`, `PT_LOAD`; từ chối `PT_DYNAMIC/INTERP/TLS`, `W+X`, segment ngoài cửa sổ user); map theo quyền **W^X** (`.text` `U|R|X`, `.rodata` `U|R|NX`, `.data` `U|R|W|NX`); `build.rs` dùng **`$RUSTC`** biên dịch `init/init_user.rs` (+`.S`, `.ld`) thành `init.elf` tại `0x4000_0000`, nhúng bằng `include_bytes!` **chỉ ở ảnh test user** | `[TK]` | KT-53 §16.2 |
 
 Ghi chú kiểm chứng: `run.sh`/`ktest.sh` in `# qemu <version>` và `# opensbi <version>` **từ log
 boot thật**; QEMU dưới sàn **9.2** (so cả major.minor) ⇒ **FAIL**, không tự hạ (D2-72 Q2). OpenSBI banner
@@ -115,20 +117,27 @@ stack hart này đè guard hart khác).
   trong page table kernel (TAP 6 ghi/đọc qua nửa cao để chứng minh), nếu thiếu thì trap đầu tiên
   sau khi bật `satp` sẽ page-fault vào chính `.trap_stack` chưa map.
 
-## 4. Ba ảnh: sản phẩm + hai ảnh test (D2-08) — tách bằng feature, không `cfg(target_arch)`
+## 4. Bốn ảnh: sản phẩm + ba ảnh test (D2-08) — tách bằng feature, không `cfg(target_arch)`
 
 | Ảnh | Bin | Feature | TAP | Runner |
 |---|---|---|---|---|
 | **Sản phẩm** | `vifast-kbin-riscv64` | — (mặc định) | `ok 1 - k3 boot` + `# k3 halt`, kèm bằng chứng `# plic:`/`# uart irq:`/`# timer arm:`/`# timer:`/`# smp:` (PLIC + UART IRQ thật, timer 100 Hz + ≥1 tick, **SMP bring-up `N` hart**, đều **không icount**) | `v2/test/boot/run.sh` |
 | **Test chính** | `vifast-kbin-ktest` | `ktest` | **37** — 4 TAP trap KT-45 + 3 TAP MMU KT-46 + **3 TAP PLIC/UART IRQ KT-48** + **4 TAP timer KT-47** (chạy **sau** PLIC) + **5 TAP SMP KT-49** + **5 TAP IPI KT-50** + **5 TAP TLB/ASID KT-51** + **7 TAP object layer KT-52** (Retype VSpace, bất biến byte, Frame 3 cỡ, W^X 2 ca, map/unmap 4 KiB, 0 rò) + trap lồng fatal cuối (TAP 37) | `v2/test/boot/ktest.sh` |
 | **Test guard** | `vifast-kbin-ktest-guard` | `ktest` | **3** — guard image + load `scause=13` (resume probe) + store `scause=15` fatal | `v2/test/boot/ktest.sh` |
+| **Test user** | `vifast-kbin-ktest-user` | `ktest,user` | **5** — **KT-53**: nạp `init` ELF W^X + U-mode (`sret`) + `DebugPutStr` (12) + `Exit` (42) + syscall lạ (mã 5) + U-mode đọc địa chỉ kernel ⇒ `scause=13` + `PANIC: u-mode fault` (boot kết thúc có chủ đích) | `v2/test/boot/ktest.sh` |
 
 - Cùng crate `v2/kernel/vifast-kbin-riscv64`, cùng `linker.ld`; các bin test khai
-  `required-features = ["ktest"]` nên **build mặc định không sinh ảnh test**.
-- **Vì sao hai ảnh test:** mỗi boot chỉ kết thúc được **một** lần bằng PANIC có chủ đích. Ảnh chính
+  `required-features = ["ktest"]` (riêng ảnh user: `["ktest", "user"]`) nên **build mặc định không
+  sinh ảnh test**.
+- **Vì sao ba ảnh test:** mỗi boot chỉ kết thúc được **một** lần bằng PANIC có chủ đích. Ảnh chính
   dùng lần đó cho **trap lồng** (KT-45 P2b); guard **store fault** (`scause=15`) cần một boot riêng
   để dump + halt sạch. Ảnh guard kiểm thêm **load fault** (`scause=13`) trước đó bằng probe resume
   **chỉ trong test** (cờ `GUARD_RECOVER_LOAD`); chính sách mặc định của kernel vẫn là **fatal**.
+- **Vì sao ảnh user riêng (KT-53):** fault U-mode là **fatal** (log + halt), nên test cách ly (TAP 5)
+  phải là lần kết thúc boot — cùng lý do guard; 4 TAP U-mode còn lại chạy trọn trong cùng boot
+  trước đó. Module U-mode (`vifast-plat-riscv64::user`) nằm sau **feature `user`** (kéo `ktest`), nên
+  ảnh sản phẩm + ảnh test chính/guard **không** link nó; 37+3 TAP cũ và budget của chúng giữ nguyên.
+  `ktest.sh` build ảnh chính/guard với `--features ktest`, ảnh user với `--features ktest,user`.
 - `run.sh` **fail** nếu ảnh sản phẩm còn **một** chuỗi `ktest`; `ktest.sh` **fail** nếu ảnh test
   **không** có chuỗi đó ⇒ chứng minh tách ảnh thật, không chỉ đổi tên.
 - **Probe guard chỉ có trong ảnh test**: `probe_guard_load`/`probe_guard_store` nằm sau
@@ -137,6 +146,8 @@ stack hart này đè guard hart khác).
   **luôn fatal** (`report_guard_fault` + halt).
 - `PanicHandler` + trait `Platform` + logic trap/MMU thuần nằm ở `vifast-plat-common` nên **các ảnh
   dùng chung một handler**, không chép đôi code.
+- KT-53: ảnh test **user** thêm **5 TAP** (`expected.txt`: `ktest-user 5 5`), boot kết thúc bằng
+  `PANIC: u-mode fault scause=0xd stval=0x80200000 …`; runner chỉ chấp nhận đúng dòng PANIC này.
 - KT-49/50/51/52: ảnh test chính **37 TAP** (KT-49: 20; KT-50 thêm 5 TAP IPI 20..24; KT-51 thêm 5
   TAP TLB/ASID 25..29; KT-52 thêm 7 TAP object 30..36, trap lồng dời sang **37**) — `expected.txt`
   đọc kế hoạch/số `ok`; `ktest.sh` chạy
@@ -158,7 +169,7 @@ stack hart này đè guard hart khác).
 ```bash
 bash v2/test/boot/run.sh 1        # ảnh sản phẩm, 1 boot, 1 hart (D2-72 Q2, KHÔNG icount)
 bash v2/test/boot/run.sh 50       # 50 boot 0 lỗi (DoD KT-46/47)
-bash v2/test/boot/ktest.sh 1 1    # 2 ảnh test: 30 TAP chính + 3 TAP guard (`-icount shift=6`)
+bash v2/test/boot/ktest.sh 1 1    # 3 ảnh test: 37 TAP chính + 3 TAP guard + 5 TAP user (`-icount shift=6`)
 bash v2/test/boot/ktest.sh 1 matrix  # matrix smp 1/2/4 (KT-49), log riêng từng N
 bash v2/test/boot/ktest.sh 50 matrix # 50 boot **mỗi** N (DoD KT-49)
 bash v2/test/boot/run.sh 50 1     # ảnh sản phẩm 1 hart (không icount)
@@ -170,6 +181,8 @@ bash v2/test/boot/budget.sh \
   v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest ktest
 bash v2/test/boot/budget.sh \
   v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard ktest-guard
+bash v2/test/boot/budget.sh \
+  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user ktest-user
 ```
 
 Lệnh thô bên trong (không cần nhớ, chỉ để tra):
@@ -179,6 +192,9 @@ cargo build --manifest-path v2/kernel/Cargo.toml -p vifast-kbin-riscv64 \
     --bin vifast-kbin-riscv64 --target riscv64gc-unknown-none-elf --release
 cargo build --manifest-path v2/kernel/Cargo.toml -p vifast-kbin-riscv64 \
     --bin vifast-kbin-ktest --bin vifast-kbin-ktest-guard --features ktest \
+    --target riscv64gc-unknown-none-elf --release
+cargo build --manifest-path v2/kernel/Cargo.toml -p vifast-kbin-riscv64 \
+    --bin vifast-kbin-ktest-user --features ktest,user \
     --target riscv64gc-unknown-none-elf --release
 
 # Ảnh sản phẩm (run.sh) — đúng dòng D2-72 Q2:
@@ -195,7 +211,7 @@ qemu-system-riscv64 -icount shift=6 -machine virt,aia=none,aclint=on \
 Cổng đo (do script thực thi, không phải người):
 
 - **Budget** — `budget.sh` cộng `.data .sdata .bss .sbss` bằng `llvm-size -A` (đúng cách đo của
-  K0.5/KT-07), trần **262.144 B** `[TK]` cho **cả ba ảnh**, in
+  K0.5/KT-07), trần **262.144 B** `[TK]` cho **cả bốn** ảnh, in
   `# image=… data+bss=… stack=… guard=… trap_stack=…`; **exit 1** nếu vượt (D2-72 Q5). Page table
   nằm trong arena RAM nên **không** đội `.data+.bss`.
 - **Boot** — `run.sh`/`ktest.sh`: timeout **20 s**/boot `[TK]` (D2-72 Q10), chỉ `kill <pid>` do
@@ -1336,3 +1352,215 @@ trong log `kt52-budget*.log`; **không** chép số đo vào tài liệu (QD §9
 CNode/TCB/IPC/scheduler (K3b KT-58..61), U-mode + 3 syscall (KT-53), harness TAP đầy đủ + `expected.txt`
 cho mọi ảnh (KT-54), conformance 5 `.scn` (KT-55), `FaultKind`/W^X **fault** + `spec/abi.toml`
 (KT-56), soak 1.000 + K3-DOD (KT-57), pager/COW, nhiều VSpace thật cho user, migration/hotplug.
+
+## 16. U-mode + 3 syscall + nạp `init` ELF (KT-53)
+
+### 16.1 Phạm vi: một tác vụ user trong ảnh **test user**, không phải procsrv
+
+- **Code ngữ nghĩa** (bảng số hiệu, 19 mã lỗi, dải user, state machine "TCB-like", dispatch) ở
+  [`vifast-plat-common::user`](../kernel/vifast-plat-common/src/user.rs) — `no_std`, **không
+  `unsafe`**, host-test `tests/user.rs` (D2-72 Q12). **Code phần cứng** (nạp ELF vào VSpace,
+  trapframe, `sret`, đọc user bằng `sstatus.SUM`, asm `user_enter`/`user_exit_resume`) ở
+  [`vifast-plat-riscv64::user`](../kernel/vifast-plat-riscv64/src/user.rs), sau **feature `user`**
+  (kéo theo `ktest`), thuộc danh sách đóng `unsafe` D2-17.
+- **Ảnh riêng** `vifast-kbin-ktest-user`: fault U-mode là **fatal** (log + halt) nên TAP cách ly
+  phải kết thúc boot; ảnh chính đã dùng lần kết thúc đó cho trap lồng, ảnh guard cho store fault.
+  Bốn TAP U-mode còn lại chạy trước đó trong cùng boot. Vì feature `user` **không** bật ở ảnh sản
+  phẩm/ảnh chính/ảnh guard, ba ảnh đó **không** link module U-mode — 37+3 TAP và budget của chúng
+  giữ nguyên.
+- **Không** CNode/TCB/IPC/scheduler (K3b KT-58..61), **không** procsrv/shell/`wait`/`kill` (K3.5),
+  **không** `.scn` (KT-55), **không** `FaultKind` đầy đủ / `spec/abi.toml` (KT-56). Trạng thái
+  `UserTask` chỉ là "TCB-like state" tối thiểu (atomically witnessed) — **không phải TCB**, không
+  cap, không `fault_ep`.
+
+### 16.2 Nạp `init` ELF: `vifast-elf` + map theo quyền + W^X
+
+- `init` là **ELF64 little-endian, `ET_EXEC`, `e_machine=EM_RISCV`** với các `PT_LOAD`; parser
+  [`vifast-elf`](../lib/vifast-elf/src/lib.rs) kiểm header/program header, **từ chối**
+  `PT_DYNAMIC`/`PT_INTERP`/`PT_TLS`, segment `W+X`, `vaddr` lệch `p_offset` theo trang, segment
+  ngoài cửa sổ user `[0x4000_0000, 0x8000_0000)` (root index 1 — kernel không dùng), chồng lấn,
+  entry ngoài segment executable.
+- **Nguồn `init`:** [`init/init_user.rs`](../kernel/vifast-kbin-riscv64/init/init_user.rs) (chỉ
+  `global_asm!` của [`init/init_user.S`](../kernel/vifast-kbin-riscv64/init/init_user.S)) +
+  [`init/init.ld`](../kernel/vifast-kbin-riscv64/init/init.ld). `build.rs` gọi **`$RUSTC`** (cargo
+  cấp) với `--target riscv64gc-unknown-none-elf`, `-C panic=abort -C relocation-model=static`,
+  `-T init.ld`, `--gc-sections` để sinh `$OUT_DIR/init.elf`; `ktest_user.rs` nhúng bằng
+  `include_bytes!`. **Không** toolchain ngoài Rust (không assembler/`objcopy` ngoài), **không**
+  sinh file trong cây nguồn, **không** ảnh hưởng ảnh sản phẩm (feature `user` tắt ⇒ build script
+  không chạy nhánh này). Chương trình chỉ dùng thanh ghi caller-saved (`a/t`) và một biến `.data`
+  — không đụng `s0..s11/gp/tp`, để đường về S-mode khôi phục ngữ cảnh kernel.
+- **Layout thật của `init.elf`:** 3 `PT_LOAD` — `.text` `R|X`, `.rodata` `R`, `.data` `R|W` (đủ
+  để chứng minh **cả ba** quyền segment, không chỉ text) — entry `0x40000000`. Loader map từng
+  trang 4 KiB:
+  `.text` → `MapFlags::RX_USER` (U|R|X, **không W**), `.rodata` → U|R|NX, `.data` → `RW_NX_USER`
+  (U|R|W, **không X**); Frame 4 KiB zero-fill rồi chép phần file của trang (phần `memsz > filesz`
+  đã zero); **stack user** 8 trang `0x40008000..0x40010000` `U|R|W|NX`; **guard** `0x40007000`
+  **không map** ngay dưới stack; ảnh ELF phải kết thúc trước guard (`image_end ≤ 0x40007000`).
+- **Root VSpace user chỉ chép nửa thấp root kernel** (`index 0..256`, trừ index 1 = cửa sổ user):
+  kernel **chạy tại chỗ** khi `satp` trỏ root user cần UART/PLIC (index 0) + image/NOLOAD/arena
+  (index 2), tất cả `U=0`. **Nửa cao không được chép** — kernel high alias
+  `0xFFFF_FFC0_4000_0000` và physmap `0xFFFF_FFC0_0000_0000` **không tồn tại** trong VSpace user,
+  nên U-mode không có PTE nào (kể cả sai `U=1`) tới nửa cao. Hệ quả: sau khi đổi `satp`, kernel
+  **không** dùng physmap; syscall kiểm con trỏ bằng **bảng dải VA đã map** (ghi lúc nạp) thay vì
+  `walk` PTE. Bằng chứng: `# init load: … high=1` (walk high alias + physmap đều invalid).
+- **W^X ba lớp:** parser từ chối `W+X` → loader kiểm lại `writable && executable` → object layer
+  (D2-67) chặn W^X **toàn cục** theo Frame. Sau khi map, loader **đi lại PTE thật** để đếm
+  `wx_pages` (leaf `W∧X`, phải 0) và `flags_ok` (leaf khớp quyền segment + có `U`), rồi
+  `check_objmem`; bằng chứng `# init load: … wx=0 flags=1 check=1`.
+- **Cấp phát:** VSpace/Frame lấy từ Untyped `U0` của object layer KT-52 (arena 64 KiB + cửa sổ PA
+  1 GiB); bảng trung gian do `VSpace::map` tự cấp; PA của Frame đi qua **physmap** (RAM 128 MiB).
+  Không thêm arena/bảng mới.
+
+### 16.3 Trapframe U-mode + `sret` + cơ chế `sscratch` (đã chọn, kèm lý do)
+
+**Cơ chế:** **`sscratch` luôn giữ đỉnh trap stack per-hart** — giống KT-45/KT-49, **không** đổi khi
+xuống U-mode:
+
+- `sret` xuống U-mode chỉ đặt `sstatus.SPP=0`, `sepc=entry`, `sp=stack user`; **`sscratch` vẫn là
+  đỉnh trap stack** (giá trị kernel). U-mode không đọc/ghi được CSR supervisor nên không thấy và
+  không sửa được con trỏ này.
+- Trap từ U-mode: `trap_entry` làm `csrrw sp, sscratch, sp` ⇒ `sp` = trap stack top (kernel),
+  `sscratch` = sp user; frame lưu `x2` = sp user (asm đọc `sscratch` sau swap). **Một** thanh ghi
+  vừa đổi stack vừa giữ con trỏ kernel, không cần global/`tp` phụ.
+- Trap từ S-mode (timer/PLIC/IPI) dùng **cùng** đường: `sscratch` vẫn là đỉnh trap stack nên kernel
+  stack bị ngắt được giữ trong `sscratch`; `sstatus.SPP` phân biệt nguồn trap nên chính sách
+  syscall/fault tách sạch.
+- **Đường về S-mode sau `Exit`:** `user_enter` lưu ngữ cảnh kernel `(ra, sp, gp, tp, s0..s11)` vào
+  `USER_KERNEL_CTX` (`.bss`, một tác vụ/hart ở KT-53); handler đặt `sstatus.SPP=1` (asm resume của
+  `trap_entry` **không** ghi `sstatus` — P2a KT-45), `sepc = user_exit_resume`, rồi asm resume
+  `sret` về S-mode; `user_exit_resume` khôi phục ngữ cảnh kernel và `ret` về caller Rust. **Không**
+  quay lại U-mode, **không** dùng stack user.
+
+**Vì sao không chọn "`sscratch` = con trỏ user":** (1) sẽ cần thêm một nguồn lưu con trỏ kernel
+(global/`tp`) và phân nhánh trap S/U ngay trong asm; (2) trap từ S-mode vẫn phải có đỉnh trap stack
+nên `sscratch` kiểu gì cũng phải giữ giá trị kernel trong kernel; (3) cơ chế hiện tại đã chạy cho
+cả hai nguồn trap, ít trạng thái hơn, không lộ địa chỉ kernel.
+
+**Trapframe lúc vào U-mode** (`TrapFrame` 288 B của KT-45): `sepc = e_entry`; `x[2] = stack top`;
+`x[10] = mode` (0 = lượt syscall, 1 = lượt fault cách ly); `x[3]=x[4]=0` (gp/tp user = 0); các
+thanh ghi khác 0; `sstatus = sstatus hiện tại & !(SPP|SPIE|SIE|SUM)` — giữ `UXL/FS` WARL, tắt ngắt
+S-mode và SUM trong U-phase. Bằng chứng: `# init run: … u_mode=1 sret_spp=0 ecall_spp=0`.
+
+### 16.4 Ba syscall + mã lỗi ABI (không panic)
+
+ABI đọc từ `spec/abi.toml` `[calling.riscv64]`: `a7` = số hiệu, `a0/a1` = tham số, trả `a0` =
+error (0 = OK), `a1` = value.
+
+| # | Syscall | Hành vi KT-53 | Trả |
+|---|---|---|---|
+| 12 | `DebugPutStr` | kiểm `[ptr, ptr+len)` trọn dải user + **trọn một dải VA đã map** (bảng dải loader ghi: segment + stack), `len ≤ 4096`; đọc raw bằng `sstatus.SUM` (tắt ngay sau mỗi khối 64 B) rồi in ra UART | `a0=0`, `a1=len`; lỗi dải ⇒ 5, ngoài dải đã map ⇒ 11 |
+| 13 | `DebugHalt` | log `# user debug_halt: code=N` rồi SBI SRST (`DebugHalt` chỉ cho test — QD §4) | không trả |
+| 14 | `Exit(code)` | `UserTask` ⇒ `Exited`, lưu `exit_code`; trapframe chuyển về S-mode (`§16.3`) — **không** quay lại U-mode | không trả |
+
+- **Số hiệu trong dải `0..=15` nhưng chưa cài** (IPC/sched/clock/`DebugGetInfo` 15 — K3b/K3.5) ⇒
+  `a0 = NotSupported` (**18**). **Ngoài dải** (16..31 reserved, 99, EID SBI `0x53525354`…) ⇒
+  `a0 = RangeError` (**19**, **D2-79**: số syscall là *chỉ số* vào bảng dispatch, spec
+  `[error]` 19 = "chỉ số/chỉ số dải ngoài phạm vi"), ghi `bad_calls/last_bad_nr` — **không
+  panic** (TAP 4 kiểm 2 lần: EID SBI + 99). Mã 5 `InvalidArgument` chỉ dùng cho tham số sai
+  **trong** một syscall hợp lệ (vd `DebugPutStr` quá dài / con trỏ ngoài dải).
+- Bảng 19 mã lỗi (1 `InvalidCapability` … 19 `RangeError`) + tên ở
+  `vifast_plat_common::user::error_name`, khớp `spec/abi.toml` `[error]` (chỉ **đọc** spec, không
+  sửa). `DebugGetInfo` **chưa cài ở KT-53** (không cần cho `init`; ABI đầy đủ là K3b/K3.5).
+- **U-mode không gọi được SBI:** `ecall` từ U-mode luôn trap `scause=8` vào dispatcher; EID SBI nằm
+  ngoài dải syscall nên chỉ nhận mã lỗi 5 — không có đường nào để U-mode chạy `ecall` S-mode.
+
+### 16.5 Cách ly + chính sách fault U-mode
+
+- **Cách ly địa chỉ:** root VSpace user chỉ chép **nửa thấp** root kernel (**test-only** KT-52
+  L6 — `copy_kernel_low_root`) để kernel sống khi `satp` trỏ root user; mọi leaf kernel giữ `U=0`
+  và **nửa cao (high alias/physmap) không map**. U-mode đọc `0x80200000` ⇒ **load page fault**
+  `scause=13`, `stval=0x80200000`; U-mode **không** đọc/ghi được địa chỉ kernel, không có đường
+  PTE tới nửa cao. U-mode chạy với `tp=0` (không lộ hart id/con trỏ kernel); trap handler U-mode
+  **không** dùng `hart_id()`/PerHart (chỉ `TRAP_STATS`/`USER_TASK` toàn cục).
+- **Chính sách:** mọi exception từ U-mode **không phải** `EnvironmentCallFromU` là **fatal**:
+  ghi `USER_TASK.record_fault(scause, stval, sepc)` + `TRAP_STATS` (fatal), in
+  `# u-mode fault: scause=… stval=… sepc=… from_u=1 kernel_addr=… fatal=1`, rồi
+  `PANIC: u-mode fault …` + `DebugHalt(1)` — **không** treo, **không** resume, **không** pager
+  (`FaultKind` đầy đủ là KT-56). Đọc/ghi kernel từ U-mode đều cùng chính sách; TAP kiểm **read**
+  (`scause=13`) theo đúng tên test, còn store U-mode (`scause=15`) cùng PTE `U=0` — ghi nợ đo riêng
+  (§16.8).
+- **Bẫy lỗi con trỏ user:** `DebugPutStr` kiểm dải + walk PTE **trước** khi chạm bộ nhớ, nên con
+  trỏ user xấu trả mã lỗi ABI (5/11) — **không** biến thành page fault S-mode (fatal).
+
+### 16.6 TAP 1..5 (ảnh `vifast-kbin-ktest-user`) + runner
+
+| TAP | Tên | Bằng chứng (`ktest.sh` grep) |
+|---|---|---|
+| 1 | `init u-mode` | `# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x… guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x… asid=… check=1` + `# init run: … u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=5 exits=1 exit=42` + `# u sstatus: enter=0x… trap=0x… spp=0 spie=0 sie=0 sum=0 uxl=2` |
+| 2 | `syscall debug_put_str` | `# user put_str: calls=2 bytes=51 sum_off=1` + **byte user** in ra: `U: init hello from u-mode`, `U: bad syscall err=19 ok` |
+| 3 | `syscall exit` | `# user exit: code=42 state=Exited exits=1` |
+| 4 | `syscall la ma loi` | `# user badsys: nr=99 err=19 calls=2 panic=0` |
+| 5 | `u-mode kernel read fault` | `ok 5` in **trước**, rồi `# u-mode read: … addr=0x80200000 expect=scause=0xd stval=0x80200000`, `# u-mode fault: scause=0xd stval=0x80200000 … from_u=1 kernel_addr=1 fatal=1`, `PANIC: u-mode fault scause=0xd stval=0x80200000 … from_u=1` |
+
+- `expected.txt` thêm `ktest-user 5 5`; `ktest.sh` build ảnh user riêng (`--features ktest,user`),
+  kiểm budget + chuỗi `ktest`, boot `-machine virt,aia=none,aclint=on -cpu rv64 -m 128M -smp N
+  -icount shift=6`, đòi `Platform HART Count` của OpenSBI khớp N, TAP 100 %, **chỉ** dòng PANIC
+  `u-mode fault` được phép. Mỗi vòng `NBOOT` boot **3 ảnh test** × matrix `1/2/4`; summary
+  `N_BOOT*3`.
+- Ảnh chính vẫn **37 TAP**, ảnh guard **3 TAP** — không đổi số/không renumber (feature `user` chỉ
+  bật ở ảnh user).
+
+### 16.7 Ngân sách và tệp
+
+- Không thêm section ELF vào ảnh sản phẩm/ảnh chính/guard: module U-mode nằm sau feature `user`;
+  ảnh user thêm `init.elf` (nhúng `.rodata`) + bảng `USER_TASK`/`USER_KERNEL_CTX` nhỏ trong
+  `.data/.bss`; trần **262.144 B** `[TK]` vẫn áp cho **cả bốn** ảnh (D2-72 Q5).
+  `budget.sh`/`ktest.sh` in số thật trong log `kt53-budget.log`/`kt53-ktest.log` — **không** chép
+  số đo vào tài liệu (QD §9 Q12).
+- Tệp: `v2/kernel/vifast-plat-common/src/user.rs` + `tests/user.rs`;
+  `v2/kernel/vifast-plat-riscv64/src/user.rs`; `v2/kernel/vifast-kbin-riscv64/{build.rs,init/*,
+  src/ktest_user.rs,Cargo.toml}`; `v2/kernel/vifast-plat-riscv64/lib.rs` (nhánh trap U-mode),
+  `v2/kernel/vifast-plat-common/{lib.rs,trap.rs}` (`report_u_fault`);
+  `v2/test/boot/{ktest.sh,expected.txt}`.
+
+### 16.8 Giới hạn phép đo (không giấu)
+
+1. **Một tác vụ user, một hart (BSP)**; ảnh user không `smp::init` nên hart phụ không chạy; chưa
+   có scheduler/TCB/IPC — K3b.
+2. **Không có TCB/cap/fault_ep:** `Exit` chỉ chuyển `UserTask` sang `Exited` + lưu mã; không gửi
+   `FaultKind::Exit{code}` tới `fault_ep`, không `BlockedOnSend`, không `wait`/`kill` — K3.5
+   (QD §1 Q-A nói rõ các phần đó là procsrv).
+3. **Fault U-mode là fatal** (không pager/COW/fault endpoint); `FaultKind` đầy đủ + `spec/abi.toml`
+   là KT-56.
+4. **Store U-mode (`scause=15`) không có TAP riêng**: dùng chung PTE `U=0` với load (13, TAP 5);
+   ảnh guard đã đo store fault 15 từ S-mode. Nếu cần đo U-mode 15 phải thêm boot/ảnh riêng.
+5. **`DebugGetInfo` (15) chưa cài** — trả `NotSupported`; chưa kiểm `UXL`/FPU/CSR user khác.
+6. **Loader test-only, lỗi giữa chừng không dọn object** (VSpace/Frame đã cấp có thể còn); đo
+   `check_objmem` chỉ ở đường thành công. Đường lỗi in `not ok` + halt; K3.5 cần loader có
+   teardown/commit hai pha.
+7. **VSpace user dùng ASID nhãn nội bộ (1..255)** của object layer, chưa hợp nhất lease
+   `tlb::AsidAllocator` (L4 KT-52) — một nguồn ASID thật là K3b/K4.
+8. **Root VSpace chép nửa thấp root kernel (test-only)** và chỉ map root index 1; **không** chép
+   nửa cao (high/physmap) nên handler U-mode **không** được dùng physmap — `DebugPutStr` dùng bảng
+   dải VA tĩnh (tối đa `MAX_LOAD_SEGMENTS+1` dải) thay cho `walk` PTE; chưa theo dõi entry kernel
+   chia sẻ (L6 KT-52); `sstatus.SUM` chỉ bật trong cửa sổ đọc `DebugPutStr` (tắt ngay sau mỗi khối,
+   bằng chứng `sum_off=1`).
+9. **Guard stack U-mode**: TAP 1 xác nhận **leaf guard invalid** bằng `walk` (`guard_none=1`),
+   nhưng **không** có test tràn stack thật; tràn stack sẽ fault U-mode ⇒ fatal (policy đã có).
+10. **Không kiểm chữ ký `init`/file system**: ELF nhúng từ build; nạp từ FS/pager là K3.5/K4.
+11. **`SUM` mới đo một chiều**: bằng chứng `enter/trap sstatus` + `sum_off=1` chứng minh SUM tắt
+    ở hai đầu (vào U và sau `DebugPutStr`); chưa đo SUM trong lúc đọc (chỉ suy từ thứ tự
+    `set_sum(true) … set_sum(false)` + trap sstatus).
+12. **`sscratch` chứng minh gián tiếp**: trap từ U-mode lưu `x2` = sp user và handler chạy trên
+    trap stack, nhưng chưa có TAP đọc `sscratch` trực tiếp trong U-mode (U-mode không đọc được
+    CSR supervisor; đo trực tiếp cần trap tiêm/host model).
+13. **Cách ly mới đo 1 địa chỉ kernel**: TAP 5 đọc `0x80200000` (leaf identity). Chưa đo U-mode
+    chạm root index 0 (UART/PLIC) hay arena/page-table RAM; có thể thêm nếu cần (rẻ: thêm lượt
+    fault/boot riêng).
+14. **U-phase `SIE=0`** (cố ý): `init` lỗi lặp vô hạn sẽ treo hart tới timeout 20 s của runner
+    (`T-INFRA`/treo, không panic); chưa có watchdog/preemption — K3.5.
+15. **Sau `Exit`, `satp` vẫn root user + `SIE=0`**: ảnh test kết thúc bằng fault nên chấp nhận;
+    K3.5 cần chuyển về root kernel/TCB idle trước khi chạy tiếp (fragile nếu tái dùng đường này).
+16. **`USER_RANGES` thay `walk`**: sau khi đổi `satp`, handler U-mode không có physmap nên kiểm
+    con trỏ bằng bảng dải tĩnh (`MAX_LOAD_SEGMENTS+1`); nếu loader map thêm trang ngoài segment/
+    stack (tương lai) phải cập nhật bảng. `DebugGetInfo` (15) chưa cài.
+17. **Store `scause=15` từ U-mode chưa có TAP**: TAP 5 là load `scause=13`; store cùng PTE `U=0`
+    nhưng chưa đo riêng từ U-mode (ảnh guard đo store 15 từ S-mode).
+
+### 16.9 Không thuộc KT-53
+
+CNode/TCB/Untyped child/MDB/IPC/Reply/Notification/WaitAddr/scheduler (K3b KT-58..61), procsrv +
+shell Rust + `wait`/`kill` + `FaultKind::Exit` tới `fault_ep` (K3.5), harness TAP matrix/`expected.txt`
+đầy đủ (KT-54), conformance 5 `.scn` × sim/QEMU (KT-55), `FaultKind` đầy đủ + W^X **fault** +
+`spec/abi.toml` (KT-56), soak 1.000/K3-DOD (KT-57), pager/COW/shared memory, U-mode đa hart, nạp
+ELF từ FS.

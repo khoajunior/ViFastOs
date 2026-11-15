@@ -756,6 +756,26 @@ pub fn report_guard_fault<P: Platform + ?Sized>(
     platform.halt(1)
 }
 
+/// In **fault U-mode** (bắt đầu bằng `PANIC: u-mode fault`) rồi `DebugHalt(1)` — KT-53.
+///
+/// Fault từ U-mode (page/access/illegal/…) là **fatal**: không pager, không resume, không treo.
+/// Dòng đầu đủ trường để TAP/runner đối chiếu cách ly: `scause` (13 = load page fault),
+/// `stval` (địa chỉ kernel U-mode chạm), `sepc`, `sstatus`, `from_u=1`. Sau đó dump thanh ghi
+/// chính rồi `DebugHalt(1)` (SBI SRST sạch).
+pub fn report_u_fault<P: Platform + ?Sized>(platform: &P, exc: &Exception, tf: &TrapFrame) -> ! {
+    platform.put_str("PANIC: ");
+    {
+        let mut w = PlatformWriter(platform);
+        let _ = writeln!(
+            w,
+            "u-mode fault scause=0x{:x} stval=0x{:x} sepc=0x{:x} sstatus=0x{:x} from_u=1",
+            exc.scause, exc.stval, exc.sepc, tf.sstatus
+        );
+        dump_regs(&mut w, tf);
+    }
+    platform.halt(1)
+}
+
 /// In dump ngắt bất ngờ (bắt đầu bằng `PANIC`) rồi `DebugHalt(1)`.
 ///
 /// KT-47 xử lý ngắt timer thật ([`Event::Timer`]); KT-48 xử lý ngắt external mã 9 qua PLIC

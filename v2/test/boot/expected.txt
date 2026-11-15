@@ -11,3 +11,7 @@
 # Thêm ảnh test mới ⇒ thêm dòng ở đây; runner **fail** nếu số `ok`/kế hoạch không khớp.
 ktest 37 37
 ktest-guard 3 3
+
+# KT-53: ảnh test **user** (bin riêng) — U-mode + 3 syscall + nạp `init` ELF; 5 TAP, boot kết
+# thúc bằng `PANIC: u-mode fault …` có chủ đích (U-mode đọc địa chỉ kernel ⇒ page fault 13).
+ktest-user 5 5
