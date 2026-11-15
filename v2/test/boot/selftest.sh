@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-54 — tự kiểm **runner** `ktest.sh` bằng mutation của **harness** (không đụng kernel).
+#
+# Vì sao cần: một runner TAP chỉ đáng tin khi nó **đỏ** đúng lúc, **đúng lý do**, và **không xanh
+# khi không chạy gì**. Tệp này dựng 17 ca quanh một log thật:
+#   • 1 ca XANH (log thật qua, không báo động giả);
+#   • 15 ca ĐỎ — mỗi ca phá **đúng một** bất biến, và phải đỏ **kèm đúng token lý do** (không chấp
+#     nhận "exit ≠ 0 vô tội vạ"):
+#       (a) `expected.txt`: bớt 1 TAP (37→36) / mất dòng ảnh `ktest-user`;
+#       (b) log: một dòng `ok` → `not ok` / xoá 1 dòng `ok` / nhân đôi 1 dòng `ok`;
+#       (c) log: xoá 1 dòng `# evidence` / xoá dòng kế hoạch `1..N`;
+#       (d) log: thêm PANIC thứ hai / PANIC đúng mẫu **thêm đuôi lạ** / PANIC **lạ**;
+#       (e) **0 boot** (`ktest.sh 1 " "`) phải `die`, không được "0/0 boot sạch + PASS";
+#       (f) `Platform HART Count` sai (1→10/2→12) phải đỏ (mẫu phải neo **cả dòng**);
+#       (g) evidence bị thêm đuôi lạ (`# mmu on: … EXTRA`) phải đỏ (mẫu neo cả dòng);
+#       (h) lặp dòng per-hart của hart 0 thay hart 1 (`# timer hart=`/`# hart … alive`) phải đỏ
+#           (kiểm **tập hart**, không chỉ đếm dòng);
+#   • 1 ca kiểm `expected.txt` **nguyên vẹn** sau mutation (sha256 trước = sau).
+#
+# Mọi mutation chạy trên **bản sao** log trong thư mục tạm; riêng ca (a) phá **chính**
+# `expected.txt` rồi trả lại ngay (`trap` + sha256 + `cmp` chứng minh). Không sửa kernel/ảnh.
+#
+# Dùng: bash v2/test/boot/selftest.sh [log-ảnh-chính] [smp]   (mặc định: tự boot 1 vòng smp=1)
+#   vd: bash v2/test/boot/selftest.sh /tmp/k3-ktest/ktest-smp2-1.log 2
+# Exit 0 = mọi ca đúng như kỳ vọng; 1 = có ca sai (in `not ok`).
+set -u
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KTEST="$HERE/ktest.sh"
+EXPECTED="$HERE/expected.txt"
+
+SMP="${2:-1}"
+WORK=""
+RESTORE_NEEDED=0
+fail=0
+total=0
+
+sha_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        sha256sum "$1" | cut -d' ' -f1
+    fi
+}
+
+cleanup() {
+    # Ca (a) phá chính `expected.txt`: trả lại **luôn**, kể cả khi bị Ctrl-C / lỗi giữa chừng.
+    if [ "${RESTORE_NEEDED:-0}" -eq 1 ] && [ -f "$WORK/expected.orig" ]; then
+        cp "$WORK/expected.orig" "$EXPECTED"
+    fi
+    [ -n "${WORK:-}" ] && [ -d "$WORK" ] && rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+
+die() { echo "selftest.sh: $*" >&2; exit 1; }
+
+[ -f "$KTEST" ] || die "không thấy $KTEST"
+[ -f "$EXPECTED" ] || die "không thấy $EXPECTED"
+
+# Ca (a) phá **chính** `expected.txt` trong ~1 s ⇒ cấm chạy song song với một vòng boot đang đọc
+# tệp đó (một boot đọc nhầm "ktest 36 36" sẽ đỏ oan, tệ hơn: `check_manifests` làm cả vòng dừng).
+if command -v pgrep >/dev/null 2>&1 &&
+    pgrep -f 'test/boot/ktest\.sh' >/dev/null 2>&1; then
+    die "đang có 'ktest.sh' chạy — chạy selftest một mình (mutation expected.txt ~1 s)"
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/kt54-selftest.XXXXXX")" || die "không tạo được thư mục tạm"
+cp "$EXPECTED" "$WORK/expected.orig" || die "không sao được expected.txt"
+SHA_BEFORE="$(sha_of "$EXPECTED")"
+
+LOG="${1:-}"
+if [ -z "$LOG" ]; then
+    echo "# chưa có log — boot 1 vòng (ktest.sh 1 $SMP) để lấy log thật"
+    if ! bash "$KTEST" 1 "$SMP"; then
+        echo "not ok 1 - không lấy được log thật (ktest.sh 1 $SMP đỏ)"
+        exit 1
+    fi
+    LOG="$(bash "$KTEST" --log-path ktest "$SMP" 1)" || die "không lấy được đường dẫn log"
+fi
+[ -f "$LOG" ] || die "không thấy log $LOG"
+echo "# log kiểm: $LOG (smp=$SMP); expected.txt sha256=$(printf '%s' "$SHA_BEFORE" | cut -c1-16)…"
+
+# --- helpers -------------------------------------------------------------
+
+out_of() { # <biến nhận> <lệnh...>  — chạy, lưu stdout+stderr, trả mã thoát
+    local __var="$1"
+    shift
+    local __outs __rc
+    __outs="$("$@" 2>&1)"
+    __rc=$?
+    eval "$__var=\$__outs"
+    return $__rc
+}
+
+# case_green <mô tả> <lệnh...>: exit 0 và **không** có dòng `not ok`.
+case_green() {
+    local desc="$1" out="" rc=0
+    shift
+    total=$((total + 1))
+    out_of out "$@"
+    rc=$?
+    if [ "$rc" -eq 0 ] && ! printf '%s\n' "$out" | grep -q '^not ok'; then
+        echo "ok $total - $desc"
+    else
+        echo "not ok $total - $desc (exit $rc, muốn 0 + không 'not ok')"
+        printf '%s\n' "$out" | sed 's/^/#   /' | head -20
+        fail=$((fail + 1))
+    fi
+}
+
+# case_red <token-lý-do> <mô tả> <lệnh...>: exit ≠ 0, có `not ok`, **và** dòng `not ok` phải chứa
+# đúng token lý do (chứng minh đỏ vì đúng cái vừa phá, không phải đỏ ngẫu nhiên).
+case_red() {
+    local token="$1" desc="$2" out="" rc=0 first=""
+    shift 2
+    total=$((total + 1))
+    out_of out "$@"
+    rc=$?
+    first="$(printf '%s\n' "$out" | grep '^not ok' | head -1)"
+    if [ "$rc" -ne 0 ] && [ -n "$first" ] && printf '%s' "$first" | grep -qF -- "$token"; then
+        echo "ok $total - $desc"
+        echo "#   runner đỏ vì [$token]: $(printf '%s' "$first" | cut -c1-150)"
+    else
+        echo "not ok $total - $desc (exit $rc; cần 'not ok' chứa [$token])"
+        printf '%s\n' "$out" | sed 's/^/#   /' | head -15
+        fail=$((fail + 1))
+    fi
+}
+
+# case_die <token> <mô tả> <lệnh...>: lỗi **cấu hình** — exit ≠ 0 + thông điệp `ktest.sh:` chứa token
+# (đường `die`, không có dòng `not ok`).
+case_die() {
+    local token="$1" desc="$2" out="" rc=0
+    shift 2
+    total=$((total + 1))
+    out_of out "$@"
+    rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qF -- "$token"; then
+        echo "ok $total - $desc"
+        echo "#   runner die vì [$token]: $(printf '%s\n' "$out" | head -1 | cut -c1-150)"
+    else
+        echo "not ok $total - $desc (exit $rc; cần die với [$token])"
+        printf '%s\n' "$out" | sed 's/^/#   /' | head -10
+        fail=$((fail + 1))
+    fi
+}
+
+# `mut_diff <tệp> <mô tả>`: mutation phải **thật sự** làm tệp khác bản gốc — nếu không, ca test
+# "đỏ" sẽ vô nghĩa (log không đổi mà runner vẫn xanh thì ca đó không chứng minh gì).
+mut_diff() {
+    cmp -s "$1" "$2" && die "mutation KHÔNG áp dụng: $3 — dừng để sửa test (không chạy tiếp)"
+    return 0
+}
+
+# `ev_idx <ảnh> <smp> <chuỗi con của mẫu>`: **ordinal** của mục evidence (tra từ chính runner, không
+# hardcode — đổi danh sách thì test tự theo).
+ev_idx() {
+    bash "$KTEST" --print-evidence "$1" "$2" | awk -F'\t' -v pat="$3" 'index($2, pat) { print $1; exit }'
+}
+
+# --- ca 1: XANH — log thật phải qua -------------------------------------
+case_green "log thật $LOG qua runner (không báo động giả)" \
+    bash "$KTEST" --check-log ktest "$LOG" "$SMP"
+
+# --- ca (a): expected.txt bớt 1 TAP của ảnh chính (37 → 36) --------------
+# Phá **chính** tệp nguồn sự thật rồi trả lại ngay: chứng minh runner đọc số từ tệp.
+sed 's/^ktest 37 37$/ktest 36 36/' "$WORK/expected.orig" >"$EXPECTED" || die "không sửa được expected.txt"
+RESTORE_NEEDED=1
+case_red "kế hoạch 36 nhưng runner kiểm 37 TAP" \
+    "expected.txt bớt 1 TAP (ktest 37 37 → 36 36)" \
+    bash "$KTEST" --check-log ktest "$LOG" "$SMP"
+cp "$WORK/expected.orig" "$EXPECTED" || die "KHÔNG trả lại được expected.txt"
+RESTORE_NEEDED=0
+
+# --- ca (a'): expected.txt mất hẳn một ảnh ------------------------------
+grep -v '^ktest-user ' "$WORK/expected.orig" >"$WORK/expected-no-user.txt"
+mut_diff "$WORK/expected-no-user.txt" "$WORK/expected.orig" "expected.txt mất dòng ktest-user"
+case_red "thiếu dòng cho ảnh [ktest-user]" \
+    "expected.txt mất dòng ảnh 'ktest-user'" \
+    env KT54_EXPECTED="$WORK/expected-no-user.txt" bash "$KTEST" --check-log ktest "$LOG" "$SMP"
+
+# --- ca (b): một dòng `ok` thành `not ok` -------------------------------
+awk '/^ok / && !d { sub(/^ok /, "not ok "); d = 1 } { print }' "$LOG" >"$WORK/log-notok.log"
+mut_diff "$WORK/log-notok.log" "$LOG" "log: dòng ok → not ok"
+case_red "not-ok=1" \
+    "log: dòng 'ok' đầu đổi thành 'not ok'" \
+    bash "$KTEST" --check-log ktest "$WORK/log-notok.log" "$SMP"
+
+# --- ca (b'): xoá một dòng `ok` (thiếu TAP) -----------------------------
+awk '/^ok / && !d { d = 1; next } { print }' "$LOG" >"$WORK/log-missing.log"
+mut_diff "$WORK/log-missing.log" "$LOG" "log: xoá 1 dòng ok"
+case_red "tap-day-1.." \
+    "log: xoá 1 dòng 'ok' (thiếu TAP)" \
+    bash "$KTEST" --check-log ktest "$WORK/log-missing.log" "$SMP"
+
+# --- ca (b''): nhân đôi một dòng `ok` (trùng TAP) ----------------------
+awk '/^ok / && !d { print; print; d = 1; next } { print }' "$LOG" >"$WORK/log-dup.log"
+mut_diff "$WORK/log-dup.log" "$LOG" "log: nhân đôi 1 dòng ok"
+case_red "ok-count=38/" \
+    "log: nhân đôi 1 dòng 'ok' (trùng số TAP)" \
+    bash "$KTEST" --check-log ktest "$WORK/log-dup.log" "$SMP"
+
+# --- ca (c): thiếu một dòng `# evidence` --------------------------------
+grep -v '^# obj init:' "$LOG" >"$WORK/log-noevidence.log"
+mut_diff "$WORK/log-noevidence.log" "$LOG" "log: xoá evidence # obj init:"
+case_red "ev1" \
+    "log: xoá dòng evidence '# obj init:'" \
+    bash "$KTEST" --check-log ktest "$WORK/log-noevidence.log" "$SMP"
+
+# --- ca (c'): thiếu dòng kế hoạch TAP ----------------------------------
+grep -v '^1\.\.' "$LOG" >"$WORK/log-noplan.log"
+mut_diff "$WORK/log-noplan.log" "$LOG" "log: xoá dòng kế hoạch 1..N"
+case_red "plan-1..37=0" \
+    "log: xoá dòng kế hoạch '1..N'" \
+    bash "$KTEST" --check-log ktest "$WORK/log-noplan.log" "$SMP"
+
+# --- ca (d): PANIC thứ hai (dù đúng mẫu cho phép) ----------------------
+{
+    cat "$LOG"
+    echo "PANIC: nested trap (KT-45: trap trong handler = fatal, khong resume)"
+} >"$WORK/log-2panic.log"
+mut_diff "$WORK/log-2panic.log" "$LOG" "log: thêm PANIC thứ 2"
+case_red "panic-tong=2/1" \
+    "log: thêm PANIC thứ 2 (đúng mẫu cho phép vẫn phải đỏ: đúng 1)" \
+    bash "$KTEST" --check-log ktest "$WORK/log-2panic.log" "$SMP"
+
+# --- ca (d'): PANIC đúng mẫu nhưng có ĐUÔI LẠ (mẫu phải neo cuối dòng) ---
+awk '/^PANIC: nested trap/ { print $0 " EXTRA"; next } { print }' "$LOG" >"$WORK/log-panic-tail.log"
+mut_diff "$WORK/log-panic-tail.log" "$LOG" "log: PANIC + đuôi lạ"
+case_red "panic-khac=1" \
+    "log: PANIC đúng mẫu nhưng thêm đuôi lạ (mẫu phải khớp cả dòng)" \
+    bash "$KTEST" --check-log ktest "$WORK/log-panic-tail.log" "$SMP"
+
+# --- ca (d''): PANIC lạ (không khớp mẫu nào) --------------------------
+awk '/^PANIC: nested trap/ { print "PANIC: boom"; next } { print }' "$LOG" >"$WORK/log-panic-bad.log"
+mut_diff "$WORK/log-panic-bad.log" "$LOG" "log: PANIC lạ"
+case_red "panic-khac=1" \
+    "log: PANIC lạ thay cho PANIC có chủ đích" \
+    bash "$KTEST" --check-log ktest "$WORK/log-panic-bad.log" "$SMP"
+
+# --- ca (e): 0 boot KHÔNG được là PASS (reviewer KT-54 mục A) ----------
+case_die "SMP_LIST rỗng" \
+    "0 boot (ktest.sh 1 \" \") phải die, không '0/0 boot sạch + PASS'" \
+    bash "$KTEST" 1 " "
+
+# --- ca (f): Platform HART Count sai (reviewer KT-54 mục B) ------------
+EV_HART="$(ev_idx ktest "$SMP" 'Platform HART Count')"
+[ -n "$EV_HART" ] || die "không tra được ordinal evidence 'Platform HART Count'"
+awk -v s="$SMP" '!d && /^Platform HART Count/ { sub(": *" s, ": 1" s); d = 1 } { print }' \
+    "$LOG" >"$WORK/log-hartcount.log"
+mut_diff "$WORK/log-hartcount.log" "$LOG" "log: Platform HART Count sai"
+case_red "ev$EV_HART" \
+    "log: Platform HART Count $SMP → 1$SMP phải đỏ (mẫu neo cả dòng)" \
+    bash "$KTEST" --check-log ktest "$WORK/log-hartcount.log" "$SMP"
+
+# --- ca (g): evidence thêm đuôi lạ (reviewer KT-54 mục C) -------------
+EV_MMUON="$(ev_idx ktest "$SMP" '# mmu on:')"
+[ -n "$EV_MMUON" ] || die "không tra được ordinal evidence '# mmu on:'"
+sed 's/^# mmu on: \(.*\)$/# mmu on: \1 EXTRA/' "$LOG" >"$WORK/log-mmuon-tail.log"
+mut_diff "$WORK/log-mmuon-tail.log" "$LOG" "log: # mmu on: + đuôi lạ"
+case_red "ev$EV_MMUON" \
+    "log: '# mmu on: …' thêm đuôi lạ phải đỏ (mẫu neo cả dòng)" \
+    bash "$KTEST" --check-log ktest "$WORK/log-mmuon-tail.log" "$SMP"
+
+# --- ca (h): lặp dòng per-hart (reviewer KT-54 mục D) -----------------
+if [ "$SMP" -ge 2 ]; then
+    awk '/^# timer hart=1 /{ print "# timer hart=0 ticks=100 first=110005234 late=0 missed=0 non_monotonic=0 ok=1"; next } { print }' \
+        "$LOG" >"$WORK/log-hartdup-timer.log"
+mut_diff "$WORK/log-hartdup-timer.log" "$LOG" "log: lặp # timer hart=0"
+    case_red "timer-hart-lines" \
+        "log: lặp '# timer hart=0' thay cho hart 1 (kiểm tập hart, không chỉ đếm)" \
+        bash "$KTEST" --check-log ktest "$WORK/log-hartdup-timer.log" "$SMP"
+    awk '/^# hart 1 alive /{ print "# hart 0 alive ticket=0 tp=0 stack=0x80401000-0x80411000 trap=0x80411000-0x80415000 guard=0x80400000-0x80401000"; next } { print }' \
+        "$LOG" >"$WORK/log-hartdup-alive.log"
+mut_diff "$WORK/log-hartdup-alive.log" "$LOG" "log: lặp # hart 0 alive"
+    case_red "hart1-alive" \
+        "log: lặp '# hart 0 alive' thay cho hart 1" \
+        bash "$KTEST" --check-log ktest "$WORK/log-hartdup-alive.log" "$SMP"
+else
+    total=$((total + 2))
+    echo "ok $total - (bỏ qua 2 ca lặp per-hart: smp=$SMP < 2, log không có hart 1)"
+fi
+
+# --- ca cuối: expected.txt trả lại **nguyên vẹn** (sha256 + cmp) ------
+total=$((total + 1))
+SHA_AFTER="$(sha_of "$EXPECTED")"
+if [ "$SHA_BEFORE" = "$SHA_AFTER" ] && cmp -s "$WORK/expected.orig" "$EXPECTED"; then
+    echo "ok $total - expected.txt nguyên vẹn sau mutation: sha256 $(printf '%s' "$SHA_AFTER" | cut -c1-16)… (trước = sau) + cmp"
+else
+    echo "not ok $total - expected.txt ĐÃ ĐỔI sau mutation (sha256 trước $SHA_BEFORE / sau $SHA_AFTER)"
+    fail=$((fail + 1))
+fi
+
+echo "# selftest: $((total - fail))/$total ca đúng như kỳ vọng"
+[ "$fail" -eq 0 ] || exit 1
+echo "# selftest.sh: PASS"

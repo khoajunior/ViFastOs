@@ -7,8 +7,16 @@
 # cỡ, W^X 2 ca, map/unmap 4 KiB phần cứng, 0 rò) ⇒ trap lồng dời sang **37** (tổng 37 TAP); ảnh
 # test guard 3 TAP (guard page fault thật của KT-46) không đổi.
 #
-# Cú pháp: <nhãn> <kế hoạch TAP> <số dòng `ok` kỳ vọng>
-# Thêm ảnh test mới ⇒ thêm dòng ở đây; runner **fail** nếu số `ok`/kế hoạch không khớp.
+# Cú pháp (KT-54 — runner `ktest.sh` ĐỌC tệp này, không hardcode số):
+#     <nhãn> <kế hoạch TAP> <số dòng `ok` kỳ vọng>
+# Luật runner kiểm khi nạp tệp (sai ⇒ ĐỎ, không bỏ qua):
+#   - mỗi dòng dữ liệu đúng 3 trường, trường 2/3 là số nguyên >= 1, và **kế hoạch = số `ok`**
+#     (runner không có khái niệm "TAP đỏ được phép": mọi `not ok` là FAIL);
+#   - **không** nhãn lặp, **không** nhãn lạ (gõ nhầm tên ảnh ⇒ đỏ), và **đủ** ba nhãn
+#     `ktest ktest-guard ktest-user` mà runner biết;
+#   - số TAP ghi ở đây phải **bằng** số TAP runner có tên trong manifest (`ktest.sh`
+#     `manifest_for`) ⇒ thêm/bớt TAP phải sửa cả kernel, manifest và dòng này trong cùng commit.
+# Cách đọc + ý nghĩa từng dòng evidence: `v2/docs/k3-riscv64.md` §17.
 ktest 37 37
 ktest-guard 3 3
 
