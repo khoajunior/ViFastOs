@@ -4,10 +4,12 @@
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng. Mỗi boot chỉ
 # kết thúc được một lần bằng PANIC có chủ đích ⇒ **ba** ảnh test:
-#   - `ktest`       : 43 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
+#   - `ktest`       : 53 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
 #                     + KT-47 (timer SBI) + KT-49 (SMP 15..19) + KT-50 (IPI 20..24) + KT-51 (TLB/ASID
 #                     25..29) + KT-52 (object layer 30..36) + KT-55 (conformance 5 `.scn` 37:
-#                     `# trace:` chuẩn hoá) + KT-56 FaultKind/W^X (38..42) + trap lồng fatal (43).
+#                     `# trace:` chuẩn hoá) + KT-56 FaultKind/W^X (38..42) + KT-61 core `no_std`
+#                     trên nhân thật (43..52: link/untyped/tcb/configure/sched/IPC/notification/
+#                     waitaddr/D2-83/invariants) + trap lồng fatal (53).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
 #   - `ktest-user`  : 7 TAP — U-mode: nạp `init` ELF (parse + map W^X), `sret`, 3 syscall (DebugPutStr
@@ -238,6 +240,16 @@ faultkind vm store
 faultkind vm insn
 wx violation qua ABI
 device exec
+core link
+core untyped boot
+core tcb retype
+core configure resume suspend
+core sched 2 tcb
+core ipc round
+core notification signal
+core waitaddr
+core d2-83 boundary
+core invariants
 trap nested panic
 EOF
 }
@@ -382,6 +394,17 @@ __EVID24__
 ^# faultprobe: va=0x200040 access=Read scause=0xd stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
 ^# faultprobe: va=0x200040 access=Write scause=0xf stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
 ^# faultprobe: va=0x1000 access=Write scause=0xf stval=0x1000 sepc=0x[0-9a-f]+ pte=0x[0-9a-f]+ reason=Permission mapped=1 scratch=1 src=trap$
+^# core: link addr=0x[0-9a-f]+ bytes=180168 pin=196608 image_cap=262144 parts=27 sum=180168 scalars=[0-9]+ padding=[0-9]+ sum_ok=1 in_image=1$
+^# core: untyped id=[0-9]+ base=0x[0-9a-f]+ bytes=65536 used=0 free=65536 allocated=0 gap=0 objects=1 caps=0 check_bytes=1 check_all_bytes=1$
+^# core: tcb retype tcb=[0-9]+ slot=1 objects=11 caps=11 used=[0-9]+ state=Inactive check_caps=1 check_bytes=1$
+^# core: configure cspace=1 sc=1 priority=3 mcp=10 budget=4 period=8 suspended_ok=1 resume=1 state=Ready check_sched=1 check_sc_refs=1 check_budget=1$
+^# core: sched harts=1 pick0=[0-9]+ pick1=[0-9]+ dispatch0=[0-9]+ dispatch1=[0-9]+ t0=Ready t1=Running suspended=0 check_sched=1$
+^# core: ipc call=1 recv=1 reply=1 mr=0xfeed blocked_send=1 blocked_reply=1 t0=Ready ep_len=0 reply_caller=0 sent=[0-9]+ delivered=[0-9]+ check_ipc=1 check_reply_links=1$
+^# core: ntfn signal=1 wake=1 word=0x0 badge=0x0 waiter=0 consumed=0x42 poll=0x8 state=Ready check_notifications=1$
+^# core: waitaddr frame=0x[0-9a-f]+ label=[0-9]+ offset=64 value=0x1234 woke=1 waiters=0 buckets=0 state=Ready check_waitaddr=1$
+^# core: d2-83 frame=NotSupported page_table=NotSupported vspace=NotSupported atomic=1 untyped_used=[0-9]+ obj_frame=[0-9]+ obj_vspace=[0-9]+ obj_health=1 owner=obj$
+^# core: invariants caps=1 objects=[0-9]+ used=0 free=65536 deleted=[0-9]+ check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 check_sc_refs=1 check_budget=1 check_mailboxes=1 check_ipc=1 check_reply_links=1 check_notifications=1 check_waitaddr=1 check_fault=1 leak=0$
+^# core: phase fails=0 static=180168 pin=196608 image_cap=262144$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF

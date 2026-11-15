@@ -568,8 +568,8 @@ pub fn smp_phase() -> usize {
         if ctx != expected_ctx || mctx != expected_mctx || !PLIC_OK.contains(hart) {
             plic_ok = false;
         }
-        for other in hart + 1..MAX_HARTS {
-            if online & (1u64 << other) != 0 && PLIC_CTX[other].load(Ordering::SeqCst) == ctx {
+        for (other, slot) in PLIC_CTX.iter().enumerate().skip(hart + 1) {
+            if online & (1u64 << other) != 0 && slot.load(Ordering::SeqCst) == ctx {
                 contexts_distinct = false;
             }
         }

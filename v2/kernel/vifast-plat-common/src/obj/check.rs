@@ -236,7 +236,7 @@ impl<M: PhysMem> Machine<M> {
                     && self
                         .caps
                         .get(obj.cap as usize)
-                        .map_or(false, |c| c.live && c.obj == i as u16);
+                        .is_some_and(|c| c.live && c.obj == i as u16);
                 if !has_cap {
                     stats.orphans += 1;
                 }
@@ -255,8 +255,7 @@ impl<M: PhysMem> Machine<M> {
             if obj.kind != cap.kind || obj.id == 0 || obj.id != cap.id {
                 return Err(ObjError::Corrupt);
             }
-            if cap.parent != CAP_NONE
-                && !self.caps.get(cap.parent as usize).map_or(false, |p| p.live)
+            if cap.parent != CAP_NONE && !self.caps.get(cap.parent as usize).is_some_and(|p| p.live)
             {
                 return Err(ObjError::InvalidCapability);
             }
@@ -277,7 +276,7 @@ impl<M: PhysMem> Machine<M> {
             && self
                 .caps
                 .get(obj.cap as usize)
-                .map_or(false, |c| c.live && c.obj == idx)
+                .is_some_and(|c| c.live && c.obj == idx)
         {
             return true;
         }

@@ -1103,7 +1103,7 @@ impl<M: PhysMem> Machine<M> {
         if !rec.live || rec.obj == OBJ_NONE {
             return Err(ObjError::InvalidCapability);
         }
-        if !self.objects.get(rec.obj as usize).map_or(false, |o| o.live) {
+        if !self.objects.get(rec.obj as usize).is_some_and(|o| o.live) {
             return Err(ObjError::InvalidCapability);
         }
         Ok(rec)

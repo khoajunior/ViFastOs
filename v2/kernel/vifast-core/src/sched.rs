@@ -74,6 +74,20 @@ impl HartSched {
         }
     }
 
+    /// Khởi tạo **tại chỗ** hàng đợi rỗng (KT-61: static `.bss` đã zero ⇒ đặt `idle = true`,
+    /// phần còn lại đều là 0 như [`HartSched::new`]).
+    pub(crate) fn reset(&mut self) {
+        self.head = [0; MAX_PRIORITY];
+        self.tail = [0; MAX_PRIORITY];
+        self.len_at = [0; MAX_PRIORITY];
+        self.next = [0; MAX_OBJECTS + 1];
+        self.bitmap = [0; BITMAP_WORDS];
+        self.len = 0;
+        self.current = None;
+        self.idle = true;
+        self.cur_prio = 0;
+    }
+
     /// Số TCB trong ready queue (không tính `current`).
     pub fn len(&self) -> usize {
         self.len

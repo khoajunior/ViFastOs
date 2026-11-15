@@ -1,0 +1,13 @@
+# KT-61 — budget 4 ảnh (D2-72 Q5 / D2-85a): trần 262.144 B; .data+.sdata+.bss+.sbss
+# image=product path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 file=185464 data+bss=191416 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=48156 .rodata=13824 .data=7760 .bss=183656 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7760 .bss=183656 
+# image=ktest path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=484600 data+bss=197568 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=144594 .rodata=47752 .data=7912 .bss=189656 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7912 .bss=189656 
+# image=ktest-guard path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=53808 data+bss=2680 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=11300 .rodata=2896 .bss=2680 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .bss=2680 
+# image=ktest-user path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=151912 data+bss=11752 budget=262144 stack=65536 guard=4096 trap_stack=16384
+# sections-seen: .text=34200 .rodata=21624 .data=7704 .bss=4048 .stack_guard=4096 .stack=65536 .trap_stack=16384 .hart_stacks=602112 .riscv.attributes=116 
+# data+bss-sections: .data=7704 .bss=4048 

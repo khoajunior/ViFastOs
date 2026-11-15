@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 # K3b — port core `no_std`: tầng 1 (KT-58) + TCB/scheduler (KT-59) + IPC/Reply/Notification/WaitAddr/fault (KT-60)
 
-- **Trạng thái:** KT-58 **DONE**; **KT-59 DONE**; **KT-60 DONE** (chờ review độc lập + Agent 0
-  lật QUEUE). Task kế: **KT-61** (nối core vào kernel/syscall + cổng K3b).
+- **Trạng thái:** KT-58 **DONE**; **KT-59 DONE**; **KT-60 DONE**; **KT-61 DONE (đề xuất — chờ
+  review độc lập + Agent 0 lật QUEUE)**: core `no_std` **chạy trên nhân thật** (TAP 43..52 trên
+  QEMU, soak 0/1000 ảnh sản phẩm, matrix smp 1/2/4, conformance 5/5). **K3b xong phần core chạy
+  được**; procsrv/shell là **K3.5** — xem §9 + `agent/reports/K3B-DOD.md`.
 - **Nguồn sự thật:** sim `v2/sim/vifast-sim/src/kobj.rs` là **oracle**; task này **không**
   thiết kế lại ngữ nghĩa, không sửa `spec/`, không đụng `viscript/`.
 - **Crate:** `v2/kernel/vifast-core` — `#![no_std]`, `#![forbid(unsafe_code)]`, **không**
@@ -21,7 +23,7 @@
 | TCB/transition/scheduler/MCS/hộp thư | **CÓ** (KT-59) | 11 trạng thái + bảng ALLOWED, một cửa `transition_tcb`, 256 mức ưu tiên, budget/period/refill, mailbox FIFO 8 + backpressure |
 | Endpoint/Notification/Reply/IPC/WaitAddr/fault | **CÓ** (KT-60) | body + hàng chờ FIFO 8, `Call/Reply/ReplyRecv/NBSendRecv/NBSendWait`, badge OR/wait/wake/bound, WaitAddr futex **không timeout**, donation KT-21, fault `Exit` không Reply; **chưa** chuyển cap (nợ §8.5) |
 | `Frame`/`PageTable`/`VSpace` | không | đã có ở K3 (`vifast-plat-common::obj`, KT-52); `Retype` các loại này trong core trả `NotSupported` |
-| Nối syscall / `init` / ảnh kernel | không | KT-61 |
+| Nối syscall / `init` / ảnh kernel | **KT-61**: core **link + chạy** trên ảnh sản phẩm và ảnh test (`ktest_core`, TAP 43..52); syscall/`init` U-mode vẫn là K3.5 | §9 |
 
 ## 2. Crate và API
 
@@ -254,9 +256,9 @@ công thức `donated_priority` bằng unit test core, parity phủ trạng thá
    `MAX_SLOT_WORDS = 4096` (`[TK]`). Retype/copy khi bảng đầy trả `NotEnoughMemory` **nguyên
    tử** (sim không có giới hạn này vì heap không biên). Đây là biên triển khai, không phải ABI.
 2. **Slot CNode trong `.bss`, chưa nằm trong arena vật lý.** Byte slot vẫn được Untyped kế
-   toán đúng spec (`cnode_base + slots*48`), nhưng `CapId` lưu ở `SlotPool`; nợ KT-61: đưa
-   slot vào arena/`PhysMem` khi nối kernel (giống nợ metadata của KT-52). Pool có free-list để
-   `Revoke`/finalise trả word.
+   toán đúng spec (`cnode_base + slots*48`), nhưng `CapId` lưu ở `SlotPool`. **KT-61 quyết định
+   giữ nguyên** `SlotPool` (không chuyển nửa vời sang arena — tránh hai nguồn sự thật cho cùng
+   cap); nợ **K3.5** với tiêu chí đo ở §9.6. Pool có free-list để `Revoke`/finalise trả word.
 3. **Body đã có cho TCB/SchedContext/Endpoint/Reply/Notification** (KT-59/60) trong bảng
    `.bss` có free-list; `Frame`/`PageTable`/`VSpace` vẫn model-only (D2-83). Vì vậy
    `finalise_tcb` đã port (kèm hook donation/KT-34), nhưng **finalise IPC object khi Revoke**
@@ -272,8 +274,8 @@ công thức `donated_priority` bằng unit test core, parity phủ trạng thá
    trả body/message về free-list, **chưa** quét tham chiếu chết trong Endpoint/
    Reply/Notification/WaitAddr như `purge_dead_refs` của sim (nợ §8.6, parity không phủ).
 6. **Dấu chân tĩnh:** `size_of::<Machine>() = 180.168 B` `[ĐO]` (KT-60 + D2-85b, log
-   `JOURNAL/kt60-parity.log`) — chưa link vào ảnh kernel nên **ngân sách `.data+.bss`
-   262.144 B của ảnh không đổi**; KT-61 phải đo lại ảnh link và cắt theo §8.5 nếu cần.
+   `JOURNAL/kt60-parity.log`). **KT-61 đã link vào ảnh kernel** và đo lại: `.data+.bss` tăng
+   đúng `180.168 B` mỗi ảnh, vẫn ≤ trần 262.144 B (`K3B-DOD.md` §6) — **không** phải cắt.
 7. **Vùng Untyped là số học + nhãn PA (D2-83):** `Region.base` là **nhãn PA** (Untyped con =
    `base_cha + offset`), chưa cấp/đọc byte thật (chưa có Frame/PageTable trong core).
    `untyped_arena` vì vậy **khác** sim (sim trả địa chỉ block heap thật); không được mô tả
@@ -288,26 +290,27 @@ công thức `donated_priority` bằng unit test core, parity phủ trạng thá
    (chủ SC) giữ `sched_context` khi SC đang donate (KT-60 sửa điều kiện KT-59 vốn cấm mọi
    `sched_context` trên SC đang donate).
 10. **`TlbFlush` trong hộp thư là placeholder.** Core chưa sở hữu TLB (object layer K2); message
-    giữ đúng hình dạng (`seq/ack/generation/asid/va`), handler no-op — KT-61 nối TLB thật mà
-    không đổi enum.
+    giữ đúng hình dạng (`seq/ack/generation/asid/va`), handler no-op. **KT-61 chưa nối TLB
+    thật vào core** (KT-61 chỉ nối core vào `Machine`/TAP; TLB thật là `vifast-plat-*` KT-51) —
+    nợ K3.5, không đổi enum.
 11. **Nhật ký hộp thư có biên** `MAX_MAIL_LOG = 32`/hart (sim `Vec` không biên; D2-85b giảm 64→32). Quá biên:
     message vẫn xử lý đúng một lần, bất biến hàng đợi giữ nguyên, chỉ **nhật ký** dừng ghi và
     `mail_log_overflow` tăng. Không phải mất message.
 12. **`IpcArea` + `transfer` đã có (KT-60)** (4 MR thanh ghi + 60 word buffer + info/badge/
-    msg_id); chưa ghi từ syscall (KT-61). **Object** TCB 512 B theo spec, **body tĩnh** trong
+    msg_id); **KT-61 vẫn chưa ghi từ syscall** (đường syscall U-mode là K3.5). **Object** TCB 512 B theo spec, **body tĩnh** trong
     core 704 B (`IpcArea` 544 B + trường scheduler/state/IPC).
-13. **Dấu chân tĩnh (KT-60 + D2-85b):** `size_of::<Machine>() = 180.168 B` `[ĐO]` (bảng 27
-    dòng, `JOURNAL/kt60-parity.log`; 91,6 % pin 196.608 B, còn **16.440 B**). **D2-84 pin core ≤
-    196.608 B (192 KiB)** = trần ảnh 262.144 B trừ 64 KiB headroom; vượt phải **tối ưu**,
-    không nâng pin. Core **chưa link** nên `.data+.bss` ảnh không đổi; KT-61 đo lại ảnh link và
-    áp phương án cắt §8.5 nếu `size_of` vượt pin (hoặc ảnh vượt trần).
+13. **Dấu chân tĩnh (KT-61 — đã link):** `size_of::<Machine>() = 180.168 B` `[ĐO]` (pin
+    D2-84 **196.608 B**, còn 16.440 B). Core **đã link** vào ảnh: `.data+.bss` tăng đúng
+    **180.168 B** trên cả hai ảnh (sản phẩm và test) — số đo từng ảnh + trần 262.144 B ở
+    `K3B-DOD.md` §6; static nằm trong **vùng ảnh** (TAP `core link`) và ở **`.bss`** (NOBITS —
+    `filesz` không chứa 180 KB) với `init_zeroed` tại chỗ (§9.5). Không nới pin, không nới trần.
 14. **Không có `alloc`/`Vec`/`String`/`unsafe` mới:** ready queue là danh sách liên kết tĩnh
     `[u16; MAX_OBJECTS+1]`, body TCB/SC/IPC là bảng `.bss` có free-list (revoke trả body), hộp
     thư và hàng Endpoint là mảng FIFO cố định, message đang chờ nằm trong pool chung
     `[QueuedMsg; MAX_QUEUED_MESSAGES]` (hàng Endpoint giữ **chỉ số** `u16`).
 15. **Chưa chuyển cap qua IPC (KT-60):** `Message` giữ hình dạng `caps` của sim nhưng
     `MessageInfo.caps > 0` bị từ chối `InvalidArgument`; receive window 4 ô +
-    `plan_cap_transfer` (mất `RIGHT_GRANT`, unwrap badge, thất bại mềm) là nợ KT-61 — §8.6.
+    `plan_cap_transfer` (mất `RIGHT_GRANT`, unwrap badge, thất bại mềm) là nợ **K3.5** — §8.6.
     Parity KT-60 **không** dựng message có cap; đây là biên task, không phải quên.
 
 ## 7. KT-59 — TCB + transition + scheduler 256 mức + MCS + hộp thư (tầng 2)
@@ -340,7 +343,8 @@ core port nguyên ngữ nghĩa, **không** đổi `spec/`, `v2/sim/**/src/**`, `
 
 **Không (biên task):** IPC/Endpoint/Reply/Notification/WaitAddr/fault (KT-60 — object mới có
 cap/MDB/byte, **chưa có body/hàng chờ**); donation KT-21 (chỉ trường + công thức); TLB handler
-(KT-61 — `TlbFlush` placeholder); nối syscall/kernel (KT-61); Frame/PageTable/VSpace (D2-83).
+(`TlbFlush` placeholder — **KT-61 chưa nối**, nợ K3.5); nối syscall/kernel (KT-61 **đã link
+core vào ảnh** — §9; syscall U-mode vẫn K3.5); Frame/PageTable/VSpace (D2-83).
 
 ### 7.2 Giới hạn tĩnh — đầy ⇒ lỗi, không panic im lặng
 
@@ -362,8 +366,8 @@ Body TCB/SC có **free-list**: `Revoke` Untyped finalise object ⇒ trả body v
 **D2-84:** pin core = **≤ 196.608 B (192 KiB)** = trần ảnh 262.144 B (QD §3.5) trừ **64 KiB**
 headroom cho static kernel + cấu trúc tương lai. Vượt ⇒ **tối ưu** (giảm `MAX_MAIL_LOG`,
 chuyển body TCB sang arena, tách `SchedContext`), **không** nâng pin. KT-61 đo lại **ảnh link
-thật** trước khi thêm bảng; core hiện **chưa link** nên ngân sách `.data+.bss` của ảnh không
-đổi.
+thật** trước khi thêm bảng; từ **KT-61 core đã link** nên `.data+.bss` ảnh tăng đúng 180.168 B
+(số đo từng ảnh: `K3B-DOD.md` §6.2).
 
 `Machine::footprint()` trả bảng phân bố byte tĩnh (D2-84); test pin in bảng + assert
 `sum(bytes) + scalars + padding == size_of::<Machine>()`. Bảng **cập nhật KT-60** (log
@@ -511,8 +515,9 @@ core_ipc/core_sync` trước/sau (`sha256sum -c` OK).
 - **D2-85a — hai ngưỡng khác nhau, cấm đọc lẫn:** pin **196.608 B** áp cho
   `size_of::<Machine>()`; trần **262.144 B** áp cho **ảnh link** (`.data+.bss` thật). KT-61
   phải báo **cả hai** số; một số xanh không suy ra số kia.
-- Ảnh kernel hiện tại (KT-59) static **11.248 B** (đo KT-57); KT-61 đo lại sau link. Nếu
-  `Machine` vượt **196.608 B** hoặc ảnh vượt **262.144 B** ⇒ **cắt**, không nâng ngưỡng.
+- Ảnh kernel trước link (KT-57..KT-60) static **11.248 B** sản phẩm / **17.344 B** ktest; sau
+  link core (KT-61) tăng **+180.168 B** mỗi ảnh — số `[ĐO]` + đối chiếu trần **262.144 B** ở
+  `K3B-DOD.md` §6. Không phải cắt gì; nếu vượt pin/trần thì **cắt**, không nâng ngưỡng.
 - **D2-85c — test pin không tautology:** `padding` được assert `≤ 8 B` (hiện 1 B) và scalars
   kiểm theo công thức; nếu bảng bỏ sót trường, padding phình và test đỏ (bắt được lỗi log
   `kt60-footprint.log` từng thiếu 1 dòng nhưng vẫn xanh).
@@ -550,7 +555,130 @@ core_ipc/core_sync` trước/sau (`sha256sum -c` OK).
 7. **F1/F2/F3 reviewer-kt60 đã vá + có ca:** suspend donee trả SC + đánh thức client; donor
    không đổi priority/SC; `block_current(BlockedOnNotification)` ghi/kiểm waiter + Busy.
 
-## 9. Chạy lại
+**Trạng thái nợ sau KT-61 (không tô hồng):** các mục 1 (chuyển cap), 2 (finalise IPC object khi
+Revoke), 3 (`TlbFlush` placeholder) **vẫn mở** — KT-61 **không** làm vì chúng không cần cho cổng
+K3b và làm nửa đường sẽ tạo hai nguồn sự thật (cùng lý do với `SlotPool` §9.6). Mục 4 (nối
+kernel/đo ảnh) **đã xong**; mục 6 (`tcb_resume_with_regs`, Reply cap trong `Endpoint.recv`,
+WaitAddr toàn phần) **vẫn là nợ phủ**. Chủ: **K3.5**. Tiêu chí đóng: parity sim↔core có ca +
+TAP kernel mới, không đổi `spec/`.
+
+## 9. KT-61 — nối core vào kernel thật (cổng K3b)
+
+**Trạng thái:** KT-61 **DONE (đề xuất; chờ review độc lập + Agent 0 lật QUEUE)**. Phạm vi: link
+`vifast-core` vào **ảnh kernel thật** (sản phẩm + test), TAP core trên QEMU, đo **cả hai** ngưỡng
+(D2-85a), soak 1.000, matrix smp 1/2/4, conformance 5/5, `gate --fast`. **Không** đổi `spec/`, sim
+semantics, `.scn`, QUEUE/DECISIONS/AGENTS, `viscript/`; `unsafe` **chỉ** thêm ở
+`kernel/vifast-plat-riscv64` (D2-17).
+
+### 9.1 Phạm vi thay đổi
+
+| Tệp | Thay đổi |
+|---|---|
+| `kernel/vifast-plat-riscv64/src/core_bridge.rs` (mới) | Cầu nối **một chiều**: static `Machine`, `init` từ **nhãn PA** của Untyped boot, `with_machine` (spin lock `AtomicBool`), `boot_smoke` (vòng đời TCB cho ảnh sản phẩm) |
+| `kernel/vifast-plat-riscv64/{Cargo.toml,src/lib.rs}` | thêm dependency `vifast-core` + `pub mod core_bridge` |
+| `kernel/vifast-kbin-riscv64/src/ktest_core.rs` (mới) | TAP **43..52** + evidence `# core:` (§9.3) |
+| `kernel/vifast-kbin-riscv64/{src/main.rs,src/ktest.rs}` | ảnh sản phẩm: `core_bridge::init` + `boot_smoke` + `# core: product`; ảnh test: `mod ktest_core` + pha 43..52, trap lồng dời **53** |
+| `test/boot/{ktest.sh,expected.txt}` | manifest TAP 43..52 + 11 regex evidence `# core:`; `ktest 53 53` (nguồn sự thật duy nhất) |
+| `docs/{k3b-core,k3-riscv64}.md`, `agent/{reports/K3B-DOD.md,JOURNAL/kt61-*,STATE.md}` | tài liệu + log |
+
+**Không** thay đổi `Machine`/ngữ nghĩa core: `footprint.rs` (27 dòng), cap/MDB/TCB/IPC giữ nguyên;
+`vifast-core` vẫn `#![forbid(unsafe_code)]` (D2-17) — mọi `unsafe` của cầu nối nằm ở
+`kernel/vifast-plat-*`. Kernel clippy `-D warnings` **đã sạch** sau KT-61 (18+27+2 lint **nợ tích tụ**
+được sửa; `.text`/BUILD_ID không đổi; `JOURNAL/kt61-core-build.log` sạch,
+`kt61-core-build-before-fix.log` là log đỏ trước khi sửa).
+
+### 9.2 Đo **cả hai** ngưỡng (D2-85a) — không đọc lẫn
+
+| Ngưỡng | Áp cho | Số đo | Kết quả |
+|---|---|---|---|
+| **196.608 B** (pin D2-84) | `size_of::<Machine>()` | **180.168 B** `[ĐO]` (91,6 % pin; còn 16.440 B) | ĐẠT |
+| **262.144 B** (trần ảnh, QD §3.5) | `.data+.sdata+.bss+.sbss` **của ELF thật** | **191.416 (product) / 197.568 (ktest) / 2.680 (guard) / 11.752 (user) B** — `kt61-budget.log:2,5,8,11` | ĐẠT |
+
+Số `[ĐO]` chỉ do script in (`budget.sh`, `# core: link`/`# core: product` trong log QEMU); tài liệu
+không chép tay (QD §9 Q12). TAP `core link` kiểm thêm **bảng phân bố**: `sum(bytes 27 dòng) +
+scalars + padding == total` và `padding ≤ 8` (D2-85c — chống bảng thiếu dòng, không tautology).
+
+### 9.3 TAP core trên **nhân thật** (`ktest` 43..52)
+
+Mỗi TAP in `# core:` với số **object/cap/TCB thật** của lần boot và trạng thái bất biến. Không có
+test nào chạy trên host:
+
+| TAP | Bằng chứng `# core:` (neo) |
+|---|---|
+| 43 `core link` | `link addr=0x… bytes=180168 pin=196608 image_cap=262144 parts=27 sum=180168 scalars=239 padding=1 sum_ok=1 in_image=1` — static nằm trong vùng ảnh `[KERNEL_PHYS_BASE, guard)`, không phải arena/heap |
+| 44 `core untyped boot` | `untyped id=1 base=0x… bytes=65536 used=0 free=65536 allocated=0 gap=0 objects=1 caps=0 check_bytes=1 check_all_bytes=1` — Untyped dựng từ **nhãn PA** ngay sau arena object layer (D2-83: không dereference) |
+| 45 `core tcb retype` | `tcb retype tcb=3 slot=1 objects=11 caps=11 used=2304 state=Inactive check_caps=1 check_bytes=1` |
+| 46 `core configure resume suspend` | `configure cspace=1 sc=1 priority=3 mcp=10 budget=4 period=8 suspended_ok=1 resume=1 state=Ready check_sched=1 check_sc_refs=1 check_budget=1` |
+| 47 `core sched 2 tcb` | `sched harts=1 pick0=3 pick1=4 dispatch0=3 dispatch1=4 t0=Ready t1=Running suspended=0 check_sched=1` — 2 TCB **có SchedContext riêng**; `Suspend` TCB 1 ⇒ ra khỏi hàng đợi ⇒ `dispatch` sang TCB 2 |
+| 48 `core ipc round` | `ipc call=1 recv=1 reply=1 mr=0xfeed blocked_send=1 blocked_reply=1 t0=Ready ep_len=0 reply_caller=0 sent=1 delivered=1 check_ipc=1 check_reply_links=1` |
+| 49 `core notification signal` | `ntfn signal=1 wake=1 word=0x0 badge=0x0 waiter=0 consumed=0x42 poll=0x8 state=Ready check_notifications=1` |
+| 50 `core waitaddr` | `waitaddr frame=0x… label=… offset=64 value=0x1234 woke=1 waiters=0 buckets=0 state=Ready check_waitaddr=1` — khoá futex là **PPN của Frame thật ở object layer** (một chiều, §9.4) |
+| 51 `core d2-83 boundary` | `d2-83 frame=NotSupported page_table=NotSupported vspace=NotSupported atomic=1 untyped_used=2304 obj_frame=1 obj_vspace=1 obj_health=1 owner=obj` |
+| 52 `core invariants` | `invariants caps=1 objects=11 used=0 free=65536 deleted=9 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 check_sc_refs=1 check_budget=1 check_mailboxes=1 check_ipc=1 check_reply_links=1 check_notifications=1 check_waitaddr=1 check_fault=1 leak=0` |
+
+Ảnh **sản phẩm** cũng chạy core: `# core: product addr=… bytes=180168 … retype=1 configure=1
+suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 … footprint_ok=1` — mỗi boot
+soak là một vòng đời TCB thật trên kernel sản phẩm; sai ⇒ `PANIC: core init product` (soak đỏ).
+
+### 9.4 Biên D2-83 — **một chiều**, không nhân đôi chủ sở hữu
+
+| Hạng mục | Chủ sở hữu | Bằng chứng KT-61 |
+|---|---|---|
+| Untyped/CNode/MDB/cap/TCB/SchedContext/Endpoint/Reply/Notification/IPC/WaitAddr | **core** (`Machine`) | TAP 44..50 |
+| **Frame/PageTable/VSpace** | **object layer** `vifast_plat_common::obj` (KT-52) | TAP 51: core `Retype` ⇒ `NotSupported` **3/3**, `untyped_used` không đổi; **cùng lúc** obj layer tạo+revoke VSpace/Frame thật (`obj_frame=1 obj_vspace=1 obj_health=1`) |
+| Cầu nối | **một chiều**: kernel truyền **nhãn** (PA/PPN) vào core | Untyped boot = `[obj.arena_end, +64 KiB)` (nhãn PA, D2-83) — core chỉ kế toán byte; khoá `WaitAddr` = **PPN** của Frame obj-layer, core lưu trong bảng `addr_words` và **không** đọc byte/PTE |
+
+Ghi chú: core **từ chối** `add_kernel_object(ObjType::Frame)` (`is_core()` = false ⇒ panic
+"chỉ object lõi mới dựng trực tiếp") — đúng biên giới, nên TAP 50 dùng PPN chứ không tạo Frame
+trong core. Đổi biên giới này cần **D2 mới**.
+
+### 9.5 Static trong **`.bss`** + `init_zeroed` — không 180 KB trong file ảnh
+
+`Machine` có trường khởi tạo **khác 0** (`wait_buckets = NODE_NONE`, `n_harts`,
+`published[*].idle`, `HartSched.idle`, 8 ô `Option<MailboxMsg>` với `None ≠ 0`), nên **không**
+thể là zeroed `.bss` thuần. KT-61 thử ba đường:
+
+1. `static Machine = Machine::with_harts(1)` → **`.data`**: 180.168 B nằm trong **FILE** (`filesz`)
+   — loader copy mỗi boot; ảnh phình 180 KB. Đã đo và **bỏ**.
+2. `MaybeUninit` + `MACHINE.write(Machine::with_harts(1))` → Rust trả struct lớn qua `sret` nên
+   bản tạm 180.168 B dựng trên **stack 64 KiB** ⇒ tràn guard page
+   (`PANIC: guard page fault stval=0x80400000`, `JOURNAL/kt61-red-before-core-link.log`).
+3. **Chốt:** static `MaybeUninit<Machine>` trong **`.bss`** (`NOBITS`: `filesz = 0`, chỉ `memsz`)
+   + `Machine::init_zeroed` khởi tạo **tại chỗ** sau `write_bytes(0)` — không bản tạm, không
+   copy 180 KB. `.bss` tăng đúng `size_of::<Machine>()` và **được `budget.sh` cộng đủ**.
+
+`init_zeroed` chỉ đặt các trường **khác 0** so với `with_harts`; phần còn lại có `0` trùng
+`EMPTY`/constructor (body TCB/SC/Endpoint/… được ghi `*::EMPTY` **lúc cấp phát**; `HartSched`,
+`SlotPool`, `Region`, `ScBudget`, `Mailbox`, `Meta`/`Cap` toàn 0). Bất biến được chứng minh trên
+**kernel thật**: TAP 43..52 + `check_*` sau mỗi pha + soak 1.000 boot; nếu `init_zeroed` thiếu
+sentinel, `check_sched`/`check_mailboxes` bắt ngay (đã bắt thật trong quá trình làm: `idle lệch
+current`, `hop thu mat/them message` — sửa bằng `HartSched::reset`/`HartMailbox::reset`).
+
+**Số đo chứng minh `.bss` không vào file** (`ktest`, `llvm-readobj --program-headers`): segment
+RW có `filesz = 7.912` / `memsz = 2.588.672` — 189.656 B `.bss` (gồm Machine) **không** nằm
+trong file; file ảnh `ktest` 484.600 B. Số 4 ảnh + `filesz/memsz` đầy đủ ở `K3B-DOD.md` §6.2.
+
+### 9.6 `SlotPool` — **giữ nguyên**, nợ có chủ (không làm nửa vời)
+
+KT-61 **không** chuyển slot CNode sang arena `PhysMem` (phương án §8.5-C): làm nửa đường sẽ tạo
+**hai nguồn sự thật** cho cùng một cap (slot trong `SlotPool` + byte slot trong arena). Quyết định:
+giữ `SlotPool` là **nguồn duy nhất** của `CapId`; byte slot vẫn được Untyped kế toán đúng spec
+(`cnode_base + slots*48`) và `check_bytes`/`check_all_bytes` xanh trên kernel thật (TAP 44..52).
+Việc chuyển sang arena là **K3.5**, có tiêu chí: (i) slot nằm trong vùng Untyped thật (PA), (ii)
+`Revoke` trả byte slot, (iii) `check_bytes` không đổi kết quả, (iv) TAP 45/52 vẫn xanh. Đây là
+**nợ**, không phải "đã xong".
+
+### 9.7 Cổng K3b — kết quả
+
+Số đo đầy đủ + log: [`../agent/reports/K3B-DOD.md`](../agent/reports/K3B-DOD.md) (D1..D11). Tóm
+tắt điều kiện: `gate --fast` xanh; TAP **53/53 + 3/3 + 7/7** ở smp **1/2/4**; soak **0/1000** ảnh
+sản phẩm (3 luồng, không icount, timeout 20 s, BUILD_ID neo D2-80); conformance **61/61 dòng / 5/5
+ca** (core không đổi đường VM); budget **cả hai** ngưỡng. **Không nới ngưỡng nào.**
+L1 100k **mới xong 1/4 cấu hình** (`smp 1`: 100.000 seed × 64 op, `kt61-l1-100k.log:253`);
+`smp 2/4/8` dừng khi hết ngân sách 3 h — khai rõ, **không** claim 400k (`400k × smp 1/2/4/8` là
+**DoD cổng K6**, không phải KT-61; nợ thời gian có task riêng — DOD §11.10).
+
+## 10. Chạy lại
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -561,18 +689,16 @@ cargo test --manifest-path v2/Cargo.toml -p vifast-sim --test kt60_core_parity -
 # core tự build cho bare-metal + clippy riêng (không nằm trong gate host)
 cargo build --manifest-path v2/kernel/Cargo.toml -p vifast-core --target riscv64gc-unknown-none-elf
 cargo clippy --manifest-path v2/kernel/Cargo.toml -p vifast-core --all-targets -- -D warnings
-# cổng đầy đủ
+# toàn kernel (product + ktest + user) — phải 0 warning (KT-61 đã sửa hết nợ):
+cargo clippy --manifest-path v2/kernel/Cargo.toml --workspace --no-deps \
+  --target riscv64gc-unknown-none-elf -- -D warnings
+cargo clippy --manifest-path v2/kernel/Cargo.toml -p vifast-kbin-riscv64 \
+  --no-deps --features ktest,user --target riscv64gc-unknown-none-elf -- -D warnings
+# KT-61: core trên **nhân thật** — TAP 43..52 + matrix 1/2/4
+bash v2/test/boot/ktest.sh 1 matrix
+# ảnh sản phẩm: core init + một vòng đời TCB mỗi boot
+bash v2/test/boot/run.sh 1 1
+# soak + cổng
+bash v2/test/boot/soak.sh 1000 3
 ./v2/bin/v2 gate --fast
 ```
-
-## 10. Đề xuất cho KT-61
-
-- **Nối:** `vifast-core` vào `vifast-plat-common`/kbin; thay `SlotPool` bằng slot trong arena
-  `PhysMem`; VM (`Frame`/`PageTable`/`VSpace`) đi qua object layer KT-52 (D2-83 — core vẫn
-  `NotSupported`, test pin giữ); TAP/QEMU mới có CNode/MDB/IPC thật.
-- **Trước khi link:** đo `size_of::<Machine>()` + bảng phân bố + `.data+.bss` ảnh; áp §8.5 nếu
-  cần (ưu tiên A `MAX_MAIL_LOG 64→32`), **không** nâng pin. Nếu link core làm ảnh vượt
-  262.144 B thì cắt tính năng tĩnh theo D2-84.
-- **Hoàn tất nợ KT-60:** chuyển cap (receive window/`plan_cap_transfer` + 4 cap/mất GRANT/
-  unwrap badge), finalise IPC object khi Revoke, `TlbFlush` thật; giữ parity sim↔core cho các
-  phần mới (D2-05, thêm ca trước).

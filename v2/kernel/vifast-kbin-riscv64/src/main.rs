@@ -112,6 +112,62 @@ pub extern "C" fn rust_main() -> ! {
         );
     }
 
+    // KT-61: core `no_std` **chạy trên nhân thật** — `Machine` static trong `.bss` của ảnh
+    // (D2-84), khởi tạo từ vùng RAM **nhãn PA** ngay sau arena object layer (D2-83: core không sở
+    // hữu Frame/PageTable/VSpace — object layer vẫn giữ). Ảnh sản phẩm chạy **một vòng đời TCB
+    // thật** (Retype→Configure→Suspend/Resume→revoke) để soak 1.000 boot kiểm core trên kernel
+    // sản phẩm, không chỉ trên ảnh test.
+    let core = vifast_plat_riscv64::core_bridge::init(
+        obj.arena_end,
+        vifast_plat_riscv64::core_bridge::CORE_ARENA_BYTES,
+    );
+    let smoke = vifast_plat_riscv64::core_bridge::boot_smoke(core.untyped);
+    let fp = core.footprint;
+    let mut fp_sum = 0usize;
+    for i in 0..vifast_core::FOOTPRINT_PARTS {
+        fp_sum += fp.bytes[i];
+    }
+    let fp_ok = fp_sum + fp.scalars + fp.padding == fp.total && fp.padding <= 8;
+    {
+        let mut w = PlatformWriter(&PLATFORM);
+        let _ = writeln!(
+            w,
+            "# core: product addr=0x{:x} bytes={} pin={} image_cap={} untyped={} retype={} configure={} suspend={} resume={} state_ready={} objects={} caps={} used={} check_caps={} check_bytes={} check_all_bytes={} check_sched={} footprint_ok={}",
+            core.addr,
+            core.static_bytes,
+            core.pin,
+            vifast_plat_riscv64::core_bridge::IMAGE_CAP_BYTES,
+            core.arena_bytes,
+            smoke.retype as u8,
+            smoke.configure as u8,
+            smoke.suspend as u8,
+            smoke.resume as u8,
+            smoke.state_ready as u8,
+            smoke.objects,
+            smoke.caps,
+            smoke.used,
+            core.check_caps as u8,
+            core.check_bytes as u8,
+            core.check_all_bytes as u8,
+            smoke.checks as u8,
+            fp_ok as u8,
+        );
+    }
+    let core_ok = core.healthy()
+        && fp_ok
+        && smoke.retype
+        && smoke.configure
+        && smoke.suspend
+        && smoke.resume
+        && smoke.state_ready
+        && smoke.checks
+        && smoke.used == 0
+        && smoke.caps == 1;
+    if !core_ok {
+        PLATFORM.put_str("PANIC: core init product\n");
+        PLATFORM.halt(1)
+    }
+
     // KT-48: **PLIC + UART IRQ thật** — `init` đọc `ndev` từ register (probe priority, không giả
     // định 95), context S-mode `2*hart+1`, threshold 0, priority IRQ 10 = 1, enable IRQ 10. Bật
     // `IER.TX-empty` rồi mở cổng `sie.SEIE`/`sstatus.SIE`; handler claim → đọc IIR → complete

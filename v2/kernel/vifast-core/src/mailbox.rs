@@ -277,6 +277,13 @@ impl HartMailbox {
         }
     }
 
+    /// Khởi tạo **tại chỗ** hộp thư rỗng (KT-61: static `.bss` đã zero). `Option<MailboxMsg>`
+    /// **không** có `None == 0` (niche của enum) nên để zero thì cả 8 ô đọc thành
+    /// `Some(Wake(0))` và `check_mailboxes` báo "hop thu mat/them message".
+    pub(crate) fn reset(&mut self) {
+        *self = Self::new();
+    }
+
     /// Số message đang nằm trong hàng.
     pub fn len(&self) -> usize {
         self.mb.len()

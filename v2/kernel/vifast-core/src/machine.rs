@@ -356,6 +356,30 @@ impl Machine {
         }
     }
 
+    /// Khởi tạo **tại chỗ** `Machine` trong `.bss` đã zero (KT-61): chỉ đặt trường **khác 0**
+    /// (`n_harts`, `wait_buckets`/`_tail = NODE_NONE`, `sched`/`mail.reset`, `published.idle`).
+    pub fn init_zeroed(&mut self, harts: u16) {
+        assert!(
+            harts > 0 && harts as usize <= MAX_HARTS,
+            "vifast-core: số hart phải trong 1..=MAX_HARTS"
+        );
+        self.n_harts = harts as usize;
+        self.wait_buckets = [NODE_NONE; WAITADDR_BUCKETS];
+        self.wait_buckets_tail = [NODE_NONE; WAITADDR_BUCKETS];
+        // `HartSched`/`HartMailbox` có trường **không zero** (`idle = true`; 8 ô
+        // `Option<MailboxMsg>` với `None != 0`) ⇒ reset tại chỗ từng phần tử (không bản tạm lớn).
+        for s in self.sched.iter_mut() {
+            s.reset();
+        }
+        for mb in self.mail.iter_mut() {
+            mb.reset();
+        }
+        self.published = [Published {
+            idle: true,
+            cur_prio: 0,
+        }; MAX_HARTS];
+    }
+
     // ------------------------------------------------------------- cấp phát
 
     /// Thêm Untyped **do harness cấp** (đáy `base`, `size` byte arena).

@@ -57,8 +57,8 @@ impl Untyped {
             return false;
         }
         let mut at = count;
-        for i in 0..count {
-            if list[i].off > hole.off {
+        for (i, h) in list.iter().take(count).enumerate() {
+            if h.off > hole.off {
                 at = i;
                 break;
             }
@@ -110,8 +110,7 @@ impl Untyped {
     fn rewind_holes(holes: &mut [Hole; MAX_HOLES], n: &mut u8, watermark: &mut u32) {
         loop {
             let mut found = None;
-            for i in 0..*n as usize {
-                let h = holes[i];
+            for (i, h) in holes.iter().take(*n as usize).enumerate() {
                 if h.off as u64 + h.len as u64 == *watermark as u64 {
                     found = Some(i);
                     break;

@@ -44,6 +44,8 @@ required-features = ["ktest", "user"]
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }
 vifast-plat-riscv64 = { path = "../vifast-plat-riscv64" }
+# KT-61: core `no_std` — TAP `ktest_core` và smoke ảnh sản phẩm gọi thẳng API core (D2-83).
+vifast-core = { path = "../vifast-core" }
 # KT-55: IR conformance (đọc 5 `.scn` bằng `include_str!`) + dòng trace chuẩn hoá dùng chung
 # với sim. Cả hai `no_std`, không cấp phát, không dependency ngoài (D2-21).
 vifast-scenario = { path = "../../lib/vifast-scenario" }

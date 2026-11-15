@@ -73,7 +73,7 @@ pub static SMP_DTB: AtomicU64 = AtomicU64::new(0);
 /// D2-72 Q7: K3 **chỉ kiểm magic** (không parse đầy đủ) — hart count lấy từ `hart_get_status`
 /// của SBI HSM (firmware đã biết DTB), không tự đoán.
 pub fn dtb_magic_ok(dtb: u64) -> bool {
-    if dtb == 0 || dtb % 4 != 0 {
+    if dtb == 0 || !dtb.is_multiple_of(4) {
         return false;
     }
     // QEMU `virt` đặt FDT ở **cuối RAM** (vd 0x87e0_0000 với `-m 128M`), ngoài miền kernel
@@ -127,7 +127,7 @@ pub struct SmpReport {
 impl SmpReport {
     /// `true` ⇔ mọi hart `present` đều online và không timeout.
     pub fn is_online(&self) -> bool {
-        self.timed_out == false
+        !self.timed_out
             && self.online_mask & self.present_mask == self.present_mask
             && mask_count(self.present_mask) as usize == self.harts
     }

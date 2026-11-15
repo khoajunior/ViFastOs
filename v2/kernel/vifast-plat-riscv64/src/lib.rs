@@ -63,6 +63,7 @@ use vifast_plat_common::trap::{
 };
 use vifast_plat_common::{Platform, PlatformWriter};
 
+pub mod core_bridge;
 pub mod ipi;
 pub mod mmu;
 pub mod obj;
@@ -618,9 +619,9 @@ pub fn report_image_digest() {
     };
     put(b"# conf image: build=", &mut n);
     let mut hex = [0u8; 16];
-    for i in 0..16 {
+    for (i, h) in hex.iter_mut().enumerate() {
         let nib = ((hash >> ((15 - i) * 4)) & 0xf) as u8;
-        hex[i] = if nib < 10 {
+        *h = if nib < 10 {
             b'0' + nib
         } else {
             b'a' + nib - 10

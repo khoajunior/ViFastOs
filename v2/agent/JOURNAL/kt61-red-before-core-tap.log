@@ -1,0 +1,24 @@
+#   thiếu TAP #43 [core link] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #44 [core untyped boot] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #45 [core tcb retype] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #46 [core configure resume suspend] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #47 [core sched 2 tcb] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #48 [core ipc round] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #49 [core notification signal] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #50 [core waitaddr] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #51 [core d2-83 boundary] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #52 [core invariants] (thấy 0 dòng, cần đúng 1)
+#   thiếu TAP #53 [trap nested panic] (thấy 0 dòng, cần đúng 1)
+#   thiếu evidence#72: ^# core: link addr=0x[0-9a-f]+ bytes=180168 pin=196608 image_cap=262144 parts=27 sum=180168 scalars=[0-9]+ padding=[0-9]+ sum_ok=1 in_image=1$
+#   thiếu evidence#73: ^# core: untyped id=[0-9]+ base=0x[0-9a-f]+ bytes=65536 used=0 free=65536 allocated=0 gap=0 objects=1 caps=0 check_bytes=1 check_all_bytes=1$
+#   thiếu evidence#74: ^# core: tcb retype tcb=[0-9]+ slot=1 objects=11 caps=11 used=[0-9]+ state=Inactive check_caps=1 check_bytes=1$
+#   thiếu evidence#75: ^# core: configure cspace=1 sc=1 priority=3 mcp=10 budget=4 period=8 suspended_ok=1 resume=1 state=Ready check_sched=1 check_sc_refs=1 check_budget=1$
+#   thiếu evidence#76: ^# core: sched harts=1 pick0=[0-9]+ pick1=[0-9]+ dispatch0=[0-9]+ dispatch1=[0-9]+ t0=Ready t1=Running suspended=0 check_sched=1$
+#   thiếu evidence#77: ^# core: ipc call=1 recv=1 reply=1 mr=0xfeed blocked_send=1 blocked_reply=1 t0=Ready ep_len=0 reply_caller=0 sent=[0-9]+ delivered=[0-9]+ check_ipc=1 check_reply_links=1$
+#   thiếu evidence#78: ^# core: ntfn signal=1 wake=1 word=0x0 badge=0x0 waiter=0 consumed=0x42 poll=0x8 state=Ready check_notifications=1$
+#   thiếu evidence#79: ^# core: waitaddr frame=0x[0-9a-f]+ label=[0-9]+ offset=64 value=0x1234 woke=1 waiters=0 buckets=0 state=Ready check_waitaddr=1$
+#   thiếu evidence#80: ^# core: d2-83 frame=NotSupported page_table=NotSupported vspace=NotSupported atomic=1 untyped_used=[0-9]+ obj_frame=[0-9]+ obj_vspace=[0-9]+ obj_health=1 owner=obj$
+#   thiếu evidence#81: ^# core: invariants caps=1 objects=[0-9]+ used=0 free=65536 deleted=[0-9]+ check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 check_sc_refs=1 check_budget=1 check_mailboxes=1 check_ipc=1 check_reply_links=1 check_notifications=1 check_waitaddr=1 check_fault=1 leak=0$
+#   thiếu evidence#82: ^# core: phase fails=0 static=180168 pin=196608 image_cap=262144$
+not ok - check-log ktest smp=1: thiếu plan-1..53=0 ok-count=43/53 tap-day-1..53 tap43 tap44 tap45 tap46 tap47 tap48 tap49 tap50 tap51 tap52 tap53 image-build-mismatch ev72 ev73 ev74 ev75 ev76 ev77 ev78 ev79 ev80 ev81 ev82, log v2/agent/JOURNAL/kt61-red-before-ktest-43tap.log
+EXIT=1

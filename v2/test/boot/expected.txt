@@ -10,6 +10,11 @@
 # kernel read fault phân loại `FaultKind`, 6 faultkind exit, 7 faultkind wx from u — thực thi
 # trang RW NX) ⇒ **7 TAP**. Cùng lúc sửa kernel + manifest + dòng này (luật KT-54).
 #
+# KT-61: ảnh test chính thêm **10 TAP core** (43..52: link static trong ảnh + bảng phân bố,
+# untyped boot, retype TCB, configure/resume/suspend, schedule 2 TCB, IPC Call/Recv/Reply một vòng,
+# Notification signal, WaitAddr, biên D2-83, invariants) ⇒ trap lồng dời sang **53** (tổng 53 TAP);
+# ảnh guard 3 TAP và user 7 TAP không đổi. Số TAP core khớp manifest `ktest.sh` + kernel.
+#
 # KT-49: ảnh test chính 20 TAP (1..14 = KT-45/46/47/48; 15..19 = SMP KT-49; 20 = trap lồng
 # fatal có chủ đích). KT-50: thêm 5 TAP IPI (20..24). KT-51: thêm 5 TAP TLB/ASID/shootdown
 # (25..29); KT-52: thêm **7 TAP object layer** (30..36: retype vspace, byte invariant, frame 3
@@ -26,7 +31,7 @@
 #   - số TAP ghi ở đây phải **bằng** số TAP runner có tên trong manifest (`ktest.sh`
 #     `manifest_for`) ⇒ thêm/bớt TAP phải sửa cả kernel, manifest và dòng này trong cùng commit.
 # Cách đọc + ý nghĩa từng dòng evidence: `v2/docs/k3-riscv64.md` §17.
-ktest 43 43
+ktest 53 53
 ktest-guard 3 3
 
 # KT-53: ảnh test **user** (bin riêng) — U-mode + 3 syscall + nạp `init` ELF; 5 TAP, boot kết

@@ -1,0 +1,31 @@
+# KT-61 — kernel build + clippy cuối (cây đóng băng, sau khi sửa hết nợ lint)
+# ngày: 2026-11-15 23:18 JST  rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# LƯU Ý: dòng 'warning: vifast-kbin-riscv64@0.1.0: KT-53 init.elf N B' là cargo:warning của
+#        BUILD SCRIPT (build.rs KT-53 nhúng init.elf), KHÔNG phải lint clippy — đừng đếm nhầm.
+
+## build 4 ảnh
+    Finished `release` profile [optimized] target(s) in 0.34s
+BUILD_EXIT=0
+    Finished `release` profile [optimized] target(s) in 0.01s
+BUILD_EXIT=0
+    Finished `release` profile [optimized] target(s) in 0.02s
+BUILD_EXIT=0
+
+## clippy -D warnings: workspace
+CLIPPY_EXIT=0
+
+## clippy -D warnings: plat-riscv64 default
+CLIPPY_EXIT=0
+
+## clippy -D warnings: plat-riscv64 ktest
+CLIPPY_EXIT=0
+
+## clippy -D warnings: plat-riscv64 ktest+user
+CLIPPY_EXIT=0
+
+## clippy -D warnings: kbin ktest
+CLIPPY_EXIT=0
+
+## clippy -D warnings: kbin ktest+user
+CLIPPY_EXIT=0
+

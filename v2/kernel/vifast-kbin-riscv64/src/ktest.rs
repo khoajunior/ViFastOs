@@ -5,7 +5,8 @@
 //! KT-49 mở rộng ảnh này lên **20 TAP**; KT-50 thêm **5 TAP IPI** (20..24); KT-51 thêm **5 TAP
 //! TLB/ASID/shootdown** (25..29); KT-52 thêm **7 TAP object layer** (30..36); KT-55 thêm **TAP
 //! 37** conformance; **KT-56 thêm 5 TAP FaultKind/W^X (38..42)** và dời trap lồng sang **43** —
-//! tổng **43 TAP** (ảnh guard vẫn 3 TAP, ảnh user 7 TAP — §19 docs):
+//! tổng **53 TAP** (KT-61 thêm 43..52 = core trên nhân thật; ảnh guard 3 TAP, ảnh user
+//! 7 TAP — §19 docs):
 //!
 //! 1. `ok 1 - ktest image` — marker tách ảnh của KT-44.
 //! 2. `ok 2 - trap breakpoint` — **trap phần cứng thật** (`ebreak` → `scause=3`, resume đúng
@@ -24,30 +25,30 @@
 //! 13. `ok 13 - timer irq` — ngắt thật qua `stvec`, `scause = (1<<63) | 5`, `sstatus.SIE` đúng.
 //! 14. `ok 14 - timer deadline drift` — Δ tick ∈ [9,11] ms.
 //! 15. `ok 15 - harts alive N` — **SBI HSM**: `hart_start` cho hart `1..N-1`, barrier khởi động;
-//!    mỗi hart in `# hart h alive ticket=T`; hart **ngoài DTB** bị từ chối + log, không panic cả máy.
+//!     mỗi hart in `# hart h alive ticket=T`; hart **ngoài DTB** bị từ chối + log, không panic cả máy.
 //! 16. `ok 16 - per-hart stack/guard` — mỗi hart một stack + `.trap_stack` + **guard riêng**;
-//!    mỗi hart tự chạm guard **của mình** ⇒ page fault `scause=13` do **đúng hart đó** xử lý
-//!    (trapframe nằm trong trap stack của hart đó — `sscratch` per-hart).
+//!     mỗi hart tự chạm guard **của mình** ⇒ page fault `scause=13` do **đúng hart đó** xử lý
+//!     (trapframe nằm trong trap stack của hart đó — `sscratch` per-hart).
 //! 17. `ok 17 - per-hart timer` — mỗi hart tự arm SBI TIME và nhận **100 tick** trong slot
-//!    PerHart của mình (`TIMER_STATS.get(h)`), không lẫn với hart khác.
+//!     PerHart của mình (`TIMER_STATS.get(h)`), không lẫn với hart khác.
 //! 18. `ok 18 - plic ctx per hart` — PLIC enable/claim theo context `2*h+1` của từng hart;
-//!    context M-mode `2*h` **không** bật; bộ đếm PerHart không lẫn.
+//!     context M-mode `2*h` **không** bật; bộ đếm PerHart không lẫn.
 //! 19. `ok 19 - barrier` — barrier tập trung cho mọi hart (hart chậm vẫn qua), và vòng có hart
-//!    **không tồn tại** timeout rồi đi tiếp (không treo máy).
+//!     **không tồn tại** timeout rồi đi tiếp (không treo máy).
 //! 20. `ok 20 - 100 ipi delivered` — **KT-50**: 100 IPI thật qua SBI + `stvec`
-//!    (`scause=(1<<63)\|1`) không mất/nhân đôi (2 hart; `-smp 1` đo 100 IPI tự gửi, ghi rõ mode).
+//!     (`scause=(1<<63)\|1`) không mất/nhân đôi (2 hart; `-smp 1` đo 100 IPI tự gửi, ghi rõ mode).
 //! 21. `ok 21 - ipi drain khi cho ack` — 2 hart `SIE=0` chờ ack bằng **drain trong vòng chờ**
-//!    (D2-68), `traps_delta=0`; chờ predicate sai phải **hết timeout** (không treo).
+//!     (D2-68), `traps_delta=0`; chờ predicate sai phải **hết timeout** (không treo).
 //! 22. `ok 22 - self-target khong gui` — tự gửi cho mình = local flush + ack ngầm, **không** IPI
-//!    (`sent`/`traps` không tăng).
+//!     (`sent`/`traps` không tăng).
 //! 23. `ok 23 - coalesce khong mat kind` — gửi trùng bị **gộp** (2 IPI cho 6 post), một drain giao
-//!    đủ `{TlbFlush, VmKick}`.
+//!     đủ `{TlbFlush, VmKick}`.
 //! 24. `ok 24 - ipi khong nham timer/external` — mọi ngắt trong pha là mã 1; timer/external = 0;
-//!    decode 1/5/9 tách đúng nhánh.
+//!     decode 1/5/9 tách đúng nhánh.
 //! 25. `ok 25 - 100 vong shootdown Ok` — KT-51: 100 shootdown thật, ack đủ `active_on`, không
-//!    self-target, hart đích đọc lại mapping mới.
+//!     self-target, hart đích đọc lại mapping mới.
 //! 26. `ok 26 - stale mapping caught` — remap **không** sfence ⇒ đọc ra giá trị cũ (TLB sống);
-//!    `sfence.vma` ba dạng ⇒ ra giá trị mới.
+//!     `sfence.vma` ba dạng ⇒ ra giá trị mới.
 //! 27. `ok 27 - hart ngoai active_on` — hart gọi/online **ngoài** `active_on` không bị chờ.
 //! 28. `ok 28 - rollover flush` — cạn 256 ASID ⇒ `generation+1` + một flush toàn bộ.
 //! 29. `ok 29 - timeout khong treo` — hart offline trong `active_on` ⇒ `Timeout`, máy vẫn dùng được.
@@ -58,23 +59,43 @@
 //! 33. `ok 33 - wx violation x-then-w` — W^X ca 1: `X` rồi `W` ⇒ `WxViolation` atomic.
 //! 34. `ok 34 - wx violation device+exec` — W^X ca 2: `Device+EXEC` ⇒ `WxViolation`.
 //! 35. `ok 35 - map/unmap 4 KiB` — VSpace thật: `satp` + `sfence.vma`, map 4 KiB `U|R|W`,
-//!    ghi/đọc qua VA user (SUM), protect R|NX, unmap, khôi phục `satp` kernel.
+//!     ghi/đọc qua VA user (SUM), protect R|NX, unmap, khôi phục `satp` kernel.
 //! 36. `ok 36 - 0 ro` — 0 rò byte/object/mapping sau revoke; `check_objmem` ĐẠT.
 //! 37. `ok 37 - conformance 5/5` — **KT-55**: 5 `.scn` nền tảng (22..26) chạy trong kernel và in
-//!    `# trace:` cùng định dạng với sim; so 61 dòng / 5 ca (`v2/test/conformance/`). Ca 24 (2 hart)
-//!    in `skipped=smp1` trên `-smp 1`; `fault` của ca 25/26 từ **KT-56** là **trap phần cứng
-//!    thật** (probe load/store, `stval` = VA kịch bản — §19).
+//!     `# trace:` cùng định dạng với sim; so 61 dòng / 5 ca (`v2/test/conformance/`). Ca 24 (2 hart)
+//!     in `skipped=smp1` trên `-smp 1`; `fault` của ca 25/26 từ **KT-56** là **trap phần cứng
+//!     thật** (probe load/store, `stval` = VA kịch bản — §19).
 //! 38. `ok 38 - faultkind vm load` — KT-56: probe **load** VA chưa map ⇒ trap thật `scause=13`,
-//!    phân loại `Vm{access=Read, va=stval, reason=NotMapped}`.
+//!     phân loại `Vm{access=Read, va=stval, reason=NotMapped}`.
 //! 39. `ok 39 - faultkind vm store` — probe **store** ⇒ `scause=15`,
-//!    `Vm{access=Write, va=stval, reason=NotMapped}`.
+//!     `Vm{access=Write, va=stval, reason=NotMapped}`.
 //! 40. `ok 40 - faultkind vm insn` — probe **fetch** ⇒ `scause=12`,
-//!    `Vm{access=Execute, va=stval, reason=NotMapped}`.
+//!     `Vm{access=Execute, va=stval, reason=NotMapped}`.
 //! 41. `ok 41 - wx violation qua ABI` — `map` một lượt `W|X` ⇒ `WxViolation` + mã ABI **4**,
-//!    atomic (không PTE/không panic).
+//!     atomic (không PTE/không panic).
 //! 42. `ok 42 - device exec` — **nợ L3 KT-52**: Frame đã `Device` không được `RX` ở VSpace khác;
-//!    `protect` sang `Device+EXEC` bị từ chối; `mapped_device` đối xứng + `check_objmem`.
-//! 43. `ok 43 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//!     `protect` sang `Device+EXEC` bị từ chối; `mapped_device` đối xứng + `check_objmem`.
+//! 43. `ok 43 - core link` — **KT-61**: `Machine` (`vifast-core`) là static **trong vùng ảnh**;
+//!     `size_of::<Machine>()` ≤ pin D2-84 **196.608 B**; bảng phân bố 27 dòng khớp
+//!     (`sum + scalars + padding == total`, padding ≤ 8 — D2-85c).
+//! 44. `ok 44 - core untyped boot` — Untyped boot dựng từ **nhãn PA** ngay sau arena object layer
+//!     (D2-83: core không dereference), byte `used=0 free=size`, `check_bytes` xanh.
+//! 45. `ok 45 - core tcb retype` — `Retype` **từ Untyped**: CNode gốc + 3 TCB + Endpoint + Reply
+//!    + Notification + SchedControl + 2 SchedContext; cap vào slot, TCB `Inactive`.
+//! 46. `ok 46 - core configure resume suspend` — `Tcb.Configure`/`SetSchedParams`/`SetPriority`
+//!    + `Resume`/`Suspend(Abort)` qua **một cửa** `transition_tcb`; `check_sched`/`check_budget`.
+//! 47. `ok 47 - core sched 2 tcb` — 2 TCB có SC riêng: `sched_pick`/`dispatch` chọn đúng priority;
+//!     `Suspend` TCB 1 ⇒ ra khỏi hàng đợi ⇒ `dispatch` chuyển sang TCB 2.
+//! 48. `ok 48 - core ipc round` — `Call → Recv → Reply` một vòng thật; `BlockedOnSend{call}` →
+//!     `BlockedOnReply` → `Ready`, `Reply.caller` sạch, `check_ipc`/`check_reply_links`.
+//! 49. `ok 49 - core notification signal` — `Wait` (chặn) + `Signal(0x42)` (đánh thức, giao
+//!     word/badge) + `Signal` không waiter rồi `Poll`; `check_notifications`.
+//! 50. `ok 50 - core waitaddr` — `WaitAddr(PPN Frame obj-layer, +64, 0)` chặn, `SetAddr`/
+//!     `WakeAddr(1)` đánh thức; core **không** sở hữu byte Frame (D2-83).
+//! 51. `ok 51 - core d2-83 boundary` — `Retype` Frame/PageTable/VSpace trong core ⇒
+//!     `NotSupported` **3/3** atomic; object layer vẫn tạo/revoke VSpace+Frame thật.
+//! 52. `ok 52 - core invariants` — revoke cây Untyped ⇒ byte về 0, **12/12** bất biến xanh, 0 rò.
+//! 53. `ok 53 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -83,6 +104,7 @@
 #![no_main]
 
 mod ktest_conf;
+mod ktest_core;
 mod ktest_fault;
 mod ktest_ipi;
 mod ktest_obj;
@@ -142,7 +164,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..43\n");
+    PLATFORM.put_str("TAP version 13\n1..53\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -607,7 +629,7 @@ pub extern "C" fn rust_main() -> ! {
 
     // TAP 8: cửa sổ PLIC + cấu hình (ndev/context/threshold/priority/enable) đọc lại từ register.
     let ok_plic_window = plic.is_configured()
-        && plic.ndev > UART0_IRQ as u32
+        && plic.ndev > UART0_IRQ
         && plic.context == plic::current_context()
         && plic.enable_address == plic.base + 0x2000 + 0x80 * plic.context as u64
         && plic.context_address == plic.base + 0x20_0000 + 0x1000 * plic.context as u64 + 4
@@ -917,6 +939,8 @@ pub extern "C" fn rust_main() -> ! {
     fails += ktest_conf::conf_phase();
     // ------------- 38..42) `FaultKind` thật + W^X qua ABI + Device toàn cục (KT-56)
     fails += ktest_fault::fault_phase();
+    // ---------------- 43..52) core `no_std` trên **nhân thật** (KT-61): CNode/TCB/sched/IPC
+    fails += ktest_core::core_phase();
 
     {
         let mut w = PlatformWriter(&PLATFORM);
@@ -935,10 +959,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 43) trap LỒNG (fatal, có chủ đích)
-    // In `ok 43` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 53) trap LỒNG (fatal, có chủ đích)
+    // In `ok 53` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 43 - trap nested panic\n");
+    PLATFORM.put_str("ok 53 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

@@ -40,7 +40,6 @@
 use core::fmt::Write;
 
 use vifast_plat_common::fault::{classify_trap, FaultKind, PteFacts, TrapFacts};
-use vifast_plat_common::mmu::{PTE_ACCESSED, PTE_DIRTY, PTE_EXEC, PTE_READ, PTE_VALID, PTE_WRITE};
 use vifast_plat_common::obj::{CapId, Machine, MapFlags, ObjError, ObjKind};
 use vifast_plat_common::timer::TIMEBASE_HZ;
 use vifast_plat_common::tlb::FlushScope;
@@ -608,6 +607,8 @@ fn scratch_rights(access: &str, want_reason: &str) -> (bool, bool, bool) {
 }
 
 /// In evidence `# faultprobe:` — chứng minh trap đến từ **phần cứng** (scause/stval/sepc thật).
+/// 9 tham số là 9 trường **phần cứng** của một trap (không gộp struct: chỉ dùng một lần ở đây).
+#[allow(clippy::too_many_arguments)]
 fn emit_faultprobe(
     va: u64,
     access: &str,

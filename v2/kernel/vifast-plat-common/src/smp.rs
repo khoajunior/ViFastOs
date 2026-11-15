@@ -245,7 +245,7 @@ pub const fn mask_count(mask: u64) -> u32 {
 // ---------------------------------------------------------------------------------------------
 
 /// EID **SBI HSM** `0x48534D` ("HSM" ASCII) — D2-72 Q4/KT-49.
-pub const SBI_EXT_HSM: u64 = 0x4853_4D;
+pub const SBI_EXT_HSM: u64 = 0x48_53_4D;
 /// FID 0 — `sbi_hart_start(hartid, start_addr, opaque)`.
 pub const SBI_HSM_HART_START: u64 = 0;
 /// FID 1 — `sbi_hart_stop()` (không dùng ở K3).
@@ -355,7 +355,7 @@ const _: () = {
     assert!(HART_STACK_BYTES == 0x10000);
     assert!(HART_TRAP_STACK_BYTES == 0x4000);
     assert!(HART_STRIDE == 0x15000);
-    assert!(HART_STRIDE % 0x1000 == 0); // mọi record bắt đầu ở biên trang
+    assert!(HART_STRIDE.is_multiple_of(0x1000)); // mọi record bắt đầu ở biên trang
     assert!(HART_AREA_BYTES == 0xA8000);
     assert!(HART_AREA_BYTES <= 2 * 1024 * 1024); // vùng NOLOAD nằm trong 2 MiB sau ALIGN(2M)
     assert!(stack_bottom_offset(0) == HART_GUARD_BYTES);
@@ -370,7 +370,7 @@ const _: () = {
     assert!(is_guard_offset(HART_STRIDE)); // guard của hart 1
     assert!(matches!(hart_of_offset(0), Some(0)));
     assert!(matches!(hart_of_offset(HART_STRIDE), Some(1)));
-    assert!(matches!(hart_of_offset(HART_AREA_BYTES), None));
+    assert!(hart_of_offset(HART_AREA_BYTES).is_none());
     assert!(range_mask(1) == 0b1);
     assert!(range_mask(4) == 0b1111);
     assert!(range_mask(MAX_HARTS) == (1u64 << MAX_HARTS) - 1);

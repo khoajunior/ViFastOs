@@ -200,16 +200,15 @@ impl<M: PhysMem> Machine<M> {
         }
         if fail {
             // Rollback: xoá PTE đã nối, trả block chưa dùng, xoá object meta vừa tạo.
-            for k in (0..n_written).rev() {
-                let (t, i) = written[k];
+            for &(t, i) in written[..n_written].iter().rev() {
                 let _ = self.pte_store(t, i, 0);
             }
-            for k in 0..n_block {
+            for &off in block_off[..n_block].iter() {
                 // Block đã dùng (object meta) cũng phải trả: meta vừa tạo khớp `reserved[k]`.
-                let _ = self.untypeds[table_untyped as usize].free(block_off[k], PAGE_TABLE_BYTES);
+                let _ = self.untypeds[table_untyped as usize].free(off, PAGE_TABLE_BYTES);
             }
-            for k in 0..n_res {
-                self.objects[reserved[k] as usize] = Object::EMPTY;
+            for &idx in reserved[..n_res].iter() {
+                self.objects[idx as usize] = Object::EMPTY;
             }
             return Err(ObjError::Corrupt);
         }

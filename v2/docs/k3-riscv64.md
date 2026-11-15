@@ -2237,3 +2237,65 @@ trình đo, không viết tay:
    boot ở cổng KT-57; 50 boot/cấu hình đã có từ KT-54/56, log `kt5*-boot50*`).
 4. K3 **không** phải ABI đầy đủ (Q13): core CNode/TCB/IPC/sched vẫn model-only ⇒ **K3b**; nợ chi
    tiết ở K3-DOD **§12**.
+
+## 21. Nối core `no_std` vào kernel thật + cổng K3b (KT-61)
+
+Nguồn: **D2-82** (K3 DONE phase-level, mở K3b), **D2-83** (biên giới core ↔ object layer VM),
+**D2-84/D2-85** (hai ngưỡng tách: pin `size_of::<Machine>()` ≤ 196.608 B, trần **ảnh** 262.144 B),
+**Q13** (core port ngoài K3); KT-58/59/60 (core `no_std`) + KT-52 (object layer). Bằng chứng đầy đủ
++ bảng D1..D11: [`../agent/reports/K3B-DOD.md`](../agent/reports/K3B-DOD.md); chi tiết tầng core:
+[`k3b-core.md`](k3b-core.md) §9.
+
+### 21.1 Cái gì đã nối
+
+- `vifast-plat-riscv64/src/core_bridge.rs`: `Machine` **static trong vùng ảnh**, `init` từ **nhãn
+  PA** của Untyped boot (`[obj.arena_end, +64 KiB)`), `with_machine` khoá spin, `boot_smoke` cho
+  ảnh sản phẩm. `unsafe` chỉ ở `kernel/vifast-plat-*` (D2-17); `vifast-core` vẫn
+  `#![forbid(unsafe_code)]`.
+- Ảnh **sản phẩm** (soak 1.000): `# core: product …` + một **vòng đời TCB thật** mỗi boot
+  (`Retype→Configure→Suspend/Resume→revoke`); sai ⇒ `PANIC: core init product`.
+- Ảnh **test** `ktest`: TAP **43..52** chạy trên `Machine` thật (CNode/MDB/cap/TCB/sched/MCS/IPC/
+  Notification/WaitAddr/fault), trap lồng dời **53**; `expected.txt` = **53 53** (nguồn sự thật
+  duy nhất); `ktest.sh` thêm **11** regex evidence `# core:`.
+
+### 21.2 Biên D2-83 — điều KHÔNG đổi
+
+`Frame`/`PageTable`/`VSpace` **vẫn** ở object layer `vifast_plat_common::obj` (KT-52). Core
+`Retype` ba loại này trả `NotSupported` (TAP 51: 3/3 + `untyped_used` không đổi — atomic) trong khi
+object layer vẫn tạo/revoke VSpace/Frame thật. Cầu nối **một chiều**: Untyped của core là **nhãn
+PA**; khoá `WaitAddr` là **PPN** của Frame obj-layer (core chỉ lưu `(nhãn, offset) -> u64`, không
+đọc byte/PTE). Core **từ chối** `add_kernel_object(Frame)` (`is_core()` = false) — biên giới được
+chính core cưỡng chế, không chỉ bằng quy ước.
+
+### 21.3 Hai ngưỡng — không đọc lẫn (D2-85a)
+
+| Ngưỡng | Áp cho | Số `[ĐO]` | Log |
+|---|---|---|---|
+| 196.608 B (pin D2-84) | `size_of::<Machine>()` | **180.168 B** | `# core: link … bytes=180168 pin=196608` |
+| 262.144 B (trần ảnh QD §3.5) | `.data+.sdata+.bss+.sbss` ELF thật | xem `K3B-DOD.md` §6 (`budget.sh` từng ảnh) | `JOURNAL/kt61-budget.log` |
+
+Static nằm trong **`.bss`** (`MaybeUninit` — NOBITS) + `Machine::init_zeroed` khởi tạo tại chỗ
+lúc boot; **không** có 180 KB trong **file** ảnh (segment RW `filesz` 7.760/7.912 B; file product
+185.464 / ktest 484.600 B — giảm ~180 KB so bản `.data` đã thử). Hai bản trước **hỏng thật trên
+QEMU** và có log: `.data` (180 KB vào file — bỏ vì đắt) và `MaybeUninit`+`write` (bản tạm 180.168 B
+trên stack 64 KiB ⇒ guard page fault, `JOURNAL/kt61-red-before-core-link.log`). Ngân sách
+`.data+.bss` vẫn cộng **đủ** `size_of::<Machine>()`; TAP 43 chứng minh static trong vùng ảnh.
+
+### 21.4 Cổng K3b (điều kiện + log)
+
+| Điều kiện | Kết quả |
+|---|---|
+| `gate --fast` | xanh, 0 failed, L1 1.000 seed (`JOURNAL/kt61-gate.log`) |
+| TAP matrix `smp 1/2/4` × 3 ảnh | **53/53 + 3/3 + 7/7** mỗi cấu hình, 9/9 boot sạch (`JOURNAL/kt61-ktest-matrix.log`) |
+| Soak ảnh sản phẩm | **0/1000**, 3 luồng, không icount, timeout 20 s (`JOURNAL/kt61-soak.log`) |
+| Conformance 5 `.scn` | **61/61 dòng / 5/5 ca** — core không đổi đường VM (`JOURNAL/kt61-trace-compare.log`) |
+| L1 100k × smp 1/2/4/8 | `JOURNAL/kt61-l1-100k.log` |
+| Budget | cả **hai** ngưỡng, 4 ảnh (`JOURNAL/kt61-budget.log`) |
+
+### 21.5 Còn lại (K3.5) — không claim kernel đầy đủ
+
+`procsrv`/shell (K3.5); **chuyển cap** qua IPC (receive window/`plan_cap_transfer`, D2-53 Q6);
+**finalise IPC object khi Revoke** (huỷ `Reply.caller`, đánh thức Recv waiter, huỷ hàng — nợ
+KT-60 §8.6.2); `TlbFlush` **thật** trong core (KT-61 giữ placeholder); `SchedContext.Bind`
+(`bound_sc` trường chết); `tcb_resume_with_regs`; `SlotPool` → slot arena (§9.6); syscall/`init`
+U-mode dùng core. Core **không** sở hữu VM (D2-83) — không đổi biên giới này nếu không có D2 mới.

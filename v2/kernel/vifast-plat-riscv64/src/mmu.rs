@@ -60,9 +60,9 @@ use vifast_plat_common::smp::{
 #[cfg(feature = "ktest")]
 use vifast_plat_common::trap::EXC_LOAD_PAGE_FAULT;
 use vifast_plat_common::trap::{Exception, ExceptionKind, TrapFrame};
-use vifast_plat_common::Platform;
 #[cfg(feature = "ktest")]
-use vifast_plat_common::PlatformWriter;
+#[cfg(feature = "ktest")]
+use vifast_plat_common::{Platform, PlatformWriter};
 
 #[cfg(feature = "ktest")]
 use crate::{instruction_len, Riscv64Virt};
@@ -321,7 +321,7 @@ pub fn init() -> MmuReport {
     for (index, va) in samples.iter().enumerate() {
         pre_ptes[index] = walk_with(&PhysMemory, root, *va).raw();
     }
-    drop(builder);
+    let _ = builder;
 
     let satp = satp_sv39(root);
     // Bước 2: bảng đã xong — mới bật `satp` + `sfence.vma`. Một asm block để không có thao tác
@@ -708,7 +708,7 @@ pub fn high_alias(pa: u64) -> Option<u64> {
 
 /// VA physmap của một PA thuộc RAM, nếu có.
 pub fn physmap_alias(pa: u64) -> Option<u64> {
-    if pa >= RAM_PHYS_BASE && pa < RAM_PHYS_BASE + RAM_BYTES {
+    if (RAM_PHYS_BASE..RAM_PHYS_BASE + RAM_BYTES).contains(&pa) {
         Some(PHYSMAP_BASE + pa)
     } else {
         None

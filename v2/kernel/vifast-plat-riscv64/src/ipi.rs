@@ -296,7 +296,7 @@ pub fn wait_drain(timeout_ticks: u64, mut ready: impl FnMut() -> bool) -> bool {
     let deadline = deadline_after(timer::now_ticks(), timeout_ticks);
     let outcome = wait_with_drain(
         deadline,
-        || timer::now_ticks(),
+        timer::now_ticks,
         || {
             let _ = drain_current();
         },

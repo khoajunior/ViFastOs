@@ -1,0 +1,72 @@
+# KT-61 — kích thước FILE + PT_LOAD filesz/memsz 4 ảnh (chứng minh .bss không nằm trong file)
+# công cụ: llvm-readobj --program-headers (rustc 1.99.1)
+
+## image=product path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 bytes=185464
+    Type: PT_LOAD (0x1)
+    FileSize: 48156
+    MemSize: 48156
+    Type: PT_LOAD (0x1)
+    FileSize: 13824
+    MemSize: 13824
+    Type: PT_LOAD (0x1)
+    FileSize: 7760
+    MemSize: 2719744
+    FileSize: 0
+    MemSize: 0
+    FileSize: 116
+    MemSize: 116
+
+## image=ktest path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest bytes=484600
+    Type: PT_LOAD (0x1)
+    FileSize: 144594
+    MemSize: 144594
+    Type: PT_LOAD (0x1)
+    FileSize: 47752
+    MemSize: 47752
+    Type: PT_LOAD (0x1)
+    FileSize: 7912
+    MemSize: 2588672
+    FileSize: 0
+    MemSize: 0
+    FileSize: 116
+    MemSize: 116
+
+## image=ktest-guard path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard bytes=53808
+    Type: PT_LOAD (0x1)
+    FileSize: 11300
+    MemSize: 11300
+    Type: PT_LOAD (0x1)
+    FileSize: 2896
+    MemSize: 2896
+    Type: PT_LOAD (0x1)
+    FileSize: 0
+    MemSize: 2768896
+    FileSize: 0
+    MemSize: 0
+    FileSize: 116
+    MemSize: 116
+
+## image=ktest-user path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user bytes=151912
+    Type: PT_LOAD (0x1)
+    FileSize: 34200
+    MemSize: 34200
+    Type: PT_LOAD (0x1)
+    FileSize: 21624
+    MemSize: 21624
+    Type: PT_LOAD (0x1)
+    FileSize: 7704
+    MemSize: 2723840
+    FileSize: 0
+    MemSize: 0
+    FileSize: 116
+    MemSize: 116
+
+## rebuild cuối trên cây đóng băng (sau khi chỉ sửa doc/comment + lint) — BUILD_ID .text và sha256
+product bytes=185464 build=34dc594e0f651ed3 text=48156
+fb68981d8c2f2bdf03338ae3bd4ddf5265dc9c147faeec2b9d61ec1d18487ff5
+ktest bytes=484600 build=aab21609a80ca7a1 text=144594
+2732bf37c4934c870527587641811dab79f0107e84756983340a7428f44cd59c
+ktest-guard bytes=53808 build=1ea68a17aec63038 text=11300
+ac4cdbedaa27d4ba01192296c2c2aee3dd2a69c97c712a4516823a1cf38886de
+ktest-user bytes=151912 build=ca2165eaa2eb4417 text=34200
+1c07841d1732b18490831bad68715466be7b9a18e8db0d1c262fdc024ad94b17

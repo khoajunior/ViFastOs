@@ -21,6 +21,7 @@ version = "0.1.0"
 name = "vifast-kbin-riscv64"
 version = "0.1.0"
 dependencies = [
+ "vifast-core",
  "vifast-plat-common",
  "vifast-plat-riscv64",
  "vifast-scenario",
@@ -38,6 +39,7 @@ dependencies = [
 name = "vifast-plat-riscv64"
 version = "0.1.0"
 dependencies = [
+ "vifast-core",
  "vifast-elf",
  "vifast-plat-common",
 ]

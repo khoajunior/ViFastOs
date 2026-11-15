@@ -21,3 +21,7 @@ vifast-plat-common = { path = "../vifast-plat-common" }
 # KT-53: parse/validate ELF64 user (`PT_LOAD`, W^X) — crate nội bộ `no_std`,
 # `forbid(unsafe_code)`, không dependency ngoài (D2-21); loader/map vẫn ở crate arch.
 vifast-elf = { path = "../../lib/vifast-elf" }
+# KT-61: core `no_std` (CNode/MDB/cap/TCB/scheduler/IPC) link vào ảnh kernel thật.
+# Crate nội bộ, `forbid(unsafe_code)`, không `alloc` (D2-21). D2-83: core **không** sở hữu
+# Frame/PageTable/VSpace — phần đó vẫn ở `vifast-plat-common::obj` (KT-52).
+vifast-core = { path = "../vifast-core" }

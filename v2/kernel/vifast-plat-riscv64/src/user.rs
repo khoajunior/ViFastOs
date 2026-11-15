@@ -580,7 +580,7 @@ fn classify_u_fault(tf: &TrapFrame, exc: &Exception) -> Option<FaultKind> {
             sepc: exc.sepc,
             from_user: true,
         };
-        return fault::classify_trap(&facts, LAST_ASID.load(Ordering::Relaxed), pte);
+        fault::classify_trap(&facts, LAST_ASID.load(Ordering::Relaxed), pte)
     }
     #[cfg(not(feature = "ktest"))]
     {
@@ -600,7 +600,7 @@ fn classify_u_fault(tf: &TrapFrame, exc: &Exception) -> Option<FaultKind> {
 /// Địa chỉ trong vùng ảnh kernel (identity 2 MiB đầu) — dùng cho bằng chứng "kernel_addr" của
 /// fault cách ly. Không phải kiểm an ninh (an ninh do PTE `U=0` quyết định).
 fn is_kernel_addr(addr: u64) -> bool {
-    addr >= mmu::KERNEL_PHYS_BASE && addr < mmu::KERNEL_PHYS_BASE + 0x0020_0000
+    (mmu::KERNEL_PHYS_BASE..mmu::KERNEL_PHYS_BASE + 0x0020_0000).contains(&addr)
 }
 
 /// Lớp đọc bộ nhớ user của syscall `DebugPutStr`: kiểm dải user + PTE (`U|R`), đọc bằng
