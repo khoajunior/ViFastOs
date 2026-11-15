@@ -68,15 +68,24 @@ bad:
     j .
 
 fault_mode:
-    # Lượt **cách ly**: U-mode đọc địa chỉ kernel identity (leaf U=0) ⇒ load page fault
-    # scause=13, stval=0x8020_0000; kernel in bằng chứng + PANIC + halt sạch.
+    # mode 1 (KT-56): U-mode đọc địa chỉ kernel identity (leaf U=0) ⇒ load page fault
+    # scause=13, stval=0x8020_0000; lượt này **được phép fault** (TAP 5 kiểm FaultKind rồi về
+    # S-mode), nên nếu không fault thì Exit(98) để TAP đỏ.
+    li t0, 2
+    beq a0, t0, wx_mode
     li t0, 0x80200000
     ld t1, 0(t0)
-    # Không fault nghĩa là kernel bị map U=1 — thoát 98 để TAP đỏ.
     li a0, 98
     li a7, 14
     ecall
     j .
+
+wx_mode:
+    # mode 2 (KT-56): U-mode **thực thi** trang `.data` (RW NX của chính init) ⇒ instruction page
+    # fault scause=12; PTE hợp lệ, U=1, W=1, X=0 ⇒ FaultKind::Vm access=Execute reason=Wx.
+    # Đây là fault **fatal** cuối boot (chính sách K3: log + halt), có chủ đích.
+    la t0, counter
+    jr t0
 
     .section .rodata
     .balign 8

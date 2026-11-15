@@ -158,6 +158,27 @@ pub enum ObjError {
 }
 
 impl ObjError {
+    /// Mã lỗi ABI (`spec/abi.toml` `[error]`) tương ứng — `None` cho lỗi **nội bộ** không có mã
+    /// ABI (`NoSlots`/`Corrupt`). KT-56 dùng để chứng minh `WxViolation` đi đúng mã **4** qua
+    /// đường công khai (không phải chuỗi tự khai).
+    pub const fn abi_code(self) -> Option<u16> {
+        match self {
+            ObjError::InvalidCapability => Some(1),
+            ObjError::WrongObjectType => Some(2),
+            ObjError::InsufficientRights => Some(3),
+            ObjError::WxViolation => Some(4),
+            ObjError::InvalidArgument => Some(5),
+            ObjError::Alignment => Some(6),
+            ObjError::NotEnoughMemory => Some(9),
+            ObjError::AlreadyMapped => Some(10),
+            ObjError::NotMapped => Some(11),
+            ObjError::HasChildren => Some(13),
+            ObjError::NotSupported => Some(18),
+            ObjError::RangeError => Some(19),
+            ObjError::NoSlots | ObjError::Corrupt => None,
+        }
+    }
+
     /// Tên ổn định cho log/kiểm thử (trùng `spec/abi.toml` khi có).
     pub const fn code_name(self) -> &'static str {
         match self {
@@ -401,6 +422,8 @@ struct Object {
     maps: u16,
     mapped_w: u16,
     mapped_x: u16,
+    /// Số mapping **Device** đang sống trên Frame (D2-67 toàn cục — KT-56, nợ L3 KT-52).
+    mapped_device: u16,
     asid: u16,
 }
 
@@ -420,6 +443,7 @@ impl Object {
         maps: 0,
         mapped_w: 0,
         mapped_x: 0,
+        mapped_device: 0,
         asid: 0,
     };
 }
@@ -928,6 +952,9 @@ impl<M: PhysMem> Machine<M> {
                         }
                         if flags.exec {
                             f.mapped_x = f.mapped_x.saturating_sub(1);
+                        }
+                        if flags.device {
+                            f.mapped_device = f.mapped_device.saturating_sub(1);
                         }
                         self.objects[map.frame as usize] = f;
                     }

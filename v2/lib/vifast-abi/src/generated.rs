@@ -101,3 +101,12 @@ pub const TRACE_FIELDS: [(&str, usize, usize); 6] = [
 ];
 #[rustfmt::skip]
 pub const TCB_STATES: [&str; 11] = ["Inactive", "Ready", "Running", "BlockedOnSend", "BlockedOnRecv", "BlockedOnReply", "BlockedOnNotification", "BlockedOnAddress", "Sleeping", "Stopping", "Dead"];
+#[rustfmt::skip]
+pub const FAULT_KIND_COUNT: usize = 4;
+#[rustfmt::skip]
+pub const FAULT_KINDS: [(&str, &[&str]); 4] = [
+    ("Exit", &["code: u64"]),
+    ("Vm", &["vspace: u64", "va: u64", "access: Read|Write|Execute", "reason: NotMapped|Permission|Wx"]),
+    ("UnknownSyscall", &["nr: u64"]),
+    ("UserException", &["ip: u64", "kind: u64"]),
+];

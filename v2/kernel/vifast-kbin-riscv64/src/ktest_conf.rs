@@ -2,7 +2,7 @@
 //! Pha **conformance 5 `.scn` × sim/QEMU** của ảnh test `vifast-kbin-ktest` (KT-55).
 //!
 //! Nối sau pha object layer KT-52 (`ktest_obj::obj_phase`); TAP **37**
-//! (`ok 37 - conformance 5/5`), trap lồng dời sang **38**.
+//! (`ok 37 - conformance 5/5`); trap lồng dời sang **43** (KT-56 thêm TAP 38..42).
 //!
 //! # Vì sao 5 ca + tập bước rút gọn
 //!
@@ -39,14 +39,16 @@
 
 use core::fmt::Write;
 
-use vifast_plat_common::mmu::{PTE_EXEC, PTE_READ, PTE_WRITE};
+use vifast_plat_common::fault::{classify_trap, FaultKind, PteFacts, TrapFacts};
+use vifast_plat_common::mmu::{PTE_ACCESSED, PTE_DIRTY, PTE_EXEC, PTE_READ, PTE_VALID, PTE_WRITE};
 use vifast_plat_common::obj::{CapId, Machine, MapFlags, ObjError, ObjKind};
 use vifast_plat_common::timer::TIMEBASE_HZ;
 use vifast_plat_common::tlb::FlushScope;
 use vifast_plat_common::{Platform, PlatformWriter};
 use vifast_plat_riscv64::obj::{self as aobj, PhysmapMem};
+use vifast_plat_riscv64::probe::{self, ProbeKind};
 use vifast_plat_riscv64::tlb::ShootdownOutcome;
-use vifast_plat_riscv64::{smp, tlb, Riscv64Virt};
+use vifast_plat_riscv64::{mmu, smp, tlb, Riscv64Virt};
 use vifast_scenario::{IrStep, Op, RawStep, MAX_STEPS};
 use vifast_traceformat::TraceLine;
 
@@ -441,19 +443,40 @@ fn run_case(id: u8, tag: &str, text: &str, m: &mut Mac, rig: &Rig) -> Option<(us
             Op::Fault => {
                 let va = parse_u64(step.get("va").unwrap_or("0x0"));
                 let access = step.get("access").unwrap_or("Read");
+                let want_reason = step.get("reason").unwrap_or("ok");
                 let vs = step.get("vs").and_then(|v| rig.vspace(v));
-                let got = match vs {
-                    Some(vs) => classify_fault(m, vs, va, access),
-                    None => "BadObject",
-                };
-                line.field_hex("va", va)
-                    .field_str("access", access)
-                    .field_str("reason", got);
-                // Kỳ vọng của bước `vm_expect_fault` là `reason=<…>`; `expect` của tệp là `ok`
-                // (fault được giao đúng payload) nên so với `reason`, không so với `ok`.
-                if got != step.get("reason").unwrap_or("ok") {
-                    fails += 1;
-                    result = got;
+                match vs {
+                    Some(vs) => match probe_vm_fault(m, vs, va, access, want_reason) {
+                        Ok(kind) => {
+                            let got = match kind {
+                                FaultKind::Vm { reason, .. } => reason.name(),
+                                _ => "NotVm",
+                            };
+                            line.field_hex("va", va)
+                                .field_str("access", access)
+                                .field_str("reason", got);
+                            // Kỳ vọng của bước `vm_expect_fault` là `reason=<…>`; `expect` của
+                            // tệp là `ok` (fault đúng payload) nên so với `reason`, không `ok`.
+                            if got != want_reason {
+                                fails += 1;
+                                result = "Mismatch";
+                            }
+                        }
+                        Err(why) => {
+                            line.field_hex("va", va)
+                                .field_str("access", access)
+                                .field_str("reason", "NoTrap");
+                            fails += 1;
+                            result = why;
+                        }
+                    },
+                    None => {
+                        line.field_hex("va", va)
+                            .field_str("access", access)
+                            .field_str("reason", "BadObject");
+                        fails += 1;
+                        result = "BadObject";
+                    }
                 }
             }
         }
@@ -489,24 +512,120 @@ fn run_case(id: u8, tag: &str, text: &str, m: &mut Mac, rig: &Rig) -> Option<(us
     Some((n_ir, fails))
 }
 
-/// Phân loại fault **quan sát từ PTE thật** (không phải `FaultKind` ABI — KT-56): chưa map
-/// (`valid=0`) ⇒ `NotMapped`; đã map nhưng thiếu quyền ⇒ `Permission`; còn lại `ok`.
-fn classify_fault(m: &Mac, vs: CapId, va: u64, access: &str) -> &'static str {
-    match m.walk(vs, va) {
-        Ok(info) if info.valid && info.leaf => {
-            let need = match access {
-                "Write" => PTE_WRITE,
-                "Execute" => PTE_EXEC,
-                _ => PTE_READ,
-            };
-            if info.raw & need == 0 {
-                "Permission"
-            } else {
-                "ok"
-            }
-        }
-        _ => "NotMapped",
+/// **Trap phần cứng thật** cho một bước `vm_expect_fault` (KT-56 — thay phân loại PTE của KT-55).
+///
+/// Cơ chế: nếu VA đã có leaf trong rig VSpace, **scratch-map** đúng PA đó vào root kernel tại
+/// **đúng VA kịch bản** với cờ làm phép truy cập `access` fault (bảng cấp 0 dự phòng — xem
+/// `vifast_plat_riscv64::mmu::map_scratch_4k`); nếu chưa map thì để nguyên. Sau đó một
+/// instruction load/store/jump thật của `crate::probe` gây trap; `scause/stval/sepc` lấy từ
+/// trapframe phần cứng, `reason` lấy từ PTE **đã cấu hình cho phép thử** (đúng luật `D2-56a`).
+///
+/// Trả `Err(mã)` khi không có trap (kỳ vọng sai — ca đỏ, không im lặng) hoặc trap trả biến thể
+/// không phải `Vm`.
+fn probe_vm_fault(
+    m: &Mac,
+    vs: CapId,
+    va: u64,
+    access: &str,
+    want_reason: &str,
+) -> Result<FaultKind, &'static str> {
+    let walk = m.walk(vs, va).ok();
+    let mapped = walk.filter(|w| w.valid && w.leaf);
+    let (r, w, x) = scratch_rights(access, want_reason);
+    let scratch = match mapped {
+        Some(info) => mmu::map_scratch_4k(va, info.phys, r, w, x),
+        None => false,
+    };
+    // **Đọc leaf thật** từ bảng trang đang hoạt động (root kernel) — không dựng PTE bằng tay:
+    // `reason` phải suy từ entry phần cứng sẽ dùng, không phải từ biến `(r,w,x)` của test.
+    // Làm **trước** khi gỡ scratch để entry còn đó.
+    let pte = {
+        let walk_sw = mmu::walk_sw(va);
+        Some(PteFacts::new(walk_sw.valid, walk_sw.leaf, walk_sw.raw()))
+    };
+    let probe_kind = match access {
+        "Write" => ProbeKind::Store,
+        "Execute" => ProbeKind::Exec,
+        _ => ProbeKind::Load,
+    };
+    let trap = probe::probe_fault(probe_kind, va);
+    if scratch {
+        let _ = mmu::unmap_scratch_4k(va);
     }
+    let Some(trap) = trap else {
+        emit_faultprobe(va, access, 0, 0, 0, "NoTrap", scratch, mapped.is_some(), 0);
+        return Err("NoTrap");
+    };
+    let facts = TrapFacts {
+        scause: trap.scause,
+        stval: trap.stval,
+        sepc: trap.sepc,
+        from_user: trap.spp == 0,
+    };
+    let kind = classify_trap(&facts, u64::from(m.vspace_asid(vs).unwrap_or(0)), pte);
+    let pte_raw = pte.map(|p| p.raw).unwrap_or(0);
+    let reason = match kind {
+        Some(FaultKind::Vm { reason, .. }) => reason.name(),
+        Some(FaultKind::UserException { .. }) => "UserException",
+        _ => "NotVm",
+    };
+    emit_faultprobe(
+        va,
+        access,
+        trap.scause,
+        trap.stval,
+        trap.sepc,
+        reason,
+        scratch,
+        mapped.is_some(),
+        pte_raw,
+    );
+    match kind {
+        Some(kind @ FaultKind::Vm { .. }) => {
+            // D2-56a: `va` của `FaultKind` phải là `stval` của trap.
+            let ok_stval = matches!(kind, FaultKind::Vm { va: got, .. } if got == trap.stval);
+            if !ok_stval || trap.stval != va {
+                return Err("StvalMismatch");
+            }
+            Ok(kind)
+        }
+        Some(_) => Err("NotVm"),
+        None => Err("NoFault"),
+    }
+}
+
+/// Quyền của **scratch leaf** để phép thử `access` fault đúng `want_reason`:
+/// `NotMapped` không map; `Permission` thiếu đúng quyền (và không tạo W^X); `Wx` tạo thế W+X.
+fn scratch_rights(access: &str, want_reason: &str) -> (bool, bool, bool) {
+    match (access, want_reason) {
+        ("Write", "Permission") => (true, false, false),
+        ("Write", "Wx") => (true, false, true),
+        ("Execute", "Permission") => (true, false, false),
+        ("Execute", "Wx") => (true, true, false),
+        ("Read", "Permission") => (false, false, true),
+        _ => (true, false, false),
+    }
+}
+
+/// In evidence `# faultprobe:` — chứng minh trap đến từ **phần cứng** (scause/stval/sepc thật).
+fn emit_faultprobe(
+    va: u64,
+    access: &str,
+    scause: u64,
+    stval: u64,
+    sepc: u64,
+    reason: &str,
+    scratch: bool,
+    mapped: bool,
+    pte_raw: u64,
+) {
+    let mut w = PlatformWriter(&PLATFORM);
+    let _ = writeln!(
+        w,
+        "# faultprobe: va=0x{va:x} access={access} scause=0x{scause:x} stval=0x{stval:x} sepc=0x{sepc:x} pte=0x{pte_raw:x} reason={reason} mapped={} scratch={} src=trap",
+        u8::from(mapped),
+        u8::from(scratch)
+    );
 }
 
 /// Pha conformance — trả số lỗi (0 = sạch); tự in TAP 37 khi sạch.

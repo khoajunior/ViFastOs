@@ -43,6 +43,7 @@ use core::fmt::Write;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use vifast_elf::ElfError;
+use vifast_plat_common::fault::{self, FaultKind, PteFacts, TrapFacts, FAULT_STATS};
 use vifast_plat_common::mmu::{PTE_EXEC, PTE_READ, PTE_USER, PTE_WRITE};
 use vifast_plat_common::obj::{CapId, MapFlags, ObjError, ObjKind};
 use vifast_plat_common::trap::{
@@ -81,6 +82,15 @@ pub const USER_STACK_GUARD_TOP: u64 = USER_STACK_TOP - USER_STACK_BYTES;
 
 /// Số dải VA user được phép đọc trong `DebugPutStr`: mỗi `PT_LOAD` một dải + stack user.
 const MAX_USER_RANGES: usize = vifast_elf::MAX_LOAD_SEGMENTS + 1;
+
+/// VSpace của lượt U-mode gần nhất (để phân loại fault **sau khi** khôi phục root kernel).
+static LAST_VSPACE: AtomicU32 = AtomicU32::new(u32::MAX);
+/// ASID nhãn của VSpace đó — nhãn `FaultKind::Vm.vspace`.
+static LAST_ASID: AtomicU64 = AtomicU64::new(0);
+/// `1` ⇔ lượt U-mode hiện tại **được phép** fault để TAP kiểm `FaultKind` (test-only): handler
+/// phân loại + ghi bằng chứng rồi về S-mode, **không** PANIC. Mặc định `0` = chính sách K3
+/// (fault U-mode ⇒ log + halt). Đây là deviation **chỉ trong ảnh test**, ghi ở §19 docs.
+static USER_FAULT_RECOVER: AtomicU32 = AtomicU32::new(0);
 
 /// Bảng dải VA user **đã map** (ghi lúc nạp, đọc trong syscall) — thay cho `walk` PTE sau khi
 /// `satp` trỏ root user (root user **không** có physmap/high alias, xem
@@ -416,6 +426,24 @@ fn write_page(pa: u64, data: &[u8]) -> bool {
 /// `mode` được đặt vào `a0` — chương trình `init` dùng để chọn lượt chạy (0 = syscall, 1 = cố
 /// đọc địa chỉ kernel cho TAP cách ly).
 pub fn enter(loaded: &LoadedInit, mode: u64) -> Result<UserSnapshot, LoadError> {
+    enter_with(loaded, mode, false)
+}
+
+/// Như [`enter`] nhưng **cho phép một fault** U-mode (TAP `faultkind vm load`): handler phân loại
+/// `FaultKind` + ghi bằng chứng rồi trả về S-mode. Chỉ ảnh test dùng; chính sách mặc định của K3
+/// vẫn là fatal (`enter`).
+pub fn enter_expect_fault(loaded: &LoadedInit, mode: u64) -> Result<UserSnapshot, LoadError> {
+    enter_with(loaded, mode, true)
+}
+
+fn enter_with(
+    loaded: &LoadedInit,
+    mode: u64,
+    expect_fault: bool,
+) -> Result<UserSnapshot, LoadError> {
+    LAST_VSPACE.store(u32::from(loaded.vspace.0), Ordering::Relaxed);
+    LAST_ASID.store(u64::from(loaded.asid), Ordering::Relaxed);
+    USER_FAULT_RECOVER.store(u32::from(expect_fault), Ordering::Relaxed);
     let mut tf = TrapFrame::zeroed();
     tf.x[REG_SP] = USER_STACK_TOP;
     // `a0` = mode; các thanh ghi khác 0 (không lộ địa chỉ kernel cho user).
@@ -466,7 +494,14 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
                 tf.advance_pc(4);
                 crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
             }
-            SyscallAction::Exit { .. } => {
+            SyscallAction::Exit { code } => {
+                // KT-56/D2-56a: `Exit` là fault kind ABI (đi hàng gửi không Reply — D2-25).
+                let kind = FaultKind::Exit { code };
+                FAULT_STATS.record(kind);
+                {
+                    let mut w = PlatformWriter(&Riscv64Virt);
+                    let _ = writeln!(w, "# u-mode exit: code={code} faultkind={kind}");
+                }
                 exit_to_kernel(tf);
                 crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
             }
@@ -482,21 +517,84 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
         return;
     }
 
-    // Mọi fault từ U-mode là fatal: ghi bằng chứng TRƯỚC khi halt.
+    // Fault U-mode: phân loại `FaultKind` từ **trapframe phần cứng** + PTE thật của VSpace
+    // (sau khi khôi phục root kernel — root user không có physmap). Ghi bằng chứng TRƯỚC khi
+    // quyết định fatal hay resume (deviation test-only: `enter_expect_fault`).
+    let recover = USER_FAULT_RECOVER.swap(0, Ordering::SeqCst) == 1;
     USER_TASK.record_fault(saved.scause, saved.stval, saved.sepc);
-    crate::TRAP_STATS.record_exception(&saved, exc.kind, false);
+    let kind = classify_u_fault(&saved, exc);
+    if let Some(kind) = kind {
+        FAULT_STATS.record(kind);
+    }
+    crate::TRAP_STATS.record_exception(&saved, exc.kind, recover);
     {
         let mut w = PlatformWriter(&Riscv64Virt);
-        let _ = writeln!(
+        let _ = write!(
             w,
-            "# u-mode fault: scause=0x{:x} stval=0x{:x} sepc=0x{:x} from_u=1 kernel_addr={} fatal=1",
+            "# u-mode fault: scause=0x{:x} stval=0x{:x} sepc=0x{:x} from_u=1 kernel_addr={} recover={} faultkind=",
             saved.scause,
             saved.stval,
             saved.sepc,
-            is_kernel_addr(saved.stval) as u8
+            is_kernel_addr(saved.stval) as u8,
+            u8::from(recover)
         );
+        match kind {
+            Some(kind) => {
+                let _ = writeln!(w, "{kind}");
+            }
+            None => {
+                let _ = writeln!(w, "none");
+            }
+        }
+    }
+    if recover {
+        // Test-only: về S-mode ngay sau trap (không resume instruction lỗi); caller TAP kiểm
+        // `FaultKind` + `scause/stval` từ `FAULT_STATS`.
+        exit_to_kernel(tf);
+        return;
     }
     vifast_plat_common::trap::report_u_fault(&Riscv64Virt, exc, tf)
+}
+
+/// Phân loại fault U-mode **từ trapframe** (scause/stval/sepc) + PTE thật của VSpace đã nạp.
+///
+/// `restore_kernel_root` trước khi `walk`: sau `sret` xuống U-mode, root đang hoạt động là root
+/// user **không** có physmap ([`crate::obj::copy_kernel_low_root`], KT-53), nên không thể đọc
+/// PTE; khôi phục root kernel là an toàn vì fault này không quay lại instruction lỗi.
+fn classify_u_fault(tf: &TrapFrame, exc: &Exception) -> Option<FaultKind> {
+    #[cfg(feature = "ktest")]
+    {
+        let restored = aobj::restore_kernel_root();
+        let vs = LAST_VSPACE.load(Ordering::Relaxed);
+        let pte = if restored && vs != u32::MAX {
+            aobj::machine()
+                .walk(CapId(vs as u16), tf.stval)
+                .ok()
+                .map(|w| PteFacts::new(w.valid, w.leaf, w.raw))
+        } else {
+            None
+        };
+        let facts = TrapFacts {
+            scause: exc.scause,
+            stval: exc.stval,
+            sepc: exc.sepc,
+            from_user: true,
+        };
+        return fault::classify_trap(&facts, LAST_ASID.load(Ordering::Relaxed), pte);
+    }
+    #[cfg(not(feature = "ktest"))]
+    {
+        let _ = tf;
+        // Không có physmap để walk trong chế độ không-ktest: vẫn phân loại theo **cùng bảng**
+        // `scause` (12/13/15 ⇒ `Vm`, còn lại `UserException`), `pte=None` ⇒ `NotMapped`.
+        let facts = TrapFacts {
+            scause: exc.scause,
+            stval: exc.stval,
+            sepc: exc.sepc,
+            from_user: true,
+        };
+        fault::classify_trap(&facts, 0, None)
+    }
 }
 
 /// Địa chỉ trong vùng ảnh kernel (identity 2 MiB đầu) — dùng cho bằng chứng "kernel_addr" của

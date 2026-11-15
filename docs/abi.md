@@ -88,6 +88,15 @@ SINH TỰ ĐỘNG bởi `v2/tools/vifast-gen` từ `spec/abi.toml` — **đừng
 | `Tcb.Suspend` | tcb, mode | — |
 | `Untyped.Retype` | cap, type, size_bits, flags | — |
 
+## `FaultKind` (D2-56a, `[method_signature.fault_kind]`)
+
+| Biến thể | Trường |
+|---|---|
+| `Exit` | code: u64 |
+| `Vm` | vspace: u64, va: u64, access: Read|Write|Execute, reason: NotMapped|Permission|Wx |
+| `UnknownSyscall` | nr: u64 |
+| `UserException` | ip: u64, kind: u64 |
+
 ## Trace (D2-40, `[trace]`)
 
 `record_bytes = 32`, `little`; header `{'magic': 'VFT1', 'version': 1, 'count': 'u32', 'hash': 'fnv1a64'}`

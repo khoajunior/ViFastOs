@@ -2014,3 +2014,126 @@ biến đã có**, không phải nới ngưỡng và không đổi `spec/`.
 `FaultKind` thật + `scause`→`FaultKind` + W^X **fault** + `spec/abi.toml` (KT-56); soak 1.000 boot +
 perf + K3-DOD (KT-57); port core/TCB/IPC/procsrv (K3.5/`KT-58`) — mở khoá các bước `vm_dispatch/
 vm_expect_state/vm_procsrv_*` cho conformance sau này; `.scn` mới (K2 đã đóng 26 tệp / 16 nhóm).
+
+## 19. `FaultKind` thật + W^X + `spec/abi.toml` một lần (KT-56)
+
+Nguồn: **D2-56a** (`FaultKind` vào ABI), **D2-67** (W^X toàn cục), **D2-72 Q1** (`spec/abi.toml`
+mở **một lần**, chỉ `FaultKind`), **D2-79** (số syscall ngoài dải = `RangeError`), D2-25 (`Exit`),
+K2 `v2/sim/vifast-sim/src/tcb.rs` (`FaultKind`/`FaultAccess`/`VmFaultReason`), KT-52 §15.10 mục 11
+(nợ L3 `mapped_device`). Tệp `spec/` duy nhất bị sửa: `spec/abi.toml`, **một hunk** (kiểm bằng
+`git diff spec/`; xem `JOURNAL/kt56-spec.diff`).
+
+### 19.1 Bảng `scause` → `FaultKind` (một enum, khớp K2)
+
+`vifast-plat-common::fault` (host-test được, `#![forbid(unsafe_code)]`):
+
+| `scause` | `FaultKind` | Nguồn trường |
+|---|---|---|
+| 12 instruction page fault | `Vm{access=Execute, va=stval, reason}` | trapframe + PTE |
+| 13 load page fault | `Vm{access=Read, va=stval, reason}` | trapframe + PTE |
+| 15 store/AMO page fault | `Vm{access=Write, va=stval, reason}` | trapframe + PTE |
+| 8 ecall từ U-mode | **không phải fault** — dispatcher ABI | trapframe |
+| 2 illegal, 3 breakpoint, 0/1/4/5/6/7/9, mã lạ | `UserException{ip=sepc, kind=scause}` | trapframe |
+| syscall 14 `Exit(code)` | `Exit{code}` | dispatch ABI (không phải trap) |
+| — (procsrv K3.5) | `UnknownSyscall{nr}` | biến thể ABI; K3 **không** tạo từ phần cứng (D2-79 trả `RangeError` 19) |
+
+`reason` **chỉ** lấy từ PTE **thật** của VSpace bị chạm (sau khi khôi phục root kernel, vì root
+user không có physmap — KT-53):
+
+| PTE / quyền | `reason` |
+|---|---|
+| invalid / không có leaf | `NotMapped` |
+| leaf hợp lệ nhưng U-mode chạm `U=0` (hoặc S-mode chạm `U=1` khi `SUM=0`) | `Permission` (**thắng** W^X) |
+| `Write` trên leaf không `W` mà có `X`; `Execute` trên leaf không `X` mà có `W` | `Wx` |
+| còn lại thiếu quyền | `Permission` |
+
+`vspace` là **nhãn u64** (ASID của VSpace; `0` khi trap S-mode không gắn VSpace) — cùng ngữ nghĩa
+`vspace: ObjId` của K2 nhưng không rò kiểu nội bộ backend vào ABI. `FaultKind` `Display` dùng **một**
+định dạng cho log/TAP: `Exit{42}`, `Vm{vspace=1, va=0x200040, access=Write, reason=NotMapped}`,
+`UserException{ip=0x..., kind=2}`.
+
+### 19.2 Trap **thật** thay phân loại PTE của KT-55
+
+- TAP 38..40 dùng `vifast-plat-riscv64::probe` (chỉ ảnh test): thực thi **một** instruction
+  `ld`/`sd`/`jr` tới `0x5000_0000` (VA chưa map trong root kernel). Phần cứng trap **thật**
+  (`scause` 13/15/12, `stval = 0x5000_0000`); `trap_dispatch` thấy probe armed thì ghi
+  `scause/stval/sepc/sstatus.SPP` rồi đặt `sepc` về `probe_after` để resume. **Không** tiêm
+  `scause` (D2-73 cấm claim trap tiêm là trap thật), **không** phân loại từ PTE mô phỏng. Bằng
+  chứng: `# faultkind: case=load|store|insn … src=trap`.
+- Conformance `.scn` 25/26: `vm_expect_fault` gọi cùng probe. VA `0x200040` chưa map trong root
+  kernel nên trap `NotMapped` đúng `stval`; VA `0x1000` (ca 26) đã map **READ** trong rig, nên
+  kernel **scratch-map** đúng PA đó vào root kernel tại **đúng VA kịch bản**, cờ `R` (không `W`),
+  để store fault thật `scause=15 stval=0x1000`; sau đó gỡ (`unmap_scratch_4k`). Vì root kernel
+  index 0 đã có bảng K0 (UART/PLIC) và entry level-1 `0` chưa dùng, scratch dùng **một** bảng cấp 0
+  dự phòng 4 KiB trong `.bss` (`SCRATCH_L0`) rồi trả entry về 0 — không đổi layout kernel, không
+  alias VA (giữ `stval` = VA kịch bản). `reason` **không** dựng từ bộ cờ của test: sau khi cài
+  scratch, kernel đọc **leaf thật** bằng `mmu::walk_sw(va)` rồi mới `classify_trap` — nếu cờ cài
+  sai, `reason` sẽ khác kỳ vọng và ca đỏ; `scause/stval/sepc/spp` lấy từ trapframe. Bằng chứng:
+  `# faultprobe: va=… scause=… stval=… sepc=… pte=0x… reason=… scratch=… src=trap`.
+- So trace sim↔QEMU vẫn **61/61 dòng, 5/5 ca** (`JOURNAL/kt56-trace-compare.log`); sim **không**
+  đổi (mô hình `vm_touch` của K2 vẫn là nguồn của sim, đúng chủ trương "sim là model").
+
+### 19.3 W^X: map qua ABI + fault **từ U-mode**
+
+- `map`/`protect` một lượt `W|X` qua đường công khai ⇒ `ObjError::WxViolation`, **atomic** (không
+  PTE, không đếm), và `ObjError::abi_code() == Some(4)` — đúng mã `WxViolation` của
+  `spec/abi.toml` `[error]` (TAP 41: `# faultkind: case=wx-abi … abi=4`).
+- **U-mode thực thi trang `.data` RW NX** của `init` ⇒ instruction page fault thật `scause=12`,
+  PTE hợp lệ `U|R|W`, `X=0`, `W=1` ⇒ `FaultKind::Vm{access=Execute, reason=Wx}` (TAP 7 của ảnh
+  user; dòng `# u-mode fault: … faultkind=…reason=Wx` + `PANIC: u-mode fault scause=0xc …`).
+- **Nợ L3 KT-52 (`mapped_device`) đã xử lý**: `Frame` có `mapped_device`; `map`/`protect` từ chối
+  `exec` khi Frame đang `Device` và ngược lại (`WxViolation` atomic); `check_objmem` đếm lại và
+  từ chối `mapped_device>0 && mapped_x>0`. TAP 42 (`device exec`) chứng minh: `Device` ở vs0 +
+  `RX` ở vs1 ⇒ `WxViolation`; `protect` sang `Device+EXEC` ⇒ `WxViolation`; `frame_device` về 0
+  sau unmap. Test host `device_toan_cuc_khong_lan_exec_theo_frame` (đỏ trước khi thêm đếm).
+
+### 19.4 Deviation test-only: một fault U-mode được phép recover
+
+Chính sách K3 **giữ nguyên**: fault U-mode ⇒ log + halt, không pager (TAP 7 dùng đúng chính sách
+này). TAP 5 cần phân loại `FaultKind` của **cùng** trap rồi kiểm tiếp TAP 6/7 trong **một** boot,
+nên `user::enter_expect_fault` bật cờ **một lần** (`USER_FAULT_RECOVER`): handler khôi phục root
+kernel, phân loại + ghi `FAULT_STATS`, log `recover=1 faultkind=…`, rồi `exit_to_kernel` (không
+resume instruction lỗi). Cờ chỉ tồn tại trong ảnh test; `enter` thường vẫn fatal. Ghi rõ ở đây để
+review không nhầm là nới chính sách.
+
+### 19.5 TAP, expected, ngân sách
+
+| Ảnh | TAP cũ | TAP mới | Tổng |
+|---|---|---|---|
+| `ktest` | 1..37 | 38 `faultkind vm load`, 39 `faultkind vm store`, 40 `faultkind vm insn`, 41 `wx violation qua ABI`, 42 `device exec` | **43** (trap lồng dời 43) |
+| `ktest-user` | 1..5 (5 = kernel read fault, nay recover + phân loại) | 6 `faultkind exit`, 7 `faultkind wx from u` | **7** |
+| `ktest-guard` | 3 | — | 3 |
+
+`expected.txt`, `manifest_*` và kernel sửa **cùng lúc** (luật KT-54). Ngân sách `.data+.bss` mỗi ảnh
+đo bằng `ktest.sh` (D2-72 Q5); ảnh test chính tăng do `FaultStats`/`SCRATCH_L0`/mã phân loại —
+số đo trong `JOURNAL/kt56-budget.log` (không chép tay vào tài liệu).
+
+### 19.6 Bằng chứng
+
+`JOURNAL/kt56-red.txt` (đỏ trước: spec chỉ `Exit`, `fault` phân loại PTE, không `mapped_device`),
+`kt56-baseline-gate.log`, `kt56-ktest-matrix.log` (9/9 boot, ảnh 43/7/3 TAP), `kt56-trace-compare.log`
+(61/61 dòng, 5/5 ca, `build=…`), `kt56-host-fault.log`, `kt56-gate.log`, `kt56-budget.log`,
+`kt56-boot50.log`, `kt56-spec.diff`, `kt56-journal.md`.
+
+### 19.7 Giới hạn (không giấu)
+
+1. Conformance ca 26 dùng **scratch mapping** cùng PA/cờ tại đúng VA kịch bản để trap thật; đây là
+   mapping tạm của ảnh test, không phải mapping của rig VSpace. `scause/stval` do phần cứng sinh;
+   `reason` đọc từ **leaf thật** (`mmu::walk_sw`, `pte=0x…` trong `# faultprobe`) — bộ cờ của
+   scratch do test chọn để tạo đúng loại fault, nên đây là phép kiểm "quyền đặt vào bảng ⇒ trap
+   phân loại đúng", không phải phép kiểm độc lập quyền của rig. Ghi rõ thay vì overclaim.
+2. `mmu::map_scratch_4k` (test-only, `#[cfg(feature = "ktest")]`) ghi **thẳng** PTE root kernel
+   bằng bảng cấp 0 dự phòng — **đường ghi bảng trang thứ hai**, không đi qua object layer nên
+   **không** cập nhật `mapped_w/mapped_x/mapped_device` của Frame. Nó chỉ tồn tại trong lúc probe
+   và được gỡ (`unmap_scratch_4k`) trước khi trả về; ảnh sản phẩm không có hàm này.
+3. `UnknownSyscall` chỉ là biến thể ABI; K3 **không** tạo nó từ phần cứng (D2-79) — procsrv K3.5.
+4. Fault S-mode khác guard (probe) được **resume** bởi cờ test; ảnh sản phẩm không có probe/scratch
+   (`#[cfg(feature = "ktest")]`) và vẫn fatal mọi fault không guard.
+5. `FaultKind.vspace` là nhãn ASID, không phải cap: procsrv K3.5 cần cap thật thì mở rộng bằng D2
+   mới, không tự đổi spec.
+
+Kết quả đo cuối (log trong `JOURNAL/`, không chép tay vào bảng): `ktest.sh 50 matrix`
+**450/450 boot sạch** (`kt56-boot50.log`), `ktest.sh 1 matrix` **9/9** (`kt56-ktest-matrix.log`),
+trace sim↔QEMU **61/61 dòng/5 ca** (`kt56-trace-compare.log`), `selftest.sh` **17/17**
+(`kt56-selftest.log`), `gate --fast` **PASS 574** (`kt56-gate.log`), budget 3 ảnh ≤ trần
+(`kt56-budget.log`).

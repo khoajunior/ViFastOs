@@ -824,6 +824,119 @@ fn remap_leaf(va: u64, pa: u64) -> bool {
     write_pte_at(table, index, pte)
 }
 
+/// Bảng cấp 0 dự phòng cho **scratch mapping** của probe KT-56 (chỉ ảnh test).
+///
+/// 4 KiB `.bss`, căn 4 KiB; chỉ dùng khi `map_scratch_4k` cần một bảng cấp 0 mới dưới một
+/// entry cấp 1 **chưa dùng** của root kernel (KT-56 dùng VA `0x1000` của `.scn` 26 — root[0]
+/// là bảng K0 đã có cho UART/PLIC, entry level-1 `0` chưa dùng). `unmap_scratch_4k` trả entry
+/// level-1 về 0 nên bảng này không còn được tham chiếu sau mỗi probe.
+#[cfg(feature = "ktest")]
+#[repr(C, align(4096))]
+struct ScratchL0([u64; 512]);
+
+#[cfg(feature = "ktest")]
+static mut SCRATCH_L0: ScratchL0 = ScratchL0([0; 512]);
+
+/// `sfence.vma` toàn bộ (xả TLB sau khi sửa scratch mapping).
+#[cfg(feature = "ktest")]
+fn sfence_all() {
+    // SAFETY: chỉ xả TLB của hart hiện tại, không đụng bộ nhớ.
+    unsafe { asm!("sfence.vma zero, zero", options(nostack, preserves_flags)) };
+}
+
+/// **Scratch mapping 4 KiB** vào root kernel — chỉ ảnh test, phục vụ probe trap thật của KT-56.
+///
+/// `.scn` 26 ghi vào VA `0x1000` (root index 0) mà root kernel đã có bảng K0 cho UART/PLIC;
+/// để `stval` của trap **đúng** VA kịch bản (không dùng alias), hàm này tạm nối **một** leaf
+/// 4 KiB dưới entry level-1 `0` (entry này luôn invalid trong layout K3 — IMAGE ở root index 2):
+/// cấp bảng cấp 0 dự phòng `SCRATCH_L0`, ghi leaf `pa`, `sfence.vma`. [`unmap_scratch_4k`] trả
+/// entry về 0. Trả `false` (không sửa gì) nếu entry level-1 đã có mapping.
+#[cfg(feature = "ktest")]
+pub fn map_scratch_4k(va: u64, pa: u64, read: bool, write: bool, exec: bool) -> bool {
+    use vifast_plat_common::mmu::{PTE_ACCESSED, PTE_DIRTY, PTE_READ, PTE_VALID, PTE_WRITE};
+    if va & (PAGE_BYTES - 1) != 0 || pa & (PAGE_BYTES - 1) != 0 {
+        return false;
+    }
+    let root = ROOT_PHYS.load(Ordering::SeqCst);
+    if root == 0 {
+        return false;
+    }
+    let root_index = ((va >> 30) & 0x1ff) as usize;
+    let level1_index = ((va >> 21) & 0x1ff) as usize;
+    let level0_index = ((va >> 12) & 0x1ff) as usize;
+    let Some(root_entry) = read_pte_at(root, root_index) else {
+        return false;
+    };
+    let leaf_mask = PTE_READ | PTE_WRITE | vifast_plat_common::mmu::PTE_EXEC;
+    if root_entry & PTE_VALID == 0 || root_entry & leaf_mask != 0 {
+        return false;
+    }
+    let table = (root_entry >> vifast_plat_common::mmu::PTE_PPN_SHIFT) << 12;
+    let Some(old) = read_pte_at(table, level1_index) else {
+        return false;
+    };
+    if old & PTE_VALID != 0 {
+        return false;
+    }
+    // SAFETY: chỉ lấy địa chỉ của static mut, không tạo tham chiếu `&mut`.
+    let scratch = unsafe { core::ptr::addr_of_mut!(SCRATCH_L0.0) as *mut u64 };
+    if scratch.is_null() {
+        return false;
+    }
+    // SAFETY: `scratch` trỏ tới mảng 512×u64 trong `.bss` của chính ảnh kernel (identity map);
+    // zero 4 KiB rồi ghi hai PTE bên dưới. Chỉ một hart chạy probe tại một thời điểm.
+    unsafe {
+        core::ptr::write_bytes(scratch as *mut u8, 0, PAGE_BYTES as usize);
+        let table_pte =
+            (((scratch as u64) >> 12) << vifast_plat_common::mmu::PTE_PPN_SHIFT) | PTE_VALID;
+        let mut flags = PTE_VALID | PTE_ACCESSED | PTE_DIRTY;
+        if read {
+            flags |= PTE_READ;
+        }
+        if write {
+            flags |= PTE_WRITE;
+        }
+        if exec {
+            flags |= vifast_plat_common::mmu::PTE_EXEC;
+        }
+        if flags & (PTE_READ | PTE_WRITE | vifast_plat_common::mmu::PTE_EXEC) == 0 {
+            flags |= PTE_READ;
+        }
+        let leaf = ((pa >> 12) << vifast_plat_common::mmu::PTE_PPN_SHIFT) | flags;
+        core::ptr::write_volatile(scratch.add(level0_index), leaf);
+        if !write_pte_at(table, level1_index, table_pte) {
+            return false;
+        }
+    }
+    sfence_all();
+    true
+}
+
+/// Gỡ scratch mapping của [`map_scratch_4k`]: trả entry level-1 về 0 + `sfence.vma`.
+#[cfg(feature = "ktest")]
+pub fn unmap_scratch_4k(va: u64) -> bool {
+    use vifast_plat_common::mmu::PTE_VALID;
+    if va & (PAGE_BYTES - 1) != 0 {
+        return false;
+    }
+    let root = ROOT_PHYS.load(Ordering::SeqCst);
+    if root == 0 {
+        return false;
+    }
+    let root_index = ((va >> 30) & 0x1ff) as usize;
+    let level1_index = ((va >> 21) & 0x1ff) as usize;
+    let Some(root_entry) = read_pte_at(root, root_index) else {
+        return false;
+    };
+    if root_entry & PTE_VALID == 0 {
+        return false;
+    }
+    let table = (root_entry >> vifast_plat_common::mmu::PTE_PPN_SHIFT) << 12;
+    let ok = write_pte_at(table, level1_index, 0);
+    sfence_all();
+    ok
+}
+
 /// Guard page fault **thật** (`scause` 12/13/15, `stval` trong guard page **của hart nào đó**)
 /// — KT-46/49. Guard per-hart nên kiểm theo **chủ sở hữu** ([`guard_owner`]), không chỉ guard
 /// của hart 0.

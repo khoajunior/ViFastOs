@@ -62,6 +62,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod fault;
 pub mod ipi;
 pub mod mmu;
 pub mod obj;

@@ -481,3 +481,47 @@ fn wx_ca_3_cung_map_w_x_bi_tu_choi_atomic() {
     m.revoke(vs).unwrap();
     m.revoke(fr).unwrap();
 }
+
+/// KT-56 (nợ L3 KT-52) — bất biến **Device toàn cục** của D2-67: một Frame đang là Device ở
+/// mapping này **không** được trở thành executable ở mapping khác, và ngược lại; bộ đếm
+/// `mapped_device` phải đối xứng qua map/protect/unmap/revoke và `check_objmem` phải bắt.
+#[test]
+fn device_toan_cuc_khong_lan_exec_theo_frame() {
+    let (mut m, u0, _u1) = machine();
+    let vs0 = m.retype(u0, ObjKind::VSpace, 0).expect("vs0");
+    let vs1 = m.retype(u0, ObjKind::VSpace, 0).expect("vs1");
+    let fr = m.retype(u0, ObjKind::Frame, 12).expect("frame");
+    m.map(vs0, VA, fr, MapFlags::DEVICE_RW)
+        .expect("map Device RW");
+    assert_eq!(m.frame_device(fr).unwrap(), 1);
+    // Frame đã Device ⇒ RX ở VSpace **khác** bị từ chối, không ghi PTE.
+    let err = m.map(vs1, VA + 0x1000, fr, MapFlags::RX).unwrap_err();
+    assert_eq!(err, ObjError::WxViolation);
+    assert!(!m.walk(vs1, VA + 0x1000).unwrap().valid);
+    assert_eq!(m.frame_device(fr).unwrap(), 1);
+    // Protect mapping Device sang Device+EXEC cũng bị từ chối, PTE cũ giữ nguyên.
+    let bad = MapFlags {
+        read: true,
+        write: false,
+        exec: true,
+        user: false,
+        device: true,
+    };
+    assert_eq!(m.protect(vs0, VA, bad).unwrap_err(), ObjError::WxViolation);
+    assert_eq!(m.frame_counts(fr).unwrap(), (1, 1, 0));
+    m.check_objmem().expect("Device toàn cục vẫn đạt");
+    m.unmap(vs0, VA).expect("unmap");
+    assert_eq!(m.frame_device(fr).unwrap(), 0, "đếm Device trả về 0");
+
+    // Chiều ngược: RX trước rồi Device sau ⇒ WxViolation.
+    m.map(vs1, VA + 0x1000, fr, MapFlags::RX).expect("map RX");
+    assert_eq!(
+        m.map(vs0, VA, fr, MapFlags::DEVICE_RW).unwrap_err(),
+        ObjError::WxViolation
+    );
+    assert_eq!(m.frame_device(fr).unwrap(), 0);
+    m.revoke(vs0).unwrap();
+    m.revoke(vs1).unwrap();
+    m.revoke(fr).unwrap();
+    m.check_objmem().expect("dọn sạch");
+}

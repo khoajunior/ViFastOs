@@ -96,6 +96,23 @@ def gen_rs(doc: dict) -> str:
     names = ", ".join(f'"{n}"' for n in states)
     out.append("#[rustfmt::skip]")
     out.append(f"pub const TCB_STATES: [&str; {len(states)}] = [{names}];")
+    # KT-56 / D2-56a: FaultKind đầy đủ (mở spec MỘT lần — D2-72 Q1). Sinh từ
+    # `[method_signature.fault_kind]` để sửa tay / lệch spec bị gen-check bắt.
+    fk = sig.get("fault_kind") or {}
+    fk_names = fk.get("names") or []
+    if fk_names:
+        out.append("#[rustfmt::skip]")
+        out.append(f"pub const FAULT_KIND_COUNT: usize = {len(fk_names)};")
+        out.append("#[rustfmt::skip]")
+        out.append(
+            "pub const FAULT_KINDS: [(&str, &[&str]); %d] = [" % len(fk_names)
+        )
+        for name in fk_names:
+            fields = ", ".join(
+                f'"{f}"' for f in (fk.get(name) or {}).get("fields", [])
+            )
+            out.append(f'    ("{name}", &[{fields}]),')
+        out.append("];")
     out.append("")
     return "\n".join(out)
 
@@ -129,6 +146,14 @@ def gen_md(doc: dict) -> str:
         params = ", ".join(sig[name].get("params", [])) or "—"
         rets = ", ".join(sig[name].get("returns", [])) or "—"
         out.append(f"| `{name}` | {params} | {rets} |")
+    fk = doc.get("method_signature", {}).get("fault_kind") or {}
+    fk_names = fk.get("names") or []
+    if fk_names:
+        out += ["", "## `FaultKind` (D2-56a, `[method_signature.fault_kind]`)", "",
+                "| Biến thể | Trường |", "|---|---|"]
+        for name in fk_names:
+            fields = ", ".join((fk.get(name) or {}).get("fields", [])) or "—"
+            out.append(f"| `{name}` | {fields} |")
     tr = doc.get("trace")
     if tr:
         out += ["", "## Trace (D2-40, `[trace]`)", "",

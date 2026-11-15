@@ -38,6 +38,27 @@ mod tests {
     }
 
     #[test]
+    fn fault_kind_du_bon_bien_the_dung_spec() {
+        // KT-56/D2-56a: `spec/abi.toml` mở **một lần**; code sinh phải khớp đúng 4 biến thể.
+        assert_eq!(FAULT_KIND_COUNT, 4);
+        let names: Vec<&str> = FAULT_KINDS.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, vec!["Exit", "Vm", "UnknownSyscall", "UserException"]);
+        let vm = FAULT_KINDS
+            .iter()
+            .find(|(n, _)| *n == "Vm")
+            .expect("phải có Vm");
+        for field in ["vspace: u64", "va: u64", "access", "reason"] {
+            assert!(
+                vm.1.iter().any(|f| f.contains(field)),
+                "Vm thiếu trường {field}"
+            );
+        }
+        assert!(FAULT_KINDS
+            .iter()
+            .any(|(n, f)| *n == "Exit" && f.contains(&"code: u64")));
+    }
+
+    #[test]
     fn object_loi_va_reserved_tach_bach() {
         assert!(CORE_OBJECTS
             .iter()

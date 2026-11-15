@@ -4,15 +4,17 @@
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng. Mỗi boot chỉ
 # kết thúc được một lần bằng PANIC có chủ đích ⇒ **ba** ảnh test:
-#   - `ktest`       : 38 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
+#   - `ktest`       : 43 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
 #                     + KT-47 (timer SBI) + KT-49 (SMP 15..19) + KT-50 (IPI 20..24) + KT-51 (TLB/ASID
 #                     25..29) + KT-52 (object layer 30..36) + KT-55 (conformance 5 `.scn` 37:
-#                     `# trace:` chuẩn hoá) + trap lồng fatal (38).
+#                     `# trace:` chuẩn hoá) + KT-56 FaultKind/W^X (38..42) + trap lồng fatal (43).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
-#   - `ktest-user`  : 5 TAP — U-mode: nạp `init` ELF (parse + map W^X), `sret`, 3 syscall (DebugPutStr
-#                     12, DebugHalt 13, Exit 14), syscall lạ trả 19 `RangeError`, rồi U-mode đọc địa
-#                     chỉ kernel ⇒ page fault `scause=13` + `PANIC: u-mode fault` (kết thúc có chủ đích).
+#   - `ktest-user`  : 7 TAP — U-mode: nạp `init` ELF (parse + map W^X), `sret`, 3 syscall (DebugPutStr
+#                     12, DebugHalt 13, Exit 14), syscall lạ trả 19 `RangeError`, U-mode đọc địa chỉ
+#                     kernel ⇒ trap thật `scause=13` phân loại `FaultKind::Vm{Read,Permission}` (TAP 5,
+#                     recover), `Exit(42)` ⇒ `FaultKind::Exit` (TAP 6), rồi U-mode thực thi trang
+#                     `.data` RW NX ⇒ `scause=12` `FaultKind::Vm{Execute,Wx}` + `PANIC: u-mode fault` (TAP 7).
 #
 # **KT-54 — nguồn sự thật duy nhất là `v2/test/boot/expected.txt`** (mỗi ảnh một dòng
 # `<ảnh> <kế hoạch TAP> <số dòng ok>`): runner **đọc số từ tệp**, không hardcode; `expected.txt` lệch
@@ -231,6 +233,11 @@ wx violation device+exec
 map/unmap 4 KiB
 0 ro
 __CONF37__
+faultkind vm load
+faultkind vm store
+faultkind vm insn
+wx violation qua ABI
+device exec
 trap nested panic
 EOF
 }
@@ -250,6 +257,8 @@ syscall debug_put_str
 syscall exit
 syscall la ma loi
 u-mode kernel read fault
+faultkind exit
+faultkind wx from u
 EOF
 }
 
@@ -365,6 +374,14 @@ __EVID24__
 ^# trace: 25 [0-9]+ fault va=0x[0-9a-f]+ access=Write reason=NotMapped => ok$
 ^# trace: 26 [0-9]+ fault va=0x[0-9a-f]+ access=Write reason=Permission => ok$
 ^# trace: 26 [0-9]+ check => ok$
+^# faultkind: case=load access=Read scause=0xd stval=0x50000000 sepc=0x[0-9a-f]+ spp=1 kind=Vm\{vspace=0, va=0x50000000, access=Read, reason=NotMapped\} src=trap walk=0 ok=1$
+^# faultkind: case=store access=Write scause=0xf stval=0x50000000 sepc=0x[0-9a-f]+ spp=1 kind=Vm\{vspace=0, va=0x50000000, access=Write, reason=NotMapped\} src=trap walk=0 ok=1$
+^# faultkind: case=insn access=Execute scause=0xc stval=0x50000000 sepc=0x[0-9a-f]+ spp=1 kind=Vm\{vspace=0, va=0x50000000, access=Execute, reason=NotMapped\} src=trap walk=0 ok=1$
+^# faultkind: case=wx-abi map=W\|X err=WxViolation abi=4 atomic=1 pte=0 counts=0/0/0 panic=0 ok=1$
+^# faultkind: case=device-exec device_count=1 map_rx=WxViolation protect_dev_rx=WxViolation abi=4 atomic=1 check=1 ok=1$
+^# faultprobe: va=0x200040 access=Read scause=0xd stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
+^# faultprobe: va=0x200040 access=Write scause=0xf stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
+^# faultprobe: va=0x1000 access=Write scause=0xf stval=0x1000 sepc=0x[0-9a-f]+ pte=0x[0-9a-f]+ reason=Permission mapped=1 scratch=1 src=trap$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -385,10 +402,14 @@ EOF
 ^# user put_str: calls=2 bytes=51 sum_off=1$
 ^# user exit: code=42 state=Exited exits=1$
 ^# user badsys: nr=99 err=19 calls=2 panic=0$
+^# user exitkind: code=42 kind=Exit\{42\} ok=1$
 ^U: init hello from u-mode$
 ^U: bad syscall err=19 ok$
-^# u-mode read: hart=[0-9]+ addr=0x80200000 expect=scause=0xd stval=0x80200000$
-^# u-mode fault: scause=0xd stval=0x80200000 sepc=0x[0-9a-f]+ from_u=1 kernel_addr=1 fatal=1$
+^# u-mode read: hart=[0-9]+ addr=0x80200000 expect=scause=0xd stval=0x80200000 recover=1$
+^# faultkind: case=u-kernel-read scause=0xd stval=0x80200000 recover=1 kind=Vm\{vspace=[0-9]+, va=0x80200000, access=Read, reason=Permission\} ok=1$
+^# u-mode fault: scause=0xd stval=0x80200000 sepc=0x[0-9a-f]+ from_u=1 kernel_addr=1 recover=1 faultkind=Vm\{vspace=[0-9]+, va=0x80200000, access=Read, reason=Permission\}$
+^# u-mode wx: hart=[0-9]+ exec=data_page expect=scause=0xc reason=Wx fatal=1$
+^# u-mode fault: scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ from_u=1 kernel_addr=0 recover=0 faultkind=Vm\{vspace=[0-9]+, va=0x[0-9a-f]+, access=Execute, reason=Wx\}$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -415,7 +436,7 @@ panic_allow_re() {
     case "$1" in
         ktest) printf '%s' '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$' ;;
         ktest-guard) printf '%s' '^PANIC: guard page fault scause=0xf stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+$' ;;
-        ktest-user) printf '%s' '^PANIC: u-mode fault scause=0xd stval=0x80200000 sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
+        ktest-user) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         *) return 1 ;;
     esac
 }

@@ -3,8 +3,9 @@
 //! **không** nằm trong ảnh sản phẩm.
 //!
 //! KT-49 mở rộng ảnh này lên **20 TAP**; KT-50 thêm **5 TAP IPI** (20..24); KT-51 thêm **5 TAP
-//! TLB/ASID/shootdown** (25..29); KT-52 thêm **7 TAP object layer** (30..36) và dời trap lồng
-//! sang **37** — tổng **37 TAP** (ảnh guard vẫn 3 TAP):
+//! TLB/ASID/shootdown** (25..29); KT-52 thêm **7 TAP object layer** (30..36); KT-55 thêm **TAP
+//! 37** conformance; **KT-56 thêm 5 TAP FaultKind/W^X (38..42)** và dời trap lồng sang **43** —
+//! tổng **43 TAP** (ảnh guard vẫn 3 TAP, ảnh user 7 TAP — §19 docs):
 //!
 //! 1. `ok 1 - ktest image` — marker tách ảnh của KT-44.
 //! 2. `ok 2 - trap breakpoint` — **trap phần cứng thật** (`ebreak` → `scause=3`, resume đúng
@@ -61,8 +62,19 @@
 //! 36. `ok 36 - 0 ro` — 0 rò byte/object/mapping sau revoke; `check_objmem` ĐẠT.
 //! 37. `ok 37 - conformance 5/5` — **KT-55**: 5 `.scn` nền tảng (22..26) chạy trong kernel và in
 //!    `# trace:` cùng định dạng với sim; so 61 dòng / 5 ca (`v2/test/conformance/`). Ca 24 (2 hart)
-//!    in `skipped=smp1` trên `-smp 1`; `fault` là phân loại từ PTE thật, không phải trap (KT-56).
-//! 38. `ok 38 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//!    in `skipped=smp1` trên `-smp 1`; `fault` của ca 25/26 từ **KT-56** là **trap phần cứng
+//!    thật** (probe load/store, `stval` = VA kịch bản — §19).
+//! 38. `ok 38 - faultkind vm load` — KT-56: probe **load** VA chưa map ⇒ trap thật `scause=13`,
+//!    phân loại `Vm{access=Read, va=stval, reason=NotMapped}`.
+//! 39. `ok 39 - faultkind vm store` — probe **store** ⇒ `scause=15`,
+//!    `Vm{access=Write, va=stval, reason=NotMapped}`.
+//! 40. `ok 40 - faultkind vm insn` — probe **fetch** ⇒ `scause=12`,
+//!    `Vm{access=Execute, va=stval, reason=NotMapped}`.
+//! 41. `ok 41 - wx violation qua ABI` — `map` một lượt `W|X` ⇒ `WxViolation` + mã ABI **4**,
+//!    atomic (không PTE/không panic).
+//! 42. `ok 42 - device exec` — **nợ L3 KT-52**: Frame đã `Device` không được `RX` ở VSpace khác;
+//!    `protect` sang `Device+EXEC` bị từ chối; `mapped_device` đối xứng + `check_objmem`.
+//! 43. `ok 43 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -71,6 +83,7 @@
 #![no_main]
 
 mod ktest_conf;
+mod ktest_fault;
 mod ktest_ipi;
 mod ktest_obj;
 mod ktest_smp;
@@ -129,7 +142,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..38\n");
+    PLATFORM.put_str("TAP version 13\n1..43\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -902,6 +915,8 @@ pub extern "C" fn rust_main() -> ! {
     fails += ktest_obj::obj_phase();
     // --------------------- 37) conformance 5 `.scn` × sim/QEMU (KT-55) — `# trace:` chuẩn hoá
     fails += ktest_conf::conf_phase();
+    // ------------- 38..42) `FaultKind` thật + W^X qua ABI + Device toàn cục (KT-56)
+    fails += ktest_fault::fault_phase();
 
     {
         let mut w = PlatformWriter(&PLATFORM);
@@ -920,10 +935,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 38) trap LỒNG (fatal, có chủ đích)
-    // In `ok 38` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 43) trap LỒNG (fatal, có chủ đích)
+    // In `ok 43` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 38 - trap nested panic\n");
+    PLATFORM.put_str("ok 43 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

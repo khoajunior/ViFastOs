@@ -55,6 +55,16 @@ impl<M: PhysMem> Machine<M> {
         if flags.exec && fr.mapped_w > 0 {
             return Err(ObjError::WxViolation);
         }
+        // KT-56 (nợ L3 KT-52): **Device toàn cục** — một Frame đang là Device ở mapping khác
+        // không được trở thành executable, và ngược lại. Trước KT-56 chỉ kiểm cờ của **một**
+        // mapping nên `Device(RW)` ở vs0 + `RX` ở vs1 lọt qua; `check_objmem` không có bộ đếm
+        // Device nên cũng không bắt. Đây là bất biến của D2-67 ("toàn cục").
+        if flags.exec && fr.mapped_device > 0 {
+            return Err(ObjError::WxViolation);
+        }
+        if flags.device && fr.mapped_x > 0 {
+            return Err(ObjError::WxViolation);
+        }
         if self.va_conflict(vs_idx, va, size) {
             return Err(ObjError::AlreadyMapped);
         }
@@ -171,6 +181,9 @@ impl<M: PhysMem> Machine<M> {
                         if flags.exec {
                             f.mapped_x += 1;
                         }
+                        if flags.device {
+                            f.mapped_device += 1;
+                        }
                         self.objects[fr_idx as usize] = f;
                         if !self.push_flush(Flush {
                             kind: FLUSH_PAGE,
@@ -239,6 +252,9 @@ impl<M: PhysMem> Machine<M> {
             if flags.exec {
                 f.mapped_x = f.mapped_x.saturating_sub(1);
             }
+            if flags.device {
+                f.mapped_device = f.mapped_device.saturating_sub(1);
+            }
             self.objects[map.frame as usize] = f;
         }
         self.mappings[slot].live = false;
@@ -278,6 +294,14 @@ impl<M: PhysMem> Machine<M> {
         if flags.exec && rest_w > 0 {
             return Err(ObjError::WxViolation);
         }
+        // KT-56: cùng bất biến Device toàn cục khi `protect` (Frame đã Device ở mapping khác).
+        let rest_dev = fr.mapped_device.saturating_sub(u16::from(old.device));
+        if flags.exec && rest_dev > 0 {
+            return Err(ObjError::WxViolation);
+        }
+        if flags.device && rest_x > 0 {
+            return Err(ObjError::WxViolation);
+        }
         let level = map.level;
         let (root_pa, _) = self.missing_tables(&vs, va, level)?;
         let indices = walk_shape(va).indices();
@@ -303,6 +327,7 @@ impl<M: PhysMem> Machine<M> {
         let mut f = fr;
         f.mapped_w = f.mapped_w - u16::from(old.write) + u16::from(flags.write);
         f.mapped_x = f.mapped_x - u16::from(old.exec) + u16::from(flags.exec);
+        f.mapped_device = f.mapped_device - u16::from(old.device) + u16::from(flags.device);
         self.objects[map.frame as usize] = f;
         self.mappings[slot] = Mapping::new(vs_idx, map.frame, va, level, flags);
         if !self.push_flush(Flush {

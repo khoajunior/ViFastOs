@@ -67,6 +67,9 @@ pub mod ipi;
 pub mod mmu;
 pub mod obj;
 pub mod plic;
+/// KT-56: probe trap **thật** cho `FaultKind` (chỉ ảnh test — `#[cfg(feature = "ktest")]`).
+#[cfg(feature = "ktest")]
+pub mod probe;
 pub mod smp;
 pub mod timer;
 pub mod tlb;
@@ -360,6 +363,13 @@ pub extern "C" fn trap_dispatch(tf: &mut TrapFrame) {
             #[cfg(feature = "user")]
             if !exc.from_supervisor {
                 user::on_u_exception(tf, &exc);
+                return;
+            }
+            // KT-56: trap do probe **thật** (load/store/insn) — ghi `scause/stval/sepc` rồi
+            // resume ngay sau instruction lỗi; không đi chính sách fatal/PANIC.
+            #[cfg(feature = "ktest")]
+            if probe::on_trap(tf) {
+                TRAP_STATS.record_exception(&saved, exc.kind, true);
                 return;
             }
             // KT-46: guard page fault là page fault **thật** (scause 12/13/15, stval trong guard

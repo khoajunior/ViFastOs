@@ -16,6 +16,7 @@ impl<M: PhysMem> Machine<M> {
         let mut frame_maps = [0u16; MAX_OBJECTS];
         let mut frame_w = [0u16; MAX_OBJECTS];
         let mut frame_x = [0u16; MAX_OBJECTS];
+        let mut frame_dev = [0u16; MAX_OBJECTS];
         // 1) Bất biến byte + PA của từng Untyped.
         for u_idx in 0..self.n_untypeds as usize {
             let u = &self.untypeds[u_idx];
@@ -205,16 +206,23 @@ impl<M: PhysMem> Machine<M> {
             if flags.exec {
                 frame_x[map.frame as usize] += 1;
             }
+            if flags.device {
+                frame_dev[map.frame as usize] += 1;
+            }
         }
-        // 3) Đếm lại Frame + W^X toàn cục.
+        // 3) Đếm lại Frame + W^X toàn cục (kể cả **Device** — KT-56, nợ L3 KT-52).
         for (i, fr) in self.objects.iter().enumerate() {
             if !fr.live || fr.kind != ObjKind::Frame {
                 continue;
             }
-            if fr.maps != frame_maps[i] || fr.mapped_w != frame_w[i] || fr.mapped_x != frame_x[i] {
+            if fr.maps != frame_maps[i]
+                || fr.mapped_w != frame_w[i]
+                || fr.mapped_x != frame_x[i]
+                || fr.mapped_device != frame_dev[i]
+            {
                 return Err(ObjError::Corrupt);
             }
-            if fr.mapped_w > 0 && fr.mapped_x > 0 {
+            if (fr.mapped_w > 0 && fr.mapped_x > 0) || (fr.mapped_device > 0 && fr.mapped_x > 0) {
                 return Err(ObjError::WxViolation);
             }
         }
@@ -354,6 +362,12 @@ impl<M: PhysMem> Machine<M> {
     pub fn frame_counts(&self, cap: CapId) -> Result<(u16, u16, u16), ObjError> {
         let (_, fr) = self.frame_cap_full(cap)?;
         Ok((fr.maps, fr.mapped_w, fr.mapped_x))
+    }
+
+    /// Số mapping **Device** đang sống trên Frame (KT-56 — bất biến toàn cục D2-67).
+    pub fn frame_device(&self, cap: CapId) -> Result<u16, ObjError> {
+        let (_, fr) = self.frame_cap_full(cap)?;
+        Ok(fr.mapped_device)
     }
 
     /// Đọc 8 B vật lý qua [`PhysMem`] — chẩn đoán/TAP (vd. chứng minh Frame 4 KiB/2 MiB là
