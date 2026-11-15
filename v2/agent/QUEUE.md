@@ -162,8 +162,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-55 | Conformance 5 `.scn` × sim/QEMU, chuẩn hoá trace | KT-51 | 3 h | DONE | b3b8ed01; 61/61 dòng khớp smp2/4; TAP 37; gate 573; D2-80 hash ảnh; bắt lỗi W|X thật |
 | KT-56 | `FaultKind` thật + W^X + `spec/abi.toml` **một lần** (D2-72 Q1) | KT-46 | 3 h | DONE | 25251719; FaultKind khớp K2; spec 1 hunk + gen tất định; 61/61 trace; 450/450 boot; gate 574 |
 | KT-57 | Cổng K3: soak 0/1000, matrix, 100k L1, perf, K3-DOD | KT-54 | 3 h | DONE | ce943707; soak 0/1000 (219 s, 3 luồng); TAP 43/3/7 ×3; L1 400k; gate 574; K3-DOD |
-| KT-58 | **K3b** port core `no_std`: CNode/MDB/Untyped | KT-57 | 3 h | READY | parity với sim trên bộ test port |
-| KT-59 | **K3b** port TCB/transition/sched + hộp thư | KT-58 | 3 h | BLOCKED | TAP parity; schedule đúng |
+| KT-58 | **K3b** port core `no_std`: CNode/MDB/Untyped | KT-57 | 3 h | DONE | 430b206c; parity 14 ca + 2016 bước; 3 mutation độc lập; gate 579; VM reserved (D2-83) |
+| KT-59 | **K3b** port TCB/transition/sched + hộp thư | KT-58 | 3 h | READY | TAP parity; schedule đúng |
 | KT-60 | **K3b** port IPC/Reply/Notification/WaitAddr/fault | KT-59 | 3 h | BLOCKED | L1 driver chạy `no_std`; C1/C2 đạt |
 | KT-61 | **K3b** cổng: TAP + soak + conformance trên nhân thật | KT-60 | 3 h | BLOCKED | TAP 100 %; soak 0/1000; conformance 5/5 |
 
