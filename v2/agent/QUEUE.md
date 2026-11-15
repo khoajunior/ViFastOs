@@ -165,7 +165,7 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-58 | **K3b** port core `no_std`: CNode/MDB/Untyped | KT-57 | 3 h | DONE | 430b206c; parity 14 ca + 2016 bước; 3 mutation độc lập; gate 579; VM reserved (D2-83) |
 | KT-59 | **K3b** port TCB/transition/sched + hộp thư | KT-58 | 3 h | DONE | 5374920a; parity 8 ca + differential; footprint 167.896 (D2-84); gate 587; F1 257-finalise atomic |
 | KT-60 | **K3b** port IPC/Reply/Notification/WaitAddr/fault | KT-59 | 3 h | DONE | L1 driver chạy `no_std`; C1/C2 đạt |
-| KT-61 | **K3b** cổng: TAP + soak + conformance trên nhân thật | KT-60 | 3 h | READY | TAP 100 %; soak 0/1000; conformance 5/5 |
+| KT-61 | **K3b** cổng: TAP + soak + conformance trên nhân thật | KT-60 | 3 h | DONE | 1e2455c8; core TAP 43..52 trên QEMU; 53/53, 9/9; soak 0/1000; conf 61/61; gate 598; .bss 180.168 |
 
 
 APPROVED 2026-11-12 Agent 0
@@ -184,7 +184,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b**: KT-58/59/60 DONE (gate 598, footprint 180.168); **KT-61 READY** (nối core vào kernel).
+2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. Tiếp: **K3.5** procsrv + shell.
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
