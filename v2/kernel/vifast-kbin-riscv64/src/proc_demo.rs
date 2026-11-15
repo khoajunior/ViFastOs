@@ -1,0 +1,866 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//! KT-65 — demo end-to-end trên QEMU: **procsrv + shell + tiến trình con** đều là chương trình
+//! U-mode thật (ELF riêng nạp bằng `vifast-elf`), core `Machine` thật giữ TCB/cap/IPC.
+//!
+//! # Vai trò của kernel trong pha demo (không có scheduler U-mode trong core)
+//!
+//! 1. **Scheduler tuần tự**: `user::run_task` hạ `sret` xuống một tác vụ; `Yield`/`Exit` trả về
+//!    S-mode; kernel chọn tác vụ kế (round-robin). Mỗi lượt có đúng một TCB `Running{hart:0}`
+//!    theo bất biến core — chuyển trạng thái qua `transition_tcb`.
+//! 2. **Chuyển tiếp fault (D2-25/QD §1 Q-A)**: khi con `Exit`, core đưa fault `Exit{code}` vào
+//!    `fault_ep`; lượt `NBRecv` của procsrv làm core ghi `Tcb.last_fault` của procsrv và đưa TCB
+//!    con về `Inactive`. ABI `Recv` hiện chỉ trả `MessageInfo`+MR (chưa có trường fault), nên
+//!    kernel đọc `last_fault` rồi gửi một **message chuyển tiếp** vào `fault_ep` bằng đúng
+//!    `NBSend` — procsrv nhận bằng `NBRecv` của mình (không thêm syscall; xem
+//!    `docs/k35-procsrv.md` §2 ghi rõ đây là cầu nối của arch, nợ ABI).
+//! 3. **UART → message**: chưa có IRQ→user; kernel bơm dòng script vào `uart_ep` của shell bằng
+//!    `NBSend` (phương án tối thiểu đề bài cho phép).
+//! 4. **`ps`**: kernel đọc trạng thái TCB **từ `Machine`** khi shell gửi `PS_REQ`, trả bằng
+//!    message; shell tự định dạng/in — không có bảng tĩnh nào.
+//! 5. **`kill`**: procsrv quyết định theo giao thức; kernel thi hành `Tcb.Suspend(Abort)` khi
+//!    nhận sự kiện `EV_KILL` của procsrv (chưa có syscall invocation TCB cho user — nợ D2-86).
+//!
+//! Mọi output `# proc:`/`# shell:` do **chương trình U-mode** in qua `DebugPutStr`; kernel
+//! capture byte theo ô tác vụ (`user::captured_contains`) để TAP kiểm chữ thật, không tin lời.
+// Module chỉ có trong ảnh test `vifast-kbin-ktest-user` (feature `ktest,user`).
+#![allow(clippy::too_many_arguments)]
+
+use core::fmt::Write;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use vifast_core::{
+    FaultKind, Machine, Message, MessageInfo, ObjId, ObjType, SlotRef, SuspendMode, TcbState,
+};
+use vifast_plat_common::obj::CapId;
+use vifast_plat_common::trap::{TrapFrame, REG_SP};
+use vifast_plat_common::{Platform, PlatformWriter};
+use vifast_plat_riscv64::obj as aobj;
+use vifast_plat_riscv64::user::{self, LoadedInit, Stop};
+use vifast_plat_riscv64::{core_bridge, Riscv64Virt};
+
+/// ELF U-mode do `build.rs` sinh (KT-65).
+static PROCSRV_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/procsrv.elf"));
+static SHELL_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shell.elf"));
+static CHILD_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/child.elf"));
+
+/// Ô bảng dải/console capture: procsrv, shell, con.
+const SLOT_PROCSRV: usize = 0;
+const SLOT_SHELL: usize = 1;
+const SLOT_CHILD: usize = 2;
+
+/// Slot cspace dùng chung của ảnh demo (chương trình U-mode cũng dùng hằng này).
+const EP_FAULT: usize = 1;
+const EP_PROC: usize = 2;
+const EP_UART: usize = 3;
+const EP_REPLY: usize = 4;
+const EP_PS: usize = 5;
+const EP_CTL: usize = 6;
+const EP_EVENTS: usize = 8;
+const SLOT_CSPACE: usize = 20;
+const TCB_SLOTS: [usize; 5] = [10, 11, 12, 13, 14];
+const SC_SLOTS: [usize; 5] = [30, 31, 32, 33, 34];
+const T_PROCSRV: usize = 0;
+const T_SHELL: usize = 1;
+const T_CHILD: usize = 2;
+const T_VICTIM: usize = 3;
+const T_KERN: usize = 4;
+
+/// Label message (trùng hằng trong 3 chương trình user).
+const LINE: u64 = 0x601;
+const PS_REQ: u64 = 0x602;
+const PS_REPLY: u64 = 0x603;
+const EV_FAULT: u64 = 0x502;
+const EV_WAIT: u64 = 0x503;
+const EV_KILL: u64 = 0x504;
+const EV_UP: u64 = 0x501;
+const EV_PS: u64 = 0x505;
+const EV_ECHO: u64 = 0x506;
+const EV_HELP: u64 = 0x507;
+const FAULT_EXIT: u64 = 0x608;
+
+/// Vùng RAM cho Untyped **U2** của riêng pha demo (nạp 3 VSpace + Frame). Nằm trên RAM 128 MiB,
+/// ngoài mọi vùng kernel/object layer đã dùng; không đụng ngưỡng `.data+.bss` (đây là PA thật,
+/// không phải section ảnh).
+const DEMO_ARENA_BASE: u64 = 0x8100_0000;
+const DEMO_ARENA_BYTES: u32 = 512 * 1024;
+const DEMO_PA_BASE: u64 = 0x8120_0000;
+
+/// Một tác vụ U-mode của demo.
+struct Task {
+    slot: usize,
+    loaded: LoadedInit,
+    tf: TrapFrame,
+    started: bool,
+    exited: bool,
+}
+
+/// Bộ nhớ/trạng thái kernel thu thập trong pha demo.
+struct Demo {
+    uart_idx: usize,
+    fault_seen: usize,
+    child_code: Option<u64>,
+    child_state: Option<TcbState>,
+    shell_exit_state: Option<TcbState>,
+    shell_exit_code: Option<u64>,
+    ps_replies: usize,
+    ps_entries: usize,
+    ps_words: [u64; 2],
+    ps_n: usize,
+    wait_code: Option<u64>,
+    wait_pid: Option<u64>,
+    kill_code: Option<u64>,
+    kill_pid: Option<u64>,
+    victim_suspended: bool,
+    kill_suspend_ok: bool,
+    events: usize,
+    procsrv_started: bool,
+    shell_started: bool,
+    child_started: bool,
+}
+
+impl Demo {
+    fn new() -> Self {
+        Self {
+            uart_idx: 0,
+            fault_seen: 0,
+            child_code: None,
+            child_state: None,
+            shell_exit_state: None,
+            shell_exit_code: None,
+            ps_replies: 0,
+            ps_entries: 0,
+            ps_words: [0; 2],
+            ps_n: 0,
+            wait_code: None,
+            wait_pid: None,
+            kill_code: None,
+            kill_pid: None,
+            victim_suspended: false,
+            kill_suspend_ok: false,
+            events: 0,
+            procsrv_started: false,
+            shell_started: false,
+            child_started: false,
+        }
+    }
+}
+
+/// Cap/slot của rig core.
+struct Rig {
+    tcb: [SlotRef; 5],
+    tcb_obj: [ObjId; 5],
+    ep: [ObjId; 6], // fault, proc, uart, reply, ps, events
+    ep_slot: [SlotRef; 6],
+}
+
+fn msg(label: u64, words: &[u64]) -> Message {
+    let info =
+        MessageInfo::new(label as u32, 0, false, 0, words.len() as u8).expect("KT-65: MessageInfo");
+    Message::new(info, words).expect("KT-65: Message")
+}
+
+fn build_rig(untyped: ObjId) -> Rig {
+    core_bridge::with_machine(|m| {
+        let root = m.add_cnode(64);
+        let us = SlotRef::new(root, 0);
+        let uc = m.root_cap(untyped);
+        m.put_cap(root, 0, uc).expect("KT-65: cap untyped");
+        let mut ep = [0u32; 6];
+        let ep_slots = [EP_FAULT, EP_PROC, EP_UART, EP_REPLY, EP_PS, EP_EVENTS];
+        let mut ep_slot = [SlotRef::new(root, 0); 6];
+        for (i, slot) in ep_slots.iter().enumerate() {
+            let cap = m
+                .retype(us, ObjType::Endpoint, 0, 0)
+                .expect("KT-65: retype endpoint");
+            m.put_cap(root, *slot, cap).expect("KT-65: put endpoint");
+            ep[i] = m.cap_obj(cap).expect("KT-65: endpoint obj");
+            ep_slot[i] = SlotRef::new(root, *slot);
+        }
+        // Cap CSpace của chính CNode (để cấu hình TCB) + SchedControl.
+        let cs = m.root_cap(root);
+        m.put_cap(root, SLOT_CSPACE, cs).expect("KT-65: cspace cap");
+        let ctl_cap = m
+            .retype(us, ObjType::SchedControl, 0, 0)
+            .expect("KT-65: retype SchedControl");
+        m.put_cap(root, EP_CTL, ctl_cap).expect("KT-65: cap ctl");
+        let ctl = SlotRef::new(root, EP_CTL);
+        let cspace = SlotRef::new(root, SLOT_CSPACE);
+        let mut tcb = [SlotRef::new(root, 0); 5];
+        let mut tcb_obj = [0u32; 5];
+        let mut sc = [SlotRef::new(root, 0); 5];
+        for i in 0..5 {
+            let tcap = m.retype(us, ObjType::Tcb, 0, 0).expect("KT-65: retype TCB");
+            m.put_cap(root, TCB_SLOTS[i], tcap).expect("KT-65: put TCB");
+            let scap = m
+                .retype(us, ObjType::SchedContext, 0, 0)
+                .expect("KT-65: retype SC");
+            m.put_cap(root, SC_SLOTS[i], scap).expect("KT-65: put SC");
+            tcb[i] = SlotRef::new(root, TCB_SLOTS[i]);
+            tcb_obj[i] = m.cap_obj(tcap).expect("KT-65: tcb obj");
+            sc[i] = SlotRef::new(root, SC_SLOTS[i]);
+        }
+        for i in 0..5 {
+            m.tcb_configure(tcb[i], Some(cspace))
+                .expect("KT-65: tcb cspace");
+            if i < 4 {
+                m.tcb_set_fault_ep(tcb[i], ep_slot[0])
+                    .expect("KT-65: fault_ep");
+            }
+            m.sched_control_configure(ctl, sc[i], 1_000, 10_000)
+                .expect("KT-65: SC");
+            m.set_sched_params(tcb[i], Some(sc[i]))
+                .expect("KT-65: sched params");
+            m.tcb_set_priority(tcb[i], 5, 10).expect("KT-65: priority");
+            m.transition_tcb(tcb_obj[i], TcbState::Ready)
+                .expect("KT-65: Ready");
+        }
+        Rig {
+            tcb,
+            tcb_obj,
+            ep,
+            ep_slot,
+        }
+    })
+}
+
+fn set_line(lines: &mut [([u8; 24], usize); 6], idx: &mut usize, text: &[u8]) {
+    if *idx >= lines.len() {
+        return;
+    }
+    let n = text.len().min(24);
+    lines[*idx].0[..n].copy_from_slice(&text[..n]);
+    lines[*idx].1 = n;
+    *idx += 1;
+}
+
+fn decimal(out: &mut [u8], mut value: u64) -> usize {
+    let mut tmp = [0u8; 20];
+    let mut i = tmp.len();
+    if value == 0 {
+        i -= 1;
+        tmp[i] = b'0';
+    }
+    while value > 0 {
+        i -= 1;
+        tmp[i] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    let n = tmp.len() - i;
+    out[..n].copy_from_slice(&tmp[i..]);
+    n
+}
+
+/// Xây script UART **theo pid thật** của con/victim (pid là `ObjId` của core).
+fn build_script(rig: &Rig) -> ([([u8; 24], usize); 6], usize) {
+    let mut lines = [([0u8; 24], 0); 6];
+    let mut idx = 0usize;
+    set_line(&mut lines, &mut idx, b"help");
+    set_line(&mut lines, &mut idx, b"echo shell-that");
+    set_line(&mut lines, &mut idx, b"ps");
+    let mut wait = [0u8; 24];
+    wait[..5].copy_from_slice(b"wait ");
+    let n = decimal(&mut wait[5..], u64::from(rig.tcb_obj[T_CHILD]));
+    set_line(&mut lines, &mut idx, &wait[..5 + n]);
+    let mut kill = [0u8; 24];
+    kill[..5].copy_from_slice(b"kill ");
+    let n = decimal(&mut kill[5..], u64::from(rig.tcb_obj[T_VICTIM]));
+    set_line(&mut lines, &mut idx, &kill[..5 + n]);
+    set_line(&mut lines, &mut idx, b"exit");
+    (lines, idx)
+}
+
+/// Dịch vụ kernel giữa hai lượt U-mode (một lần khoá `Machine`).
+fn service(m: &mut Machine, rig: &Rig, demo: &mut Demo, script: &[([u8; 24], usize)]) {
+    // 1) Sự kiện từ procsrv (kênh IPC `events_ep`).
+    while let Ok(Some(message)) = m.nb_recv(rig.tcb_obj[T_KERN], rig.ep_slot[5]) {
+        demo.events += 1;
+        let label = u64::from(message.info.label());
+        match label {
+            EV_UP => {
+                demo.procsrv_started = true;
+            }
+            EV_FAULT => {
+                demo.fault_seen += 1;
+            }
+            EV_WAIT => {
+                demo.wait_pid = Some(message.mr[0]);
+                demo.wait_code = Some(message.mr[1]);
+            }
+            EV_KILL => {
+                demo.kill_pid = Some(message.mr[0]);
+                demo.kill_code = Some(message.mr[1]);
+                let suspend = m.tcb_suspend(rig.tcb[T_VICTIM], SuspendMode::Abort);
+                demo.kill_suspend_ok = suspend.is_ok();
+                demo.victim_suspended = suspend.is_ok()
+                    && m.tcb_info_obj(rig.tcb_obj[T_VICTIM])
+                        .map(|info| info.suspended && info.state == TcbState::Ready)
+                        .unwrap_or(false);
+            }
+            EV_PS => {
+                demo.ps_entries = message.mr[0] as usize;
+            }
+            EV_ECHO | EV_HELP => {}
+            _ => {}
+        }
+    }
+    // 2) Fault `Exit` vừa được procsrv `NBRecv` thụ lý (core đã ghi `last_fault` + `Inactive`).
+    if let Ok(Some((pid, kind))) = m.take_last_fault(rig.tcb_obj[T_PROCSRV]) {
+        let state = m.tcb_state(pid).ok();
+        if let FaultKind::Exit { code } = kind {
+            let words = [u64::from(pid), code, 0, 0];
+            let _ = m.nb_send(rig.tcb_obj[T_KERN], rig.ep_slot[0], msg(FAULT_EXIT, &words));
+            if pid == rig.tcb_obj[T_CHILD] {
+                demo.child_code = Some(code);
+                demo.child_state = state;
+            } else if pid == rig.tcb_obj[T_SHELL] {
+                demo.shell_exit_code = Some(code);
+                demo.shell_exit_state = state;
+            }
+        }
+    }
+    // 3) `ps`: shell yêu cầu, kernel đọc `Machine` và trả message (shell tự in).
+    while let Ok(Some(request)) = m.nb_recv(rig.tcb_obj[T_KERN], rig.ep_slot[4]) {
+        if u64::from(request.info.label()) == PS_REQ {
+            let ids = [
+                rig.tcb_obj[T_PROCSRV],
+                rig.tcb_obj[T_SHELL],
+                rig.tcb_obj[T_CHILD],
+                rig.tcb_obj[T_VICTIM],
+            ];
+            let mut entries = [0u64; 4];
+            let mut n = 0usize;
+            for id in ids {
+                let Ok(state) = m.tcb_state(id) else { continue };
+                let suspended = m
+                    .tcb_info_obj(id)
+                    .map(|info| info.suspended)
+                    .unwrap_or(false);
+                let entry =
+                    (u64::from(id) << 5) | ((state.index() as u64) << 1) | u64::from(suspended);
+                if n < entries.len() {
+                    entries[n] = entry;
+                    n += 1;
+                }
+            }
+            let words = [
+                entries[0] | (entries[1] << 16),
+                entries[2] | (entries[3] << 16),
+            ];
+            let _ = m.nb_send(rig.tcb_obj[T_KERN], rig.ep_slot[3], msg(PS_REPLY, &words));
+            demo.ps_words = words;
+            demo.ps_n = n;
+            demo.ps_replies += 1;
+        }
+    }
+    // 4) UART → message cho shell (một dòng mỗi lần, giữ thứ tự; chưa có IRQ→user).
+    let shell_alive = m
+        .tcb_state(rig.tcb_obj[T_SHELL])
+        .map(|state| state.is_live())
+        .unwrap_or(false);
+    let empty = m
+        .endpoint_send_len(rig.ep[2])
+        .map(|len| len == 0)
+        .unwrap_or(false);
+    if shell_alive && empty && demo.uart_idx < script.len() {
+        let (bytes, len) = script[demo.uart_idx];
+        let mut w = [0u64; 4];
+        w[..3].copy_from_slice(&[
+            u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
+            u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
+            u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
+        ]);
+        w[3] = len as u64;
+        let _ = m.nb_send(rig.tcb_obj[T_KERN], rig.ep_slot[2], msg(LINE, &w));
+        demo.uart_idx += 1;
+    }
+}
+
+/// Trạng thái điều phối của demo để **không** nằm trong khung stack bị ghi đè (chẩn đoán KT-65:
+/// biến cục bộ `steps`/`tcb_index` từng bị zero sau lượt U-mode đầu của shell — xem
+/// `docs/k35-procsrv.md` §6). Dùng static để vòng lặp có nguồn sự thật ngoài stack.
+static STEP_NO: AtomicU64 = AtomicU64::new(0);
+static TURN_NO: AtomicU64 = AtomicU64::new(0);
+static CUR_TASK: AtomicU64 = AtomicU64::new(0);
+
+fn task_running(m: &mut Machine, tcb: ObjId) -> bool {
+    m.transition_tcb(tcb, TcbState::Running { hart: 0 }).is_ok()
+}
+
+fn task_ready(m: &mut Machine, tcb: ObjId) {
+    let _ = m.transition_tcb(tcb, TcbState::Ready);
+}
+
+/// Đệm nhỏ dựng dòng `pid=… state=…` để đối chiếu output shell (không cấp phát).
+struct FixedBuf {
+    b: [u8; 64],
+    n: usize,
+}
+
+impl FixedBuf {
+    fn new() -> Self {
+        Self { b: [0; 64], n: 0 }
+    }
+    fn push(&mut self, t: &[u8]) {
+        for byte in t {
+            if self.n < self.b.len() {
+                self.b[self.n] = *byte;
+                self.n += 1;
+            }
+        }
+    }
+    fn num(&mut self, mut v: u64) {
+        let mut tmp = [0u8; 20];
+        let mut i = tmp.len();
+        if v == 0 {
+            i -= 1;
+            tmp[i] = b'0';
+        }
+        while v > 0 {
+            i -= 1;
+            tmp[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+        }
+        self.push(&tmp[i..]);
+    }
+    fn as_bytes(&self) -> &[u8] {
+        &self.b[..self.n]
+    }
+}
+
+/// Tên trạng thái theo **chỉ số `TcbState::index()`** — khớp `state_name` của shell.
+fn state_label(code: u8) -> &'static [u8] {
+    match code {
+        0 => b"Inactive",
+        1 => b"Ready",
+        2 => b"Running",
+        3 => b"BlockedOnSend",
+        4 => b"BlockedOnRecv",
+        5 => b"BlockedOnReply",
+        6 => b"BlockedOnNotification",
+        7 => b"BlockedOnAddress",
+        8 => b"Sleeping",
+        9 => b"Stopping",
+        10 => b"Dead",
+        _ => b"Unknown",
+    }
+}
+
+fn tcb_name(state: TcbState) -> &'static str {
+    match state {
+        TcbState::Inactive => "Inactive",
+        TcbState::Ready => "Ready",
+        TcbState::Running { .. } => "Running",
+        TcbState::BlockedOnSend { .. } => "BlockedOnSend",
+        TcbState::BlockedOnRecv { .. } => "BlockedOnRecv",
+        TcbState::BlockedOnReply { .. } => "BlockedOnReply",
+        TcbState::BlockedOnNotification { .. } => "BlockedOnNotification",
+        TcbState::BlockedOnAddress { .. } => "BlockedOnAddress",
+        TcbState::Sleeping { .. } => "Sleeping",
+        TcbState::Stopping => "Stopping",
+        TcbState::Dead => "Dead",
+    }
+}
+
+/// Chạy pha demo, in TAP 15..21 rồi giao quyền cho `cont` (`-> !`). Ảnh test kết thúc bằng
+/// continuation (TAP 22..24 + PANIC fatal của KT-56) nên **không quay lại khung gọi** — tránh
+/// đường trả về của khung `rust_main` sau nhiều lượt `user_enter` (đã thấy `ra=0` khi trả về).
+pub fn run(
+    platform: &Riscv64Virt,
+    load_untyped: CapId,
+    core_untyped: ObjId,
+    init_loaded: LoadedInit,
+    init_exit_kind_ok: bool,
+    cont: fn(LoadedInit, bool) -> !,
+) -> ! {
+    // --- nạp 3 chương trình U-mode vào 3 VSpace thật (Untyped U2 của pha demo).
+    // U2 **của object layer** cấp Frame/PageTable cho 3 VSpace; core rig dùng Untyped riêng
+    // (`core_untyped`) như KT-61/KT-62.
+    let _u2 = aobj::machine()
+        .add_untyped(DEMO_ARENA_BASE, DEMO_ARENA_BYTES, DEMO_PA_BASE)
+        .expect("KT-65: add_untyped U2");
+    let procsrv = match user::load_init_slot(PROCSRV_ELF, load_untyped, SLOT_PROCSRV) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            let mut w = PlatformWriter(platform);
+            let _ = writeln!(
+                w,
+                "not ok 15 - procsrv/shell/con load: {} {:?}",
+                e.name(),
+                e
+            );
+            platform.put_str("# ktest halt\n");
+            platform.halt(1);
+        }
+    };
+    let shell = match user::load_init_slot(SHELL_ELF, load_untyped, SLOT_SHELL) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            let mut w = PlatformWriter(platform);
+            let _ = writeln!(
+                w,
+                "not ok 15 - procsrv/shell/con load: shell {} {:?}",
+                e.name(),
+                e
+            );
+            platform.put_str("# ktest halt\n");
+            platform.halt(1);
+        }
+    };
+    let child = match user::load_init_slot(CHILD_ELF, load_untyped, SLOT_CHILD) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            let mut w = PlatformWriter(platform);
+            let _ = writeln!(
+                w,
+                "not ok 15 - procsrv/shell/con load: child {} {:?}",
+                e.name(),
+                e
+            );
+            platform.put_str("# ktest halt\n");
+            platform.halt(1);
+        }
+    };
+    let load_ok = procsrv.check_ok
+        && procsrv.wx_pages == 0
+        && procsrv.flags_ok
+        && procsrv.high_half_unmapped
+        && shell.check_ok
+        && shell.wx_pages == 0
+        && shell.flags_ok
+        && shell.high_half_unmapped
+        && child.check_ok
+        && child.wx_pages == 0
+        && child.flags_ok
+        && child.high_half_unmapped;
+    {
+        let mut w = PlatformWriter(platform);
+        let _ = writeln!(
+            w,
+            "# proc: load procsrv=[0x{:x},0x{:x}) asid={} segs={} stack={} ok={} shell=[0x{:x},0x{:x}) asid={} segs={} stack={} ok={} child=[0x{:x},0x{:x}) asid={} segs={} stack={} ok={}",
+            procsrv.entry,
+            procsrv.image_end,
+            procsrv.asid,
+            procsrv.segments,
+            procsrv.stack_pages,
+            procsrv.check_ok as u8,
+            shell.entry,
+            shell.image_end,
+            shell.asid,
+            shell.segments,
+            shell.stack_pages,
+            shell.check_ok as u8,
+            child.entry,
+            child.image_end,
+            child.asid,
+            child.segments,
+            child.stack_pages,
+            child.check_ok as u8,
+        );
+    }
+
+    // --- rig core: cspace dùng chung + 6 endpoint + 5 TCB + 5 SC + SchedControl.
+    let rig = build_rig(core_untyped);
+    let (lines, n_lines) = build_script(&rig);
+    let mut demo = Demo::new();
+    let mut tasks = [
+        Task {
+            slot: SLOT_PROCSRV,
+            loaded: procsrv,
+            tf: TrapFrame::zeroed(),
+            started: false,
+            exited: false,
+        },
+        Task {
+            slot: SLOT_SHELL,
+            loaded: shell,
+            tf: TrapFrame::zeroed(),
+            started: false,
+            exited: false,
+        },
+        Task {
+            slot: SLOT_CHILD,
+            loaded: child,
+            tf: TrapFrame::zeroed(),
+            started: false,
+            exited: false,
+        },
+    ];
+    for task in tasks.iter_mut() {
+        task.tf.x[REG_SP] = user::USER_STACK_TOP;
+        task.tf.sepc = task.loaded.entry;
+    }
+    let mut script = [([0u8; 24], 0usize); 6];
+    script[..n_lines].copy_from_slice(&lines[..n_lines]);
+
+    user::enable_multitask(true);
+    user::capture_begin();
+    const ORDER: [usize; 3] = [T_PROCSRV, T_SHELL, T_CHILD];
+    STEP_NO.store(0, Ordering::Relaxed);
+    TURN_NO.store(0, Ordering::Relaxed);
+    let mut running = true;
+    while running && STEP_NO.load(Ordering::Relaxed) < 240 {
+        let _ = STEP_NO.fetch_add(1, Ordering::Relaxed) + 1;
+        let turn = TURN_NO.fetch_add(1, Ordering::Relaxed);
+        CUR_TASK.store(
+            ORDER[(turn as usize) % ORDER.len()] as u64,
+            Ordering::Relaxed,
+        );
+        let tcb_index = CUR_TASK.load(Ordering::Relaxed) as usize;
+        if tasks[tcb_index].exited {
+            continue;
+        }
+        user::set_active_slot(tasks[CUR_TASK.load(Ordering::Relaxed) as usize].slot);
+        user::bind_core_tcb(rig.tcb_obj[CUR_TASK.load(Ordering::Relaxed) as usize]);
+        let entered = core_bridge::with_machine(|m| {
+            task_running(m, rig.tcb_obj[CUR_TASK.load(Ordering::Relaxed) as usize])
+        });
+        if !entered {
+            break;
+        }
+        tasks[CUR_TASK.load(Ordering::Relaxed) as usize].started = true;
+        let stop = user::run_task(
+            &tasks[CUR_TASK.load(Ordering::Relaxed) as usize].loaded,
+            &mut tasks[CUR_TASK.load(Ordering::Relaxed) as usize].tf,
+        );
+        let saved = user::saved_tf();
+        tasks[CUR_TASK.load(Ordering::Relaxed) as usize].tf = saved;
+        match stop {
+            Stop::Yield => {
+                core_bridge::with_machine(|m| {
+                    task_ready(m, rig.tcb_obj[CUR_TASK.load(Ordering::Relaxed) as usize])
+                });
+            }
+            Stop::Exit { .. } => {
+                tasks[tcb_index].exited = true;
+                if tcb_index == T_CHILD {
+                    demo.child_started = true;
+                }
+            }
+            Stop::Blocked(_) | Stop::Halt { .. } => {
+                tasks[tcb_index].exited = true;
+            }
+        }
+        if tasks[T_PROCSRV].started {
+            demo.procsrv_started =
+                demo.procsrv_started || user::captured_contains(SLOT_PROCSRV, b"# proc: up");
+        }
+        if tasks[T_SHELL].started {
+            demo.shell_started =
+                demo.shell_started || user::captured_contains(SLOT_SHELL, b"# shell: up");
+        }
+        if tasks[T_CHILD].started {
+            demo.child_started = true;
+        }
+        core_bridge::with_machine(|m| service(m, &rig, &mut demo, &script));
+        // Điều kiện dừng: shell đã Exit, procsrv đã nhận **cả** Exit của con và của shell.
+        let shell_state = core_bridge::with_machine(|m| m.tcb_state(rig.tcb_obj[T_SHELL]).ok());
+        running = !(tasks[T_SHELL].exited
+            && demo.fault_seen >= 2
+            && demo.child_code == Some(42)
+            && demo.shell_exit_code == Some(0)
+            && shell_state == Some(TcbState::Inactive));
+        // Không còn tác vụ nào chạy được mà chưa xong ⇒ thoát để TAP đỏ có chẩn đoán.
+        if tasks.iter().all(|task| task.exited) && running {
+            break;
+        }
+    }
+    user::enable_multitask(false);
+    user::capture_end();
+
+    // ---------------------------------------------------------------- TAP 15..21
+    let mut ok_all = true;
+    let mut w = PlatformWriter(platform);
+    // 15 — nạp + chạy U-mode thật cả ba chương trình.
+    let ok15 =
+        load_ok && tasks[T_PROCSRV].started && tasks[T_SHELL].started && tasks[T_CHILD].started;
+    if ok15 {
+        let _ = writeln!(w, "ok 15 - procsrv/shell/con load u-mode");
+    } else {
+        let _ = writeln!(
+            w,
+            "not ok 15 - procsrv/shell/con load u-mode: load/start sai"
+        );
+        ok_all = false;
+    }
+    // 16 — procsrv nhận Exit của con qua core; TCB con `Inactive`.
+    let ok16 = demo.child_code == Some(42)
+        && demo.child_state == Some(TcbState::Inactive)
+        && demo.fault_seen >= 1
+        && user::captured_contains(SLOT_PROCSRV, b"# proc: recv exit pid=")
+        && user::captured_contains(SLOT_PROCSRV, b" code=42");
+    {
+        let _ = writeln!(
+            w,
+            "# proc: exit recv code={} state={} faults={} captured={}",
+            demo.child_code.map(|c| c as i64).unwrap_or(-1),
+            demo.child_state.map(tcb_name).unwrap_or("none"),
+            demo.fault_seen,
+            user::captured_contains(SLOT_PROCSRV, b"# proc: recv exit pid=") as u8
+        );
+    }
+    if ok16 {
+        let _ = writeln!(w, "ok 16 - procsrv recv fault exit");
+    } else {
+        let _ = writeln!(w, "not ok 16 - procsrv recv fault exit: core/chuoi sai");
+        ok_all = false;
+    }
+    // 17 — help + echo do shell U-mode in.
+    let ok17 = user::captured_contains(SLOT_SHELL, b"# shell: help cmds=6")
+        && user::captured_contains(SLOT_SHELL, b"# shell: echo shell-that");
+    if ok17 {
+        let _ = writeln!(w, "ok 17 - shell help echo");
+    } else {
+        let _ = writeln!(w, "not ok 17 - shell help echo: thieu output U-mode");
+        ok_all = false;
+    }
+    // 18 — ps từ core: snapshot kernel lúc `PS_REQ` phải khớp **từng dòng** shell in.
+    let mut snapshot_ok = demo.ps_n == 4;
+    if snapshot_ok {
+        for word in demo.ps_words {
+            for half in 0..2 {
+                let entry = if half == 0 { word & 0xFFFF } else { word >> 16 };
+                if entry == 0 {
+                    continue;
+                }
+                let pid = entry >> 5;
+                let state = ((entry >> 1) & 0x1F) as u8;
+                let suspended = entry & 1 != 0;
+                let mut line = FixedBuf::new();
+                line.push(b"  pid=");
+                line.num(pid);
+                line.push(b" state=");
+                line.push(state_label(state));
+                if suspended {
+                    line.push(b" suspended");
+                }
+                if !user::captured_contains(SLOT_SHELL, line.as_bytes()) {
+                    snapshot_ok = false;
+                }
+            }
+        }
+    }
+    let ok18 = demo.ps_replies == 1
+        && demo.ps_entries == 4
+        && snapshot_ok
+        && user::captured_contains(SLOT_SHELL, b"# shell: ps n=4");
+    {
+        let _ = writeln!(
+            w,
+            "# shell: ps replies={} entries={} snapshot_match={} captured={}",
+            demo.ps_replies,
+            demo.ps_entries,
+            snapshot_ok as u8,
+            user::captured_contains(SLOT_SHELL, b"# shell: ps n=") as u8
+        );
+    }
+    if ok18 {
+        let _ = writeln!(w, "ok 18 - shell ps tu core");
+    } else {
+        let _ = writeln!(w, "not ok 18 - shell ps tu core: snapshot/chuoi sai");
+        ok_all = false;
+    }
+    // 19 — wait: giao thức procsrv trả mã thoát của con.
+    let ok19 = demo.wait_pid == Some(u64::from(rig.tcb_obj[T_CHILD]))
+        && demo.wait_code == Some(42)
+        && user::captured_contains(SLOT_SHELL, b"# shell: wait pid=")
+        && user::captured_contains(SLOT_SHELL, b" code=42");
+    {
+        let _ = writeln!(
+            w,
+            "# shell: wait pid={} code={} captured={}",
+            demo.wait_pid.map(|p| p as i64).unwrap_or(-1),
+            demo.wait_code.map(|c| c as i64).unwrap_or(-1),
+            user::captured_contains(SLOT_SHELL, b"# shell: wait pid=") as u8
+        );
+    }
+    if ok19 {
+        let _ = writeln!(w, "ok 19 - shell wait ma thoat");
+    } else {
+        let _ = writeln!(w, "not ok 19 - shell wait ma thoat: giao thuc sai");
+        ok_all = false;
+    }
+    // 20 — kill: procsrv quyết định, core treo TCB victim thật (`suspended=1`).
+    let ok20 = demo.kill_pid == Some(u64::from(rig.tcb_obj[T_VICTIM]))
+        && demo.kill_code == Some(0)
+        && demo.kill_suspend_ok
+        && demo.victim_suspended
+        && user::captured_contains(SLOT_SHELL, b"# shell: kill pid=")
+        && user::captured_contains(SLOT_SHELL, b" code=0");
+    {
+        let _ = writeln!(
+            w,
+            "# shell: kill pid={} code={} suspend_ok={} victim_suspended={} captured={}",
+            demo.kill_pid.map(|p| p as i64).unwrap_or(-1),
+            demo.kill_code.map(|c| c as i64).unwrap_or(-1),
+            demo.kill_suspend_ok as u8,
+            demo.victim_suspended as u8,
+            user::captured_contains(SLOT_SHELL, b"# shell: kill pid=") as u8
+        );
+    }
+    if ok20 {
+        let _ = writeln!(w, "ok 20 - procsrv kill treo tcb");
+    } else {
+        let _ = writeln!(w, "not ok 20 - procsrv kill treo tcb: suspended sai");
+        ok_all = false;
+    }
+    // 21 — shell Exit: core chuyển Inactive sau khi procsrv Recv (D2-25).
+    let ok21 = demo.shell_exit_code == Some(0)
+        && demo.shell_exit_state == Some(TcbState::Inactive)
+        && demo.fault_seen >= 2
+        && user::captured_contains(SLOT_SHELL, b"# shell: exit code=0")
+        && user::captured_contains(SLOT_PROCSRV, b" code=0");
+    {
+        let shell_state = core_bridge::with_machine(|m| m.tcb_state(rig.tcb_obj[T_SHELL]).ok());
+        let _ = writeln!(
+            w,
+            "# shell: exit code={} state={} faults={} steps={} captured={}",
+            demo.shell_exit_code.map(|c| c as i64).unwrap_or(-1),
+            shell_state.map(tcb_name).unwrap_or("none"),
+            demo.fault_seen,
+            STEP_NO.load(Ordering::Relaxed),
+            user::captured_contains(SLOT_SHELL, b"# shell: exit code=0") as u8
+        );
+    }
+    if ok21 {
+        let _ = writeln!(w, "ok 21 - shell exit va procsrv finalise");
+    } else {
+        let _ = writeln!(
+            w,
+            "not ok 21 - shell exit va procsrv finalise: state/chuoi sai"
+        );
+        ok_all = false;
+    }
+    {
+        // Bất biến core sau pha demo (cùng bộ kiểm của KT-62).
+        let invariants = core_bridge::with_machine(|m| {
+            m.check_caps().is_ok()
+                && m.check_bytes(core_untyped).is_ok()
+                && m.check_all_bytes().is_ok()
+                && m.check_sched().is_ok()
+                && m.check_sc_refs().is_ok()
+                && m.check_budget().is_ok()
+                && m.check_mailboxes().is_ok()
+                && m.check_ipc().is_ok()
+                && m.check_reply_links().is_ok()
+                && m.check_notifications().is_ok()
+                && m.check_waitaddr().is_ok()
+                && m.check_fault().is_ok()
+        });
+        let _ = writeln!(
+            w,
+            "# proc: sched steps={} loads=3 events={} faults={} ps={} invariant={}",
+            STEP_NO.load(Ordering::Relaxed),
+            demo.events,
+            demo.fault_seen,
+            demo.ps_entries,
+            invariants as u8
+        );
+        ok_all &= invariants;
+    }
+    {
+        let mut w = PlatformWriter(platform);
+        let _ = writeln!(w, "# proc: sched done ok={}", ok_all as u8);
+    }
+    // Không trả về khung gọi: continuation chạy TAP 22..24 (fault/KT-56) rồi kết thúc boot.
+    cont(init_loaded, init_exit_kind_ok)
+}

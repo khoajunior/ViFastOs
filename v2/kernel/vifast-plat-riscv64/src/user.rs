@@ -40,6 +40,7 @@
 
 use core::arch::{asm, global_asm};
 use core::fmt::Write;
+use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use vifast_core::syscall::{
@@ -149,8 +150,220 @@ impl UserRanges {
     }
 }
 
-/// Dải user đang map của tác vụ (một tác vụ/1 hart ở KT-53).
-static USER_RANGES: UserRanges = UserRanges::new();
+/// Số tác vụ U-mode tối đa mà runtime đa nhiệm hỗ trợ (KT-65: procsrv + shell + con + dự phòng).
+/// Mỗi tác vụ có **bảng dải user riêng**: `DebugPutStr` phải kiểm con trỏ theo đúng VSpace đang
+/// chạy, không dùng bảng của lượt nạp trước (KT-53 chỉ có một tác vụ nên bảng là static đơn).
+pub const MAX_PROCS: usize = 4;
+
+/// Bảng dải `[base,end)` theo **ô tác vụ** (nạp bằng [`load_init_slot`], chọn bằng
+/// [`set_active_slot`]).
+static RANGE_SLOTS: [UserRanges; MAX_PROCS] = [const { UserRanges::new() }; MAX_PROCS];
+/// Ô bảng dải mà `load_init_slot` kế tiếp ghi vào.
+static LOAD_SLOT: AtomicU32 = AtomicU32::new(0);
+/// Ô bảng dải/console capture của tác vụ **đang chạy**.
+static ACTIVE_SLOT: AtomicU32 = AtomicU32::new(0);
+
+fn slot_index(slot: usize) -> usize {
+    if slot < MAX_PROCS {
+        slot
+    } else {
+        0
+    }
+}
+
+/// Chọn ô bảng dải cho lượt nạp kế tiếp.
+pub fn set_load_slot(slot: usize) {
+    LOAD_SLOT.store(slot_index(slot) as u32, Ordering::Relaxed);
+}
+
+/// Chọn ô bảng dải (và console capture) của tác vụ sắp chạy.
+pub fn set_active_slot(slot: usize) {
+    ACTIVE_SLOT.store(slot_index(slot) as u32, Ordering::Relaxed);
+}
+
+fn active_ranges() -> &'static UserRanges {
+    &RANGE_SLOTS[ACTIVE_SLOT.load(Ordering::Relaxed) as usize]
+}
+
+fn loading_ranges() -> &'static UserRanges {
+    &RANGE_SLOTS[LOAD_SLOT.load(Ordering::Relaxed) as usize]
+}
+
+// ---------------------------------------------------------------------------------------------
+// KT-65 — console capture của ảnh test: byte do **U-mode** in ra, không phải kernel in hộ.
+// ---------------------------------------------------------------------------------------------
+
+/// Cỡ bộ đệm capture mỗi tác vụ (đủ cho các dòng `# shell:`/`# proc:` của demo).
+const CAP_BYTES: usize = 1024;
+/// `1` ⇔ đang capture byte `DebugPutStr` theo ô tác vụ đang chạy.
+static CAP_ON: AtomicU32 = AtomicU32::new(0);
+/// Số byte đã capture theo ô tác vụ.
+static CAP_LEN: [AtomicU32; MAX_PROCS] = [const { AtomicU32::new(0) }; MAX_PROCS];
+/// Bộ đệm capture theo ô tác vụ.
+static mut CAP_BUF: [[u8; CAP_BYTES]; MAX_PROCS] = [[0; CAP_BYTES]; MAX_PROCS];
+
+/// Bắt đầu capture (xoá bộ đệm mọi ô). Chỉ ảnh test dùng.
+pub fn capture_begin() {
+    for len in CAP_LEN.iter() {
+        len.store(0, Ordering::Relaxed);
+    }
+    CAP_ON.store(1, Ordering::Relaxed);
+}
+
+/// Tắt capture.
+pub fn capture_end() {
+    CAP_ON.store(0, Ordering::Relaxed);
+}
+
+fn capture_byte(byte: u8) {
+    if CAP_ON.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let slot = ACTIVE_SLOT.load(Ordering::Relaxed) as usize;
+    let len = CAP_LEN[slot].load(Ordering::Relaxed) as usize;
+    if len >= CAP_BYTES {
+        return;
+    }
+    // SAFETY: `CAP_BUF` là static duy nhất; offset `slot * CAP_BYTES + len` đã kiểm
+    // `slot < MAX_PROCS`, `len < CAP_BYTES`; chỉ ghi một byte, không tạo tham chiếu `&mut`.
+    unsafe {
+        core::ptr::addr_of_mut!(CAP_BUF)
+            .cast::<u8>()
+            .add(slot * CAP_BYTES + len)
+            .write_volatile(byte);
+    }
+    CAP_LEN[slot].store((len + 1) as u32, Ordering::Relaxed);
+}
+
+/// Số byte U-mode đã in của ô tác vụ `slot` (chỉ có nghĩa khi capture bật).
+pub fn captured_len(slot: usize) -> usize {
+    CAP_LEN[slot_index(slot)].load(Ordering::Relaxed) as usize
+}
+
+/// `true` ⇔ chuỗi byte `needle` xuất hiện trong output U-mode của ô `slot`.
+pub fn captured_contains(slot: usize, needle: &[u8]) -> bool {
+    let slot = slot_index(slot);
+    let len = captured_len(slot);
+    if needle.is_empty() || needle.len() > len {
+        return false;
+    }
+    // SAFETY: cùng static/offset như `capture_byte`; đọc `len` byte đã được ghi trong bộ đệm của
+    // ô này, `len <= CAP_BYTES`, chưa có ghi đồng thời (một hart, tuần tự).
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            core::ptr::addr_of!(CAP_BUF)
+                .cast::<u8>()
+                .add(slot * CAP_BYTES),
+            len,
+        )
+    };
+    bytes.windows(needle.len()).any(|window| window == needle)
+}
+
+/// Chụp bảng dải của ô `slot` ra đầu ra `out` (tối đa 16 byte) — dùng cho log/TAP.
+pub fn captured_prefix(slot: usize, out: &mut [u8]) -> usize {
+    let slot = slot_index(slot);
+    let len = captured_len(slot).min(out.len());
+    // SAFETY: như `captured_contains` — đọc `len` byte từ bộ đệm của ô.
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            core::ptr::addr_of!(CAP_BUF)
+                .cast::<u8>()
+                .add(slot * CAP_BYTES),
+            out.as_mut_ptr(),
+            len,
+        );
+    }
+    len
+}
+
+// ---------------------------------------------------------------------------------------------
+// KT-65 — đa nhiệm U-mode tuần tự (kernel làm scheduler; không thêm syscall)
+// ---------------------------------------------------------------------------------------------
+
+/// Vì sao một lượt [`run_task`] trả về S-mode.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Stop {
+    /// Tác vụ gọi `Exit` (syscall 14). `code` = mã thoát.
+    Exit { code: u64 },
+    /// Tác vụ gọi `Yield` (syscall 8) — điểm nhường CPU của scheduler.
+    Yield,
+    /// Tác vụ chặn trong core (không dùng ở KT-65; giữ để không panic).
+    Blocked(TcbState),
+    /// Tác vụ gọi `DebugHalt` (13).
+    Halt { code: u64 },
+}
+
+/// `1` ⇔ bật ngữ nghĩa đa nhiệm (chỉ pha demo KT-65). Mặc định `0` giữ nguyên KT-53/62: `Yield`
+/// đi vào core như mọi syscall, `Switched` là lỗi nặng (PANIC).
+static MULTITASK: AtomicU32 = AtomicU32::new(0);
+/// Loại [`Stop`] lần gần nhất (0 = chưa có).
+static STOP_KIND: AtomicU32 = AtomicU32::new(0);
+/// Mã thoát của [`Stop::Exit`]/[`Stop::Halt`].
+static STOP_CODE: AtomicU64 = AtomicU64::new(0);
+/// Trapframe của tác vụ vừa dừng — scheduler đọc để chạy tiếp.
+static mut SAVED_TF: TrapFrame = TrapFrame::zeroed();
+
+/// Bật/tắt ngữ nghĩa đa nhiệm của runtime U-mode.
+pub fn enable_multitask(on: bool) {
+    MULTITASK.store(u32::from(on), Ordering::Relaxed);
+}
+
+fn save_tf(tf: &TrapFrame) {
+    // SAFETY: một hart, `user_enter` đã trả về S-mode nên không có ai đọc/ghi đồng thời.
+    unsafe {
+        core::ptr::write(core::ptr::addr_of_mut!(SAVED_TF), *tf);
+    }
+}
+
+/// Bản sao trapframe của tác vụ vừa dừng ([`Stop::Yield`]/[`Stop::Exit`]).
+pub fn saved_tf() -> TrapFrame {
+    // SAFETY: như `save_tf` — chỉ đọc sau khi handler đã ghi xong trong cùng luồng.
+    unsafe { core::ptr::read(core::ptr::addr_of!(SAVED_TF)) }
+}
+
+fn stop(kind: u32, code: u64) {
+    STOP_CODE.store(code, Ordering::Relaxed);
+    STOP_KIND.store(kind, Ordering::Release);
+}
+
+fn saved_stop() -> Stop {
+    match STOP_KIND.load(Ordering::Acquire) {
+        1 => Stop::Exit {
+            code: STOP_CODE.load(Ordering::Relaxed),
+        },
+        2 => Stop::Yield,
+        3 => Stop::Blocked(TcbState::Inactive),
+        4 => Stop::Halt {
+            code: STOP_CODE.load(Ordering::Relaxed),
+        },
+        _ => Stop::Blocked(TcbState::Inactive),
+    }
+}
+
+/// Chạy một tác vụ U-mode từ `loaded` với trapframe `tf` (đã có `sepc`/`sp`/regs). Trả về khi
+/// tác vụ `Yield`/`Exit` (đa nhiệm) hoặc `DebugHalt`; `tf` **không** bị sửa tại chỗ — bản mới
+/// nằm ở [`saved_tf`]. `a0` của lần vào đầu là của caller (0 với chương trình KT-65).
+pub fn run_task(loaded: &LoadedInit, tf: &mut TrapFrame) -> Stop {
+    LAST_VSPACE.store(u32::from(loaded.vspace.0), Ordering::Relaxed);
+    LAST_ASID.store(u64::from(loaded.asid), Ordering::Relaxed);
+    USER_FAULT_RECOVER.store(0, Ordering::Relaxed);
+    let current = read_sstatus();
+    tf.sstatus = current & !(SSTATUS_SPP | SSTATUS_SPIE | SSTATUS_SIE | SSTATUS_SUM);
+    USER_TASK.begin_run(tf.sstatus & SSTATUS_SPP != 0);
+    USER_TASK.record_enter_sstatus(tf.sstatus);
+    STOP_KIND.store(0, Ordering::Release);
+    if !aobj::switch_root(loaded.root, loaded.asid) {
+        let _ = aobj::restore_kernel_root();
+        return Stop::Blocked(TcbState::Inactive);
+    }
+    // SAFETY: như `enter_with` — trapframe do scheduler dựng từ lần nạp/trap trước; `user_enter`
+    // chỉ quay lại qua `user_exit_resume` sau khi handler gọi `exit_to_kernel`.
+    unsafe { user_enter(tf as *const TrapFrame) };
+    // KT-65: cùng lý do `enter_with` — trả về S-mode với `satp` kernel để scheduler/physmap chạy.
+    let _ = aobj::restore_kernel_root();
+    saved_stop()
+}
 
 /// Trạng thái tác vụ user (TCB-like tối thiểu) — TAP đọc sau mỗi lượt.
 pub static USER_TASK: UserTask = UserTask::new();
@@ -295,6 +508,13 @@ pub struct LoadedInit {
 ///
 /// `untyped` là cap Untyped chứa arena/PA cho VSpace/Frame (KT-52).
 pub fn load_init(bytes: &[u8], untyped: CapId) -> Result<LoadedInit, LoadError> {
+    load_init_slot(bytes, untyped, 0)
+}
+
+/// Như [`load_init`] nhưng ghi bảng dải user vào **ô tác vụ** `slot` (KT-65: nhiều chương trình
+/// U-mode trong cùng ảnh test, mỗi chương trình một VSpace).
+pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<LoadedInit, LoadError> {
+    set_load_slot(slot);
     let image = vifast_elf::parse(bytes, EM_RISCV, USER_BASE, USER_TOP).map_err(LoadError::Elf)?;
     // Ảnh không được chạm guard/stack user; guard nằm ngay dưới stack.
     let mut image_end = USER_BASE;
@@ -323,7 +543,7 @@ pub fn load_init(bytes: &[u8], untyped: CapId) -> Result<LoadedInit, LoadError> 
     if !aobj::copy_kernel_low_root(root, USER_ROOT_INDEX) {
         return Err(LoadError::Physmap);
     }
-    USER_RANGES.reset();
+    loading_ranges().reset();
 
     let mut text_pages = 0usize;
     let mut ro_pages = 0usize;
@@ -366,7 +586,7 @@ pub fn load_init(bytes: &[u8], untyped: CapId) -> Result<LoadedInit, LoadError> 
                 return Err(LoadError::Physmap);
             }
             m.map(vspace, va, frame, flags).map_err(LoadError::Obj)?;
-            if index == 0 && !USER_RANGES.push(va, va + (pages as u64) * 4096) {
+            if index == 0 && !loading_ranges().push(va, va + (pages as u64) * 4096) {
                 return Err(LoadError::Image);
             }
             if segment.executable() {
@@ -392,7 +612,7 @@ pub fn load_init(bytes: &[u8], untyped: CapId) -> Result<LoadedInit, LoadError> 
         }
         m.map(vspace, stack_va, frame, MapFlags::RW_NX_USER)
             .map_err(LoadError::Obj)?;
-        if stack_pages == 0 && !USER_RANGES.push(USER_STACK_GUARD_TOP, USER_STACK_TOP) {
+        if stack_pages == 0 && !loading_ranges().push(USER_STACK_GUARD_TOP, USER_STACK_TOP) {
             return Err(LoadError::Image);
         }
         stack_pages += 1;
@@ -531,7 +751,90 @@ fn enter_with(
     // lưu ngữ cảnh kernel, nạp CSR + 31 thanh ghi từ frame rồi `sret`. Chỉ quay lại qua
     // `user_exit_resume` (Exit) hoặc không quay lại (fault ⇒ halt).
     unsafe { user_enter(&tf as *const TrapFrame) };
+    // KT-65: `Exit`/fault trả về S-mode **vẫn đang** `satp` = root user (không có physmap).
+    // Khôi phục root kernel trước khi phần còn lại của kernel chạm object layer/physmap.
+    let _ = aobj::restore_kernel_root();
     Ok(USER_TASK.snapshot())
+}
+
+// ---------------------------------------------------------------------------------------------
+// KT-65 — **stack riêng cho dispatch syscall** (không dùng trap stack 16 KiB của KT-49)
+// ---------------------------------------------------------------------------------------------
+
+/// Cỡ stack dispatch syscall. Trap stack per-hart chỉ **16 KiB** (bất biến KT-49); đường IPC
+/// `NBRecv`/`Send` với `Message` 64 MR làm khung dispatch sâu hơn 16 KiB ⇒ tràn xuống kernel
+/// stack và **ghi đè biến cục bộ** của scheduler (đã quan sát: `LoadedInit`/`steps` bị zero,
+/// `ret` về 0). Chuyển phần nặng sang stack riêng 32 KiB trong `.bss` của ảnh test.
+const SYSCALL_STACK_BYTES: usize = 32 * 1024;
+
+#[repr(align(16))]
+struct SyscallStack(
+    // Chỉ dùng làm **vùng nhớ** cho `sp`; nội dung không đọc bằng Rust (asm `mv sp`).
+    #[allow(dead_code)] [u8; SYSCALL_STACK_BYTES],
+);
+static mut SYSCALL_STACK: SyscallStack = SyscallStack([0; SYSCALL_STACK_BYTES]);
+/// `sp` kernel được lưu tạm trong lúc chạy dispatch trên stack riêng (không lồng nhau).
+static mut SYSCALL_SAVED_SP: [u64; 2] = [0; 2];
+/// Tham số/`tcb` của lượt dispatch đang chạy trên stack riêng.
+static mut SYSCALL_TCB: u32 = 0;
+static mut SYSCALL_NR: u64 = 0;
+static mut SYSCALL_ARGS: [u64; 6] = [0; 6];
+/// Kết quả dispatch (kiểu `Copy`).
+static mut SYSCALL_ACTION: MaybeUninit<SyscallAction> = MaybeUninit::uninit();
+
+/// Chạy trên stack riêng: gọi đúng façade [`abi::dispatch`] như trước.
+extern "C" fn syscall_on_private_stack() {
+    // SAFETY: các static chỉ được ghi trước khi chuyển stack và đọc trong cùng lượt, một hart;
+    // dùng `ptr::read`/`ptr::write` để **không** tạo tham chiếu tới `static mut` (Rust 2024).
+    let (tcb, nr, args) = unsafe {
+        (
+            core::ptr::read(core::ptr::addr_of!(SYSCALL_TCB)),
+            core::ptr::read(core::ptr::addr_of!(SYSCALL_NR)),
+            core::ptr::read(core::ptr::addr_of!(SYSCALL_ARGS)),
+        )
+    };
+    let action = crate::core_bridge::with_machine(|m| {
+        abi::dispatch(m, tcb, 0, nr, args, &mut UserMemAccess, &USER_TASK)
+    });
+    // SAFETY: một người ghi (hart hiện tại), chưa ai đọc cho tới khi quay lại stack cũ.
+    unsafe {
+        core::ptr::write(
+            core::ptr::addr_of_mut!(SYSCALL_ACTION),
+            MaybeUninit::new(action),
+        );
+    }
+}
+
+/// Dispatch một syscall U-mode trên stack riêng (xem [`SYSCALL_STACK_BYTES`]).
+fn dispatch_on_private_stack(tcb: ObjId, nr: u64, args: [u64; 6]) -> SyscallAction {
+    // SAFETY: ghi tham số vào static trước khi đổi stack; một hart, không lồng nhau.
+    unsafe {
+        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_TCB), tcb);
+        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_NR), nr);
+        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_ARGS), args);
+    }
+    let top = core::ptr::addr_of_mut!(SYSCALL_STACK) as u64 + SYSCALL_STACK_BYTES as u64;
+    // SAFETY: đổi `sp` sang stack riêng (16 B aligned, trong `.bss`), lưu `sp`/`ra` vào static,
+    // `call` hàm Rust (giữ callee-saved theo ABI), rồi khôi phục `ra`/`sp`. Không dùng stack của
+    // compiler trong khối asm; `clobber_abi("C")` khai báo đúng các thanh ghi bị clobber.
+    unsafe {
+        asm!(
+            "la t0, {saved}",
+            "sd sp, 0(t0)",
+            "sd ra, 8(t0)",
+            "mv sp, {top}",
+            "call {f}",
+            "la t0, {saved}",
+            "ld ra, 8(t0)",
+            "ld sp, 0(t0)",
+            saved = sym SYSCALL_SAVED_SP,
+            top = in(reg) top,
+            f = sym syscall_on_private_stack,
+            clobber_abi("C"),
+            options(nostack),
+        );
+        (*core::ptr::addr_of!(SYSCALL_ACTION)).assume_init()
+    }
 }
 
 /// Trap **từ U-mode** đã decode: syscall (`scause=8`) hoặc fault U-mode (mọi loại khác).
@@ -555,6 +858,20 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
             tf.arg(4),
             tf.arg(5),
         ];
+        // KT-65: trong pha đa nhiệm, `Yield` (8) là **điểm nhường CPU** của scheduler U-mode
+        // (kernel ở S-mode chọn tác vụ kế). Không đi vào core: core vẫn là đường của KT-62 và
+        // được kiểm ở ảnh có cùng `Machine`; ở đây `Yield` chỉ trả `a0=0,a1=0` rồi về S-mode.
+        if MULTITASK.load(Ordering::Relaxed) != 0 && nr == 8 {
+            tf.set_arg(0, 0);
+            tf.set_arg(1, 0);
+            tf.advance_pc(4);
+            record_sys(nr, 0, 0);
+            save_tf(tf);
+            stop(2, 0);
+            crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
+            exit_to_kernel(tf);
+            return;
+        }
         // KT-62: mọi số hiệu `0..15` đi vào `Machine` thật qua `vifast_core::syscall::dispatch`
         // (façade `abi::dispatch` chỉ ghi sổ ABI). Không còn nhánh "3 syscall + NotSupported".
         let Some(tcb) = core_tcb() else {
@@ -569,9 +886,7 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
             );
             crate::debug_halt(1)
         };
-        let action = crate::core_bridge::with_machine(|m| {
-            abi::dispatch(m, tcb, 0, nr, args, &mut UserMemAccess, &USER_TASK)
-        });
+        let action = dispatch_on_private_stack(tcb, nr, args);
         match action {
             SyscallAction::Return {
                 error,
@@ -586,8 +901,10 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
                     tf.set_arg(3 + index, *word);
                 }
                 record_sys(nr, error, value);
-                {
+                if MULTITASK.load(Ordering::Relaxed) == 0 {
                     // Bằng chứng `# sys:` KT-62: số hiệu, mã trả về, TCB + trạng thái **core**.
+                    // KT-65: pha đa nhiệm **không** in từng syscall — trap stack per-hart chỉ
+                    // 16 KiB (bất biến KT-49); in ở đây làm sâu thêm khung handler không cần thiết.
                     let state = crate::core_bridge::with_machine(|m| m.tcb_state(tcb).ok());
                     let mut w = PlatformWriter(&Riscv64Virt);
                     let _ = writeln!(
@@ -631,6 +948,12 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
                         }
                     }
                 }
+                if MULTITASK.load(Ordering::Relaxed) != 0 {
+                    // Trapframe lúc `ecall` (sepc trỏ vào `ecall`, `a0` = mã thoát); scheduler
+                    // đọc trạng thái core của TCB để quyết định bước kế.
+                    save_tf(tf);
+                    stop(1, code);
+                }
                 exit_to_kernel(tf);
                 crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
             }
@@ -644,6 +967,15 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
                 crate::debug_halt(code as usize)
             }
             SyscallAction::Switched { state } => {
+                if MULTITASK.load(Ordering::Relaxed) != 0 {
+                    // KT-65: tác vụ chặn trong core ⇒ nhường CPU cho scheduler (không PANIC).
+                    // Chương trình KT-65 chỉ dùng NBRecv/NBSend nên nhánh này là lưới an toàn.
+                    save_tf(tf);
+                    stop(3, 0);
+                    crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
+                    exit_to_kernel(tf);
+                    return;
+                }
                 // KT-62: ảnh U-mode chưa có scheduler; TCB chặn/ngủ mà quay lại U-mode là sai.
                 // Dừng có chẩn đoán (TAP kernel đọc trạng thái của nó trước khi tới đây).
                 {
@@ -786,7 +1118,7 @@ impl SyscallEnv for UserMemAccess {
         // `obj::copy_kernel_low_root`). Loader ghi bảng dải `[base,end)` của **mọi** trang đã map
         // U|R (segment + stack); kiểm trọn dải trước khi đọc ⇒ con trỏ xấu nhận `NotMapped`,
         // không biến thành page fault S-mode (fatal).
-        if !USER_RANGES.contains(ptr, len) {
+        if !active_ranges().contains(ptr, len) {
             return Err(ERR_NOT_MAPPED);
         }
         // Đọc/ghép từng khối 64 B trong cửa sổ SUM, tắt SUM trước khi in (không giữ SUM lâu hơn
@@ -807,6 +1139,7 @@ impl SyscallEnv for UserMemAccess {
             aobj::set_sum(false);
             for byte in buf.iter().take(n) {
                 debug_put_byte(*byte);
+                capture_byte(*byte);
             }
             copied += n as u64;
         }

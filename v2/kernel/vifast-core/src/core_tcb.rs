@@ -873,4 +873,88 @@ mod tests {
         assert_eq!(m.finalise_overflow(), 0);
         assert!(m.finalise_log().iter().all(|e| e.state == TcbState::Dead));
     }
+
+    /// **KT-65** — kênh fault mà procsrv dùng: `Exit{code}` được ghi vào `last_fault` của
+    /// **người nhận** đang `Recv` trên `fault_ep`, TCB chết chuyển `Inactive`, và
+    /// `take_last_fault` **lấy một lần** (lần hai `None`). Đây là hợp đồng core mà bridge
+    /// `procsrv` (U-mode) dựa vào — không thêm syscall.
+    #[test]
+    fn kt65_exit_ghi_last_fault_cho_procsrv_roi_inactive() {
+        let mut m = Machine::new();
+        let c0 = m.add_cnode(32);
+        let u = m.add_untyped(0x10000, 1 << 16);
+        let root_u = m.root_cap(u);
+        m.put_cap(c0, 0, root_u).expect("cap Untyped");
+        for (slot, ty) in [
+            (1, ObjType::Endpoint),
+            (2, ObjType::Tcb),
+            (3, ObjType::Tcb),
+            (4, ObjType::CNode),
+        ] {
+            let base = if slot == 4 {
+                m.root_cap(c0)
+            } else {
+                m.retype(SlotRef::new(c0, 0), ty, 0, 0).expect("retype")
+            };
+            m.put_cap(c0, slot, base).expect("dat cap");
+        }
+        let ps_slot = SlotRef::new(c0, 2);
+        let child_slot = SlotRef::new(c0, 3);
+        let ep_slot = SlotRef::new(c0, 1);
+        let cspace = SlotRef::new(c0, 4);
+        let ps = m.cap_obj_at(c0, 2).expect("obj procsrv");
+        let child = m.cap_obj_at(c0, 3).expect("obj child");
+        m.tcb_configure(ps_slot, Some(cspace)).expect("cspace ps");
+        m.tcb_configure(child_slot, Some(cspace))
+            .expect("cspace child");
+        m.tcb_set_fault_ep(child_slot, ep_slot)
+            .expect("fault_ep child");
+        m.transition_tcb(ps, TcbState::Ready).expect("ps Ready");
+        // procsrv `Recv` chặn trên EP_FAULT — đúng lượt nhận fault của QD §1 Q-A.
+        m.recv(ps, ep_slot, None).expect("ps Recv");
+        m.exit(child, 42).expect("child Exit");
+        assert_eq!(
+            m.tcb_state(child),
+            Ok(TcbState::Inactive),
+            "Exit ⇒ TCB chết phải Inactive (D2-25)"
+        );
+        assert_eq!(
+            m.take_last_fault(ps),
+            Ok(Some((child, FaultKind::Exit { code: 42 }))),
+            "fault phải ghi vào người nhận"
+        );
+        assert_eq!(
+            m.take_last_fault(ps),
+            Ok(None),
+            "take là lấy một lần (procsrv đọc đúng một lượt)"
+        );
+    }
+
+    /// **KT-65** — `kill(pid)` của procsrv dùng `Tcb.Suspend(Abort)`: TCB đang `Running`
+    /// chuyển `Ready` + cờ `suspended`, `Resume` xoá cờ. Không có syscall mới.
+    #[test]
+    fn kt65_kill_bang_suspend_abort_dat_co_treo() {
+        let mut m = Machine::new();
+        let c0 = m.add_cnode(16);
+        let u = m.add_untyped(0x20000, 1 << 16);
+        let root_u = m.root_cap(u);
+        m.put_cap(c0, 0, root_u).expect("cap Untyped");
+        let cap = m
+            .retype(SlotRef::new(c0, 0), ObjType::Tcb, 0, 0)
+            .expect("retype TCB");
+        m.put_cap(c0, 1, cap).expect("dat cap TCB");
+        let slot = SlotRef::new(c0, 1);
+        let victim = m.cap_obj_at(c0, 1).expect("obj victim");
+        m.transition_tcb(victim, TcbState::Ready).expect("Ready");
+        m.transition_tcb(victim, TcbState::Running { hart: 0 })
+            .expect("Running");
+        m.tcb_suspend(slot, SuspendMode::Abort).expect("Suspend");
+        assert_eq!(m.tcb_state(victim), Ok(TcbState::Ready));
+        assert!(
+            m.tcb_data(victim).expect("tcb data").suspended,
+            "Abort phải đặt cờ suspended"
+        );
+        m.tcb_resume(slot).expect("Resume");
+        assert!(!m.tcb_data(victim).expect("tcb data").suspended);
+    }
 }

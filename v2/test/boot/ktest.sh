@@ -13,7 +13,7 @@
 #                     trap lồng fatal (56).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
-#   - `ktest-user`  : 17 TAP (KT-62) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
+#   - `ktest-user`  : 24 TAP (KT-62 + KT-65) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
 #                     `Machine` thật (DebugGetInfo 15, Yield 8, Exit 14 + 5 lần ngoài dải ⇒ 19), TAP
 #                     kernel-level cho bảng 16 syscall/cap sai/IPC/NB/WaitAddr/Clock/Yield (7..13),
 #                     `Exit` không Reply (14), rồi 3 TAP fault/wx (15..17, PANIC `u-mode fault`).
@@ -285,6 +285,13 @@ syscall waitaddr wakeaddr
 syscall clock read
 syscall yield doi tcb
 syscall exit khong reply
+procsrv/shell/con load u-mode
+procsrv recv fault exit
+shell help echo
+shell ps tu core
+shell wait ma thoat
+procsrv kill treo tcb
+shell exit va procsrv finalise
 u-mode kernel read fault
 faultkind exit
 faultkind wx from u
@@ -468,6 +475,19 @@ EOF
 ^# sys: kernel phase invariants=1 caps=[0-9]+ objects=[0-9]+$
 ^# user exit: code=42 state=Exited exits=1$
 ^# user exitkind: code=42 kind=Exit\{42\} ok=1$
+^# proc: load procsrv=\[0x[0-9a-f]+,0x[0-9a-f]+\) asid=[0-9]+ segs=[0-9]+ stack=[0-9]+ ok=1 shell=\[0x[0-9a-f]+,0x[0-9a-f]+\) asid=[0-9]+ segs=[0-9]+ stack=[0-9]+ ok=1 child=\[0x[0-9a-f]+,0x[0-9a-f]+\) asid=[0-9]+ segs=[0-9]+ stack=[0-9]+ ok=1
+^# proc: exit recv code=42 state=Inactive faults=[0-9]+ captured=1$
+^# proc: recv exit pid=[0-9]+ code=42$
+^# shell: ps replies=1 entries=4 snapshot_match=1 captured=1$
+^# shell: wait pid=[0-9]+ code=42 captured=1$
+^# shell: kill pid=[0-9]+ code=0 suspend_ok=1 victim_suspended=1 captured=1$
+^# shell: exit code=0 state=Inactive faults=[0-9]+ steps=[0-9]+ captured=1$
+^# proc: sched steps=[0-9]+ loads=3 events=[0-9]+ faults=2 ps=4 invariant=1$
+^# proc: sched done ok=1$
+^# proc: up proto=wait/kill$
+^# shell: up cmds=help/echo/ps/wait/kill/exit$
+^# shell: help cmds=6$
+^# child: up then exit 42$
 ^U: init hello from u-mode$
 ^U: bad syscall err=19 ok$
 ^# u-mode read: hart=[0-9]+ addr=0x80200000 expect=scause=0xd stval=0x80200000 recover=1$

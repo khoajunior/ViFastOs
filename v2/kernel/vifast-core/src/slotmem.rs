@@ -176,7 +176,7 @@ mod tests {
         let full = 1023 * SLOT_BYTES - CNODE_BASE_BYTES; // index = 1023
         let b = harness_slot_base(full, 1).expect("đầy đúng 1024 word");
         assert_eq!(b, ARENA_SLOT_WORDS, "không trùng word cuối vùng A");
-        assert!(b + 1 <= crate::MAX_SLOT_WORDS, "cửa sổ nằm trong mảng");
+        assert!(b < crate::MAX_SLOT_WORDS, "cửa sổ nằm trong mảng");
         assert!(
             harness_slot_base(full + SLOT_BYTES, 1).is_none(),
             "vượt harness ⇒ None"

@@ -40,7 +40,7 @@
 ktest 60 60
 ktest-guard 3 3
 
-# KT-53 → **KT-62**: ảnh test **user** (bin riêng) — U-mode + `init` ELF + **16 syscall đi vào
-# `Machine` thật** (5 TAP U-mode + 9 TAP kernel-level/dispatch + 3 TAP fault/wx = 17), boot kết
+# KT-53 → **KT-62**, KT-65: ảnh test **user** (bin riêng) — U-mode + `init` ELF + **16 syscall đi vào
+# `Machine` thật** (14 TAP cũ + 7 TAP procsrv/shell KT-65 + 3 TAP fault/wx = 24), boot kết
 # thúc bằng `PANIC: u-mode fault …` có chủ đích (U-mode thực thi trang RW NX ⇒ page fault 12).
-ktest-user 17 17
+ktest-user 24 24

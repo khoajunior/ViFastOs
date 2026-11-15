@@ -69,7 +69,9 @@ use vifast_plat_common::user::TaskState;
 use vifast_plat_common::{PanicHandler, Platform, PlatformWriter};
 use vifast_plat_riscv64::core_bridge;
 use vifast_plat_riscv64::mmu;
-use vifast_plat_riscv64::user::{self, USER_BASE, USER_STACK_GUARD_BOTTOM};
+use vifast_plat_riscv64::user::{self, LoadedInit, USER_BASE, USER_STACK_GUARD_BOTTOM};
+
+mod proc_demo;
 use vifast_plat_riscv64::{read_trap_vector, trap_vector, Riscv64Virt};
 
 static PLATFORM: Riscv64Virt = Riscv64Virt;
@@ -84,7 +86,7 @@ const MARKER_BYTES: u64 = 51;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..17\n");
+    PLATFORM.put_str("TAP version 13\n1..24\n");
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
     // Bảng trang + arena/guard trước (mmu::init bật satp); ASID lease rồi object layer.
@@ -461,7 +463,27 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------- 15) U-mode đọc địa chỉ kernel — trap THẬT, phân loại FaultKind
+    // ---------------- TAP 15..21 (KT-65): procsrv + shell + con chạy U-mode thật --------------
+    // Ba ELF Rust riêng (`procsrv.elf`/`shell.elf`/`child.elf`) nạp vào 3 VSpace; kernel làm
+    // scheduler tuần tự, chuyển tiếp fault Exit, UART→message và `ps` từ `Machine`. Sau TAP 21,
+    // continuation `fault_phase` chạy TAP 22..24 (KT-56) và kết thúc boot bằng PANIC fatal —
+    // **không** quay lại khung `rust_main` (xem `docs/k35-procsrv.md` §6).
+    proc_demo::run(
+        &PLATFORM,
+        obj.untyped0,
+        core.untyped,
+        loaded,
+        exit_kind_ok,
+        fault_phase,
+    );
+}
+
+/// **Continuation không trả về** sau pha demo KT-65: TAP 22..24 (fault U-mode KT-56) rồi
+/// `PANIC: u-mode fault …` (chính sách fatal của K3). Tách hàm để `proc_demo::run` gọi thẳng
+/// thay vì trả về qua khung gọi sâu (đã quan sát `ra=0` khi trả về sau nhiều lượt `user_enter`).
+fn fault_phase(loaded: LoadedInit, exit_kind_ok: bool) -> ! {
+    let mut fails = 0usize;
+    // ------------------------- 22) U-mode đọc địa chỉ kernel — trap THẬT, phân loại FaultKind
     // KT-56: lượt này **được phép fault** (`enter_expect_fault`) để kiểm phân loại rồi về S-mode;
     // chính sách mặc định của K3 (fault ⇒ log + halt) giữ nguyên cho lượt 7.
     {
@@ -479,7 +501,7 @@ pub extern "C" fn rust_main() -> ! {
             let mut w = PlatformWriter(&PLATFORM);
             let _ = writeln!(
                 w,
-                "not ok 15 - u-mode kernel read fault: enter loi kind={} ({:?})",
+                "not ok 22 - u-mode kernel read fault: enter loi kind={} ({:?})",
                 error.name(),
                 error
             );
@@ -515,17 +537,17 @@ pub extern "C" fn rust_main() -> ! {
         let _ = writeln!(w, " ok={}", u8::from(ok5));
     }
     if ok5 {
-        PLATFORM.put_str("ok 15 - u-mode kernel read fault\n");
+        PLATFORM.put_str("ok 22 - u-mode kernel read fault\n");
     } else {
-        PLATFORM.put_str("not ok 15 - u-mode kernel read fault: FaultKind/scause sai\n");
+        PLATFORM.put_str("not ok 22 - u-mode kernel read fault: FaultKind/scause sai\n");
         fails += 1;
     }
 
-    // ------------------- 16) `Exit` mang `FaultKind::Exit` (D2-25/D2-56a) — qua syscall 14 thật
+    // ------------------- 23) `Exit` mang `FaultKind::Exit` (D2-25/D2-56a) — qua syscall 14 thật
     if exit_kind_ok {
-        PLATFORM.put_str("ok 16 - faultkind exit\n");
+        PLATFORM.put_str("ok 23 - faultkind exit\n");
     } else {
-        PLATFORM.put_str("not ok 16 - faultkind exit: khong ghi Exit{{42}}\n");
+        PLATFORM.put_str("not ok 23 - faultkind exit: khong ghi Exit{{42}}\n");
         fails += 1;
     }
 
@@ -534,11 +556,11 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------- 17) W^X **từ U-mode**: thực thi trang `.data` (RW NX) ⇒ fault thật
+    // ------------------- 24) W^X **từ U-mode**: thực thi trang `.data` (RW NX) ⇒ fault thật
     // In `ok 17` TRƯỚC khi kích hoạt: boot kết thúc bằng `PANIC: u-mode fault scause=0xc …` +
     // SBI SRST (chính sách K3: log + halt), không có `# ktest halt`. Runner đòi đúng dòng PANIC
     // này và đúng `faultkind=…reason=Wx` trong dòng `# u-mode fault:`.
-    PLATFORM.put_str("ok 17 - faultkind wx from u\n");
+    PLATFORM.put_str("ok 24 - faultkind wx from u\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
@@ -550,7 +572,7 @@ pub extern "C" fn rust_main() -> ! {
     match user::enter(&loaded, 2) {
         // Không được tới đây: thực thi trang RW NX mà không fault nghĩa là W^X bị phá.
         Ok(_) => {
-            PLATFORM.put_str("not ok 17 - faultkind wx from u: khong fault\n");
+            PLATFORM.put_str("not ok 24 - faultkind wx from u: khong fault\n");
             PLATFORM.put_str("# ktest halt\n");
             PLATFORM.halt(1)
         }
@@ -558,7 +580,7 @@ pub extern "C" fn rust_main() -> ! {
             let mut w = PlatformWriter(&PLATFORM);
             let _ = writeln!(
                 w,
-                "not ok 17 - faultkind wx from u: enter loi kind={} ({:?})",
+                "not ok 24 - faultkind wx from u: enter loi kind={} ({:?})",
                 error.name(),
                 error
             );
