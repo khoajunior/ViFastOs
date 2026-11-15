@@ -4,52 +4,106 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `95021ca4` ([KT-00] K3 DONE (D2-82) + mở K3b KT-58) → commit `[KT-58]` +
-                `[KT-58b]` — **đã push**, `HEAD..origin/main = 0` (kiểm trước push). Nhánh `main`;
-                worktree có `.agents/`, `review/…`, `out-b.log`, `ViFastOs-dossier.md` của tab
-                khác — **không chạm**; commit KT-58 = `v2/**` (không `spec/`, không `viscript/`).
-BUILD_ID      : ảnh kernel **không đổi** so KT-57 (task không nối core vào kernel, không sửa
-                kernel): product 90.696 B / data+bss **11.248** (`kt58-product-run.log`, 0 chuỗi
-                ktest), ktest 332.176 / 17.344, guard 53.800 / 2.680, user 152.048 / 11.752
-                (trần **262.144**, `kt58-ktest-matrix.log`); BUILD_ID product `e09ec255c17715ae`
-                (KT-57). Core tĩnh: `size_of::<Machine>() = 68.264 B` `[ĐO]` — **chưa link**, nên
-                ngân sách ảnh không đổi.
-Task          : **KT-58 (K3b tầng 1: port core `no_std` — Untyped + CNode + MDB + capability)** —
-                **DONE (đề xuất; chờ review độc lập + Agent 0 lật QUEUE)**: crate mới
-                `v2/kernel/vifast-core` (`no_std`, `forbid(unsafe_code)`, **không** `alloc`; 7 tệp
-                1.907 dòng); hằng `[object_size]` sinh từ `spec/abi.toml` (`vifast-gen` +
-                `vifast-abi` no_std) — **không hardcode** 48/64/4096; parity host với sim
-                (11 kịch bản KT-09/10/11 + differential 32×48 op): kết quả + digest cap/MDB/byte
-                + `check_caps`/`check_bytes` khớp **sau từng bước**; `docs/k3b-core.md`;
-                `JOURNAL/kt58-*`.
-Bước          : 9/9: baseline gate **574/75** → parity **đỏ trước** (core trả `object_type` cho
-                ô `Meta` rỗng) → core + parity xanh → clippy đỏ lần đầu (`type_complexity`) →
-                sửa alias, không nới `-D warnings` → gate **578** → `ktest.sh 1 matrix` **9/9**
-                (TAP **43/3/7**) + product PASS → reviewer-kt58 **DRIFT thấp** → vá **7 mục**
-                (mã lỗi CNode đã finalise `InvalidCapability` cho `Revoke`/`put_cap`; D2-83
-                nhãn PA + biên giới VM + test pin; thêm 3 kịch bản parity nhánh còn thiếu; M1
-                độc lập = `Mint(Some(0))` giữ badge; ghi T-INFRA L1) → gate lại **579 test/76
-                suite**, L1 **830 ms**, wall **4 m 41,3 s** → commit `[KT-58]` + `[KT-58b]` +
-                push.
+HEAD          : `f95891bf` ([KT-00] **D2-84**: pin core ≤ 192 KiB, cấm nâng lên trần 262.144) →
+                `5374920a` `[KT-59]` + commit `[KT-59b]` (journal/STATE) — **đã push**, `
+                HEAD..origin/main = 0` (kiểm trước push). Nhánh
+                `main`; worktree có `.agents/`, `review/…`, `out-b.log`, `ViFastOs-dossier.md`
+                của tab khác — **không chạm**; commit KT-59 = `v2/**` (không `spec/`, không
+                `viscript/`, sim `src/` **rỗng diff**).
+BUILD_ID      : ảnh kernel **không đổi** so KT-57/KT-58 (KT-59 không nối core vào kernel, không
+                sửa kernel): product 90.696 B / data+bss **11.248**, ktest 332.176 / 17.344,
+                guard 53.800 / 2.680, user 152.048 / 11.752 (trần **262.144**,
+                `kt59-ktest-matrix.log`); BUILD_ID product `e09ec255c17715ae` (KT-57). Core tĩnh:
+                `size_of::<Machine>() = 167.896 B` `[ĐO]` (64,0 % trần 262.144; headroom tới pin
+                D2-84 192 KiB còn **28.712 B**) — **chưa link**, nên ngân sách ảnh không đổi.
+Task          : **KT-59 (K3b tầng 2: port TCB/transition/scheduler + hộp thư sang `no_std`)** —
+                **DONE (đề xuất; chờ reviewer-kt59 re-check F1 + Agent 0 lật QUEUE)**: core
+                `v2/kernel/vifast-core` thêm `tcb.rs` (11 trạng thái + ALLOWED 48/2/73), `mcs.rs`
+                (budget/period/refill), `sched.rs` (256 mức + bitmap + ready queue tĩnh), 
+                `mailbox.rs` (FIFO 8 + backpressure + log biên 64), `core_tcb.rs`/`core_sched.rs`
+                (tách khỏi `machine.rs` để giữ R1); parity host với sim **8 test** (5 kịch bản
+                KT-18/19/20/22/29 + differential 16×32 + 2 core-only); biên tĩnh
+                `MAX_TCBS=64`/`MAX_SCHED_CONTEXTS=32`/`MAX_HARTS=8`/`MAILBOX_CAP=8`/
+                `MAX_MAIL_LOG=64`/`MAX_FINALISE=256`.
+Bước          : 9/9: baseline gate **579/76** → **red-before** (`E0433` vì core chưa có module
+                tcb/sched/mailbox/mcs) → port core + parity xanh → R1 (>1.500 dòng) ⇒ tách
+                `core_tcb.rs`+`core_sched.rs` → **D2-84** pin 192 KiB + bảng phân bố 14 dòng →
+                reviewer-kt59 **DRIFT M, chặn commit tới khi vá F1** → vá F1 (`MAX_FINALISE=256`,
+                đầy ⇒ `NotEnoughMemory` atomic + `finalise_overflow`, 2 test core: 257 lần + 2
+                vòng × 64 TCB), F2 (tên test + 616 B/512 B), (3) xác nhận assert pin 196.608,
+                (4) digest thêm `ipc_buffer[60]`/`regs[4]` + ghi nợ accessor mailbox cho KT-60 →
+                gate lại **587 test/76 suite**, L1 **839 ms**; matrix **9/9** TAP **43/3/7** →
+                commit `[KT-59]` + `[KT-59b]` + push.
 Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 579 test/76 suite, 0 failed**, L1 1.000 seed
-                **830 ms**, wall **4 m 41,3 s** (`JOURNAL/kt58-gate.log`; baseline 574 + 4 parity
-                + 1 ABI); kernel (ngoài gate):
-                `ktest.sh 1 matrix` **9/9** boot, TAP **43/43 + 3/3 + 7/7**
-                (`kt58-ktest-matrix.log`); product `run.sh 1 1` PASS (`kt58-product-run.log`);
-                core bare-metal `cargo build --target riscv64gc-unknown-none-elf` + clippy
-                `-D warnings` xanh (không nằm trong gate host).
-Miri          : **không chạy Miri** — D2-72 Q12 (kernel `no_std`/asm/MMIO); logic core chạy trên
-                host trong parity test; không có `unsafe` mới (core `forbid(unsafe_code)`).
-Việc dở       : **KT-58 xong mã + cổng**; còn **review độc lập** (verdict ghi
-                `docs/k3b-core.md`/journal trước commit) + commit/push. Kế tiếp **KT-59**
-                (TCB/transition/sched + hộp thư) → **KT-60** (IPC/Reply/Notification/WaitAddr) →
-                **KT-61** (nối core vào kernel: `.data+.bss` + `SlotPool` → slot trong arena,
-                TAP/soak/conformance trên nhân thật). Nợ KT-58: `docs/k3b-core.md` §6 (bảng tĩnh
-                có biên, slot `.bss` chưa vào arena, chưa có body TCB/IPC, reserved
-                `Frame`/`PageTable` chưa port, `Machine` 68.264 B). Không đụng `spec/`, sim
-                semantics, `.scn`/`expected.txt`, QUEUE/DECISIONS/AGENTS/`viscript/`.
+Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 587 test/76 suite, 0 failed**, L1 1.000 seed
+                **839 ms** (`JOURNAL/kt59-gate.log`; baseline 579 + 8 parity); kernel (ngoài
+                gate): `ktest.sh 1 matrix` **9/9** boot, TAP **43/43 + 3/3 + 7/7**
+                (`kt59-ktest-matrix.log`); core bare-metal `cargo build --target
+                riscv64gc-unknown-none-elf` + clippy `--all-targets -- -D warnings` xanh, unit
+                **14 test** (12 + 2 F1); parity log `kt59-parity.log` 8 passed.
+Miri          : **không chạy Miri** — D2-72 Q12 (kernel `no_std`/asm/MMIO); core `forbid(unsafe_code)`,
+                logic chạy host trong parity; không có `unsafe` mới.
+Việc dở       : **KT-59 xong mã + cổng, đã vá F1/F2**; còn **reviewer re-check F1** + go để
+                commit/push. Kế tiếp **KT-60** (IPC/Reply/Notification/WaitAddr/fault + nối
+                2 hook donation/Reply.caller tại `transition_tcb`, thêm accessor nội dung hàng
+                chờ mailbox) → **KT-61** (nối core vào kernel: `.data+.bss` đo ảnh link thật,
+                `SlotPool` → arena, TAP/soak/conformance). Nợ KT-59: `docs/k3b-core.md` §6/§7.5
+                (chưa IPC/Endpoint body, donation chỉ khung, `TlbFlush` placeholder, log
+                finalise ≤256, `MAX_MAIL_LOG` biên, core 167.896 B chưa link).
 ```
+
+
+
+## KT-59 — K3b tầng 2: TCB/transition/scheduler + hộp thư (`no_std`)
+
+**Vào**: READY; HEAD lúc mở `ce5519f9` ([KT-00] KT-59 READY); trong lúc làm lead commit
+`f95891bf` (**D2-84** pin core ≤192 KiB) — parent thật của `[KT-59]`. Working tree có
+`viscript/`/`review/` của tab khác — **không chạm**; baseline `gate --fast` **PASS 579**;
+sim `src/` rỗng diff.
+
+**Đỏ trước**: trước KT-59 core tầng 1 chưa có `tcb/sched/mailbox/mcs` ⇒ parity không biên
+dịch (`JOURNAL/kt59-red-before.log`, `E0433: cannot find TcbState in kc`, exit 101).
+
+**Làm**: `tcb.rs` (11 trạng thái + ALLOWED 11×11 port nguyên sim 48/2/73), `mcs.rs`
+(budget/period/consumed/refill/charged + `donated_priority` + biên thẳng hàng bão hoà),
+`sched.rs` (`HartSched` 256 mức + bitmap + ready queue liên kết tĩnh `[u16; 257]`, `pick`
+O(1), `pick_where` budget), `mailbox.rs` (`Mailbox<T,8>` FIFO + backpressure trả message,
+`MailboxMsg` Wake/Reschedule/Migrate/Stop/TlbFlush, `HartMailbox` log biên 64 + stopped),
+`core_tcb.rs`/`core_sched.rs` (tách khỏi `machine.rs` 2.893 dòng để giữ R1; **cùng một**
+`impl Machine`): một cửa `transition_tcb`, `Tcb.Configure/SetFaultEp/SetPriority/SetAffinity/
+SetHome/SetSchedParams/ReadState/Info`, suspend/resume/finalise + log, `dispatch`/
+`block_current`/`wake`/`yield_current`/preempt, `published`/`publish` guard + push migration,
+`SchedControl.Configure`/`tick`/refill/enforce, `post_mail`/`process_mail`/`send_mail`.
+`Machine::footprint()` trả bảng phân bố 14 dòng + scalar + padding (D2-84).
+
+**Parity**: `tests/kt59_core_parity.rs` **8 test** — 5 kịch bản tường minh (KT-18 ALLOWED/
+suspend/resume/finalise; KT-19 FIFO/round-robin/priority/preempt/affinity; KT-20 budget/
+refill/pick; KT-22 mailbox/backpressure/Migrate 1 hart; KT-29 2 hart/publish/push) +
+differential **16 seed × 32 op** (16 trace khác nhau) + 2 core-only (biên MAX_TCBS/SC atomic
++ footprint/pin). Sau **mỗi** bước so kết quả + mã lỗi + digest (state+payload, ReadState,
+toàn bộ trường TCB, `ipc_buffer[60]`/`regs[4]`, ScInfo, ready queue 256 mức, mailbox len/log/
+stopped, finalise log, pair hits) + 4 bất biến hai bên; log `kt59-parity.log`.
+
+**Biên tĩnh**: `MAX_TCBS=64`, `MAX_SCHED_CONTEXTS=32`, `MAX_MAIL_LOG=64`, `MAX_FINALISE=256`;
+đầy body TCB/SC ⇒ `NotEnoughMemory` atomic (test pin + revoke trả body free-list); mailbox
+đầy ⇒ `Busy`. **D2-84:** `size_of::<Machine>() = 167.896 B` (64,0 % trần 262.144; headroom
+28.712 B tới pin 192 KiB); bảng phân bố 14 dòng cộng khớp 100 %; assert pin **196.608**, chỉ
+dùng 262.144 làm mẫu số %. Core chưa link ⇒ budget ảnh không đổi.
+
+**Review `reviewer-kt59`**: **DRIFT M — chặn commit tới khi vá F1**, không UNSAFE; ALLOWED
+byte-identical, mã lỗi/transition không lệch trong phạm vi, sim `src/` rỗng diff. **F1**:
+`MAX_FINALISE = MAX_TCBS` sai (body tái dùng) — reviewer tái hiện 2 vòng × 64 TCB panic; vá
+`MAX_FINALISE = MAX_OBJECTS = 256`, đầy ⇒ `NotEnoughMemory` **atomic trước mọi thay đổi** +
+`finalise_overflow`, bỏ debug_assert/cắt im lặng; test core 257 lần + 2 vòng × 64 TCB ⇒ 128
+dòng. **F2**: tên test cũ + "object 512 B / body tĩnh 616 B". **(4)**: digest thêm
+`ipc_buffer`/`regs`; nội dung hàng chờ mailbox chưa so trực tiếp được do sim không có accessor
+công khai — ghi nợ KT-60 (§7.5). Nợ KT-60 ghi đúng mã: `release_donation_of` khi rời
+`BlockedOnReply`, xung đột `Reply.caller` ⇒ `IllegalOperation`.
+
+**Cổng**: gate **587/76, 0 failed**, L1 **839 ms** (`kt59-gate.log`); matrix **9/9**, TAP
+**43/3/7** (`kt59-ktest-matrix.log`); core riscv64 + clippy `-D warnings` xanh; core unit
+**14 test**; mutation M1 (bỏ kiểm Suspend Defer) / M2 (pick bỏ budget) / M3 (không sleep khi
+hết budget) đều đỏ, khôi phục sha256. **Commit `[KT-59]` + `[KT-59b]` + push sau go.**
 
 
 
