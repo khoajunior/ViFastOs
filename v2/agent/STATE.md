@@ -4,9 +4,10 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : `2e2631fa` + **KT-64 đang làm**: `[KT-64]` sẽ đặt trên `2e2631fa`; nhánh `main`;
-                worktree có `viscript/`, `review/`, `.agents/`, `out-b.log` của tab khác — **không
-                chạm**; commit chỉ `v2/**` (D2-91: Agent 2 không `git add`; lead commit pathspec).
+HEAD          : **`954851b8`** (`[KT-64b]` trên `194a09f5` `[KT-64]`, trên `da819ead` D2-92 của
+                Agent 0 — đã **push** `origin/main`, 0 sau); nhánh `main`; worktree có
+                `viscript/`, `review/`, `.agents/`, `out-b.log` của tab khác — **không chạm**;
+                commit chỉ `v2/**` (D2-91: pathspec, index sạch sau commit).
 BUILD_ID      : ảnh kernel KT-64: product **183.272 B / `.data+.bss` 200.120**, ktest
                 **573.136 / 209.856**, guard **53.808 / 2.680**, **user 335.920 / 201.008**
                 (trần 262.144 — `reports/kt64/kt64-budget.log`); core tĩnh
@@ -29,12 +30,13 @@ Task          : **KT-64 (K3.5 tầng 3: `TlbFlush` thật + `SlotPool`→arena +
                 → KT-64a (D2-92c); F4 `wait` **không ack hộ** ⇒ `Busy` reachable + test; F5 bất
                 biến 1:1 `ScData.bound` trong `check_notifications` + test `revoke`; F6 ghi rõ
                 assert/flush sai hart nếu multi-hart lọt vào kernel.
-Bước          : 9/9: baseline 625/80 → red-before `E0432` (`JOURNAL/kt64-red-before.log`) →
+Bước          : 10/10 (KT-64 xong, đã push): baseline 625/80 → red-before `E0432` (`JOURNAL/kt64-red-before.log`) →
                 slot arena + Bind + resume + TLB trong core → **12/12** → TAP 56..59 +
                 manifest/expected 60/60 → matrix 9/9 → gate **639/82** → soak **0/1000** →
                 budget 4 ảnh → docs §13 + journal → **review vòng 1: DRIFT** (F1 chặn + F2/F4/F5)
-                → **sửa F1/F2/F3/F4/F5/F6**: 15/15 core + mutation M1 đỏ/M2 ghi giới hạn →
-                gate/matrix/soak lại → **chờ confirm reviewer** → commit.
+                → **sửa F1..F6** → reviewer-kt64 **CONFIRM 5/5** → **vá F7/F8** (harness off-by-one
+                + log mutation đầy đủ) → gate **642/82**, matrix **9/9**, soak **0/1000** lại →
+                commit `[KT-64]` `194a09f5` + `[KT-64b]` `954851b8` → **push** `origin/main`.
 Nhánh         : main
 Cổng gần nhất : `./v2/bin/v2 gate --fast` — **PASS 642 test/82 suite, 0 failed**, L1 1.000 seed
                 (879 ms) (`JOURNAL/kt64-gate.log`); `ktest.sh 1 matrix` **9/9** boot, TAP
