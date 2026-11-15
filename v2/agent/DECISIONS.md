@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-80`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-81`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-80: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-81: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -129,7 +129,8 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-79** KT-53 — **số syscall ngoài `0..15` trả lỗi 19 `RangeError`** (không phải 5 `InvalidArgument`): `spec/abi.toml` định nghĩa 19 = "chỉ số/chỉ số dải ngoài phạm vi", và số syscall chính là chỉ số vào bảng dispatch — đúng ngữ nghĩa. Áp dụng cho dispatch, `init_user.S`, TAP, docs §16.4, journal. Ghi rõ: đây là **sửa ngữ nghĩa cho khớp spec**, không phải nới ngưỡng; các mã khác (5) chỉ dùng cho tham số sai trong một syscall hợp lệ.
 
 - **D2-80** Bằng chứng phải **neo vào ảnh**: mọi log dùng làm bằng chứng (ktest, conformance, soak) phải chứa **hash ảnh** (BUILD_ID/sha256 12+ ký tự) do **kernel tự in** trong cửa sổ boot đó, và runner/script so sánh **phải** kiểm hash này khớp ảnh đang chạy/bản ghi kỳ vọng, **từ chối** log không có hoặc lệch hash. Lý do đo được: `--compare` hiện nhận log có sẵn; đã chứng minh **chép trace của sim vào log QEMU vẫn PASS 61/61** — tức bằng chứng có thể bị ghép. Cấm dùng log không neo ảnh làm bằng chứng "xanh"; log tái lập phải ghi rõ là **tái lập**.| Số | Giá trị | Nguồn |
-|---|---|---|
+
+- **D2-81** KT-56 được phép commit **`docs/abi.md`** (golden sinh từ `spec/` bởi `vifast-gen`) cùng hunk `FaultKind`: đây là **đầu ra sinh**, không sửa tay, và phải khớp `gen-check`; phạm vi commit của KT-56 = `v2/**` + `spec/abi.toml` (đúng 1 hunk) + `docs/abi.md` (sinh lại). Mọi tệp khác ngoài ba nhóm này **cấm**.|---|---|---|
 | slot cap | **48 B** `[TK]` (sửa 32 B) | QD §3.9 |
 | `MAX_HARTS` | mặc định **8**, trần cấu hình **64** `[TK]` (sửa 256) | QD §3.15 |
 | `vifast-core` | ≤ **25.000** dòng `[ƯL]` (sửa 15.000); tệp ≤ 1.500 dòng | QD §3.15 |
