@@ -5,8 +5,9 @@ Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). C
 
 ```
 HEAD          : `b3b8ed01` ([KT-55] conformance 5 `.scn` × sim/QEMU + `# trace:` + D2-80 — commit
-                chỉ `v2/`; parent `54fd75b6` = [KT-00] Agent 0 mở KT-55; commit `[KT-55b]` cập nhật
-                STATE ngay sau) — **đã push**, `HEAD..origin/main = 0`
+                chỉ `v2/`; parent **`419d3013`** = [ST-00] ST-117 DONE của **dòng ViScript** chen
+                giữa trong lúc làm — worktree dùng chung, không phải base `54fd75b6` lúc mở KT-55;
+                commit `[KT-55b]` cập nhật STATE ngay sau) — **đã push**, `HEAD..origin/main = 0`
 BUILD_ID      : 4 ảnh **đổi** so KT-54 (W^X fix nằm trong `plat-common` dùng chung; ảnh ktest
                 thêm pha conformance + D2-80): product 89.640 B / data+bss 11.248,
                 ktest 304.760 / **13.200**, guard 53.800 / 2.680, user 142.072 / 11.688
@@ -66,8 +67,9 @@ Việc dở       : **KT-55 xong**: commit `b3b8ed01` + `[KT-55b]` pushed. Kế 
 
 ## KT-55 — conformance 5 `.scn` × sim/QEMU + chuẩn hoá trace (K3)
 
-**Vào**: READY; HEAD `54fd75b6` ([KT-00] lật KT-54 DONE + mở KT-55); baseline `gate --fast` PASS
-569; working tree có `viscript/` của tab khác — **không chạm**; 5 tệp `.scn` 22..26 + `check_scn.py`
+**Vào**: READY; HEAD lúc mở `54fd75b6` ([KT-00] lật KT-54 DONE + mở KT-55) — trong lúc làm,
+dòng ViScript commit `419d3013` chen giữa (worktree chung) nên **parent thật của `[KT-55]` là
+`419d3013`**; baseline `gate --fast` PASS 569; working tree có `viscript/` của tab khác — **không chạm**; 5 tệp `.scn` 22..26 + `check_scn.py`
 + `ktest.sh` (KT-54) đã có ⇒ KT-55 chỉ thêm **đường xuất trace** hai phía + máy so.
 
 **Đỏ trước**: `trace_compare.py` với trace sim (56 dòng lúc đó) và log QEMU **chưa** có `# trace:` ⇒
