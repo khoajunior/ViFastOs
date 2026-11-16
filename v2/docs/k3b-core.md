@@ -1474,3 +1474,42 @@ Nguồn chi tiết: [`k6-idl.md`](k6-idl.md). Tóm tắt phần **kernel/ABI**:
 - **Ngưỡng**: `size_of::<Machine>()` **188.872 B** không đổi ≤ 196.608 B; `ktest-user`
   `.data+.bss` **202.792 B** ≤ 262.144 B; matrix **12/12**; soak **0/1000**; clippy 4/4
   `EXIT=0` — log ở `v2/agent/JOURNAL/kt69-*.log`.
+
+## 18. KT-70 — pager U-mode + page cache `(file,page)` (K6)
+
+Nguồn chi tiết: [`k6-vfs-pager.md`](k6-vfs-pager.md). Tóm tắt phần **kernel/ABI**:
+
+- **Không mở `spec/`** (D2-99), **không thêm syscall**: pager là tiến trình U-mode thường, dùng
+  invocation `Frame.Map` (hằng sinh `vifast_abi::FRAME_MAP`) và IPC sẵn có.
+- **Phân loại fault**: trap U-mode (`scause=0xd/f`) → `FaultKind::Vm{vspace,va,access,reason}`
+  trong `vifast_plat_riscv64::user`; **`sepc` giữ tại instruction lỗi** ⇒ sau khi pager map
+  trang, kernel resume và instruction load chạy lại (không cần sửa trapframe thủ công).
+- **Hai kênh fault (có chủ đích)**: (1) core `inject_fault(client_tcb, FaultKind::Vm{…})` ghi
+  fault vào `fault_ep` + `last_fault` của **pager** (đúng cơ chế `FaultKind` hiện có, KT-65);
+  (2) message IDL `pager.fault(client,file,page,va)` vì `Recv` **không mang payload** fault —
+  cùng tiền lệ procsrv. Pager xác nhận chéo bằng `take_last_fault` ⇒ `core_fault=1` trong TAP 30.
+- **Hợp đồng core mới cần nhớ**: `last_fault` bị **xoá ở syscall kế tiếp** của TCB nhận
+  (`reset_ipc_error`), nên kernel test phải `take_last_fault` **ngay sau bước chạy pager** đã
+  tiêu thụ fault entry — không đợi tới cuối pha (bài học đo được, ghi ở journal KT-70).
+- **Cache**: `vifast-vfs` (host-testable, `no_std`, **không `unsafe`**) — khoá `(file,page)`,
+  LRU `stamp`, `Begin::{Hit,Ready,Evict,Reject}`, một bản/khoá (`keys_unique`); hit **không**
+  đọc backend; trục xuất ⇒ caller gỡ mapping **trước** khi tái dùng slot.
+- **Backend**: dùng lại `vifast_fs::BlockDev` (một đường đọc, D2-106). Host `RamDev`; QEMU
+  `MappedDisk` = 5 Frame kernel cấp map tại `VA_DISK`, pager tự seed qua `BlockDev::write`.
+  KT-72 (virtio-blk) chỉ thêm `impl BlockDev`, **không sửa pager**.
+- **Hai client thật** (`pager_client_a.elf`/`pager_client_b.elf`) + `pager_server.elf`: A nạp
+  3 trang, B hit trang A đã nạp (cùng PA), trục xuất LRU, A **nạp lại** (PA đổi) đọc đúng dữ
+  liệu, B hit lần hai; trang ngoài file ⇒ pager trả `InvalidArgument` (5), kernel dừng client
+  với `0x8000_0000|5`, không resume. TAP 30..34 in từ biến đo (D2-102).
+- **TAP 35 — ca âm bắt buộc**: `Frame.Map` với aux = TCB của pager ⇒ **`WrongObjectType` (2)**
+  (core kiểm loại cap phụ trước object layer; dự đoán ban đầu `InvalidCapability` được **sửa
+  theo số đo**); `Frame.Map` vào VA **đã map** trong VSpace client B ⇒ **`AlreadyMapped` (10)**
+  và PTE khối kết quả **không bị ghi đè** (walk PA = PA cấp, magic B còn nguyên, `b_bad_bytes=0`).
+  Bài học: bộ đếm an ninh luôn 0 mà không có ca âm thì không chứng minh gì.
+- **Tài nguyên (không nới ngưỡng)**: đo cuối pha `objects=81 caps=69 frames=63 pt=12 vs=4
+  maps=61` ≤ `MAX_OBJECTS=96`/`MAX_MAPPINGS=64`; hình học thiết kế (3+2 trang, cache 3, đĩa 5
+  Frame, VA trong cùng 2 MiB block với ảnh ELF) được **giảm** để vừa bảng mapping thay vì sửa
+  hằng số. `size_of::<Machine>() = 188.872 B` không đổi; `ktest-user` `.data+.bss = 202.832 B`
+  ≤ 262.144 B.
+- **Nợ KT-71**: journal/writeback trang bẩn, `Frame.Unmap` khi tiến trình chết, xử lý nhiều
+  fault đồng thời (một hart hiện tại), virtio-blk (KT-72).

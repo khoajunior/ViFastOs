@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# IDL tối thiểu của ViFastOs v2 (KT-70) — interface `pager` (VFS tầng 1: fault → pager).
+#
+# Định dạng: xem `ring.vidl` (cùng generator). Method id **sinh tuần tự từ tệp này**; `spec/`
+# không có bảng method cho interface dịch vụ nên generator ghi rõ nguồn số (D2-102c).
+#
+# Chiều message (một interface, hai chiều theo endpoint riêng):
+#   kernel → pager : `fault` (yêu cầu nạp trang), `stop` (kết thúc)
+#   pager  → kernel: `ready` (đã map pool + stats), `served` (kết quả một fault), `finish` (tổng)
+#
+# `# caps=none`: pager nhận **cap VSpace của client + pool Frame + stats Frame lúc spawn** (kernel
+# cài vào CSpace), nên không method nào mang cap trong message — ghi rõ để generator không đòi
+# method mang cap (khác `ringchan`, nơi trao Frame qua IPC là chính giao thức).
+# caps=none
+interface pager version 1
+
+# kernel -> pager: một fault của client `client` tại `va`, thuộc `(file, page)`.
+# 4 scalar vừa MR0..MR3 (D2-99); arity **chính xác** (D2-104).
+method fault
+  param client u32
+  param file u32
+  param page u32
+  param va u64
+  returns u32
+
+# pager -> kernel: đã phục vụ fault `(client, page)`; `slot` = Frame đã map (0 nếu từ chối),
+# `status` = mã theo tên trong `spec/abi.toml` `[error]`.
+method served
+  param client u32
+  param page u32
+  param slot u32
+  param status u32
+  returns unit
+
+# pager -> kernel: sẵn sàng (đã map stats + pool Frame vào VSpace của chính nó).
+method ready
+  returns u32
+
+# pager -> kernel: tổng kết — số fault, hit, miss (đối chiếu độc lập với khối stats).
+method finish
+  param faults u32
+  param hits u32
+  param misses u32
+  returns u32
+
+# kernel -> pager: kết thúc — pager gửi `finish` rồi `Exit(0)`.
+method stop
+  returns u32

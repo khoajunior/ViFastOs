@@ -631,6 +631,10 @@ pub fn run(
                     demo.child_started = true;
                 }
             }
+            Stop::Fault => {
+                // KT-70: pha proc không bật fault→pager ⇒ fault VM là lỗi (dừng tác vụ).
+                tasks[tcb_index].exited = true;
+            }
             Stop::Blocked(_) | Stop::Halt { .. } => {
                 tasks[tcb_index].exited = true;
             }

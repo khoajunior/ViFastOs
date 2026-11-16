@@ -4,49 +4,45 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`a9f80d83`** (nhánh `main`, sau KT-68b/D2-104 + D2-105). KT-67/67a/67b/68
-                DONE; **KT-69 DONE phần cài + đo**, chờ reviewer verdict trước commit `[KT-69]`.
-                Danh sách tệp + log ở `JOURNAL/kt69-journal.md`; worktree **không** chạm
-                `viscript/`, `crates/`, `review/`, `.agents/`, `out-b.log` (tab khác).
-BUILD_ID      : ảnh **sản phẩm không đổi** (KT-69 chỉ thêm module test/user + lib): soak
-                `build=02ed5a1810ba59ce` sha256 `5c8ce032…` (`kt69-soak.log`). Ảnh test
-                (`.data+.bss`): ktest **209.920**, guard **2.680**, user **202.792**, proc
-                **206.640** — trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin
-                **196.608 B** (không đổi, không thêm field core).
-Task          : **KT-69 (K6 — IDL tối thiểu + ring buffer chia sẻ)** — **DONE phần cài + đo**
-                (chờ reviewer). (1) IDL `.vidl` (`v2/lib/vifast-idl/idl/ring.vidl`) + generator
-                `gen_idl.py` sinh stub `no_std` **không `unsafe`** cho client/server, method id
-                sinh tuần tự từ IDL (spec không có bảng method interface mới — ghi rõ; **không**
-                sửa `spec/`), `--check` + fixture âm nối vào `v2 check`; (2) `vifast-ring`: ring
-                1P/1C trên **một Frame**, header 4 KiB + 8 slot × 32 B, Acquire/Release qua
-                trait `Mem` (shim atomic VA user; kernel đọc physmap), đầy ⇒ **9**, rỗng ⇒
-                **14**, wrap bằng bộ đếm một chiều, **không `unsafe`**; (3) **hai tiến trình
-                U-mode riêng** `ring_server.elf`/`ring_client.elf`: server map Frame (cap ở
-                cspace server) → `attach` mang cap → client nhận cap qua receive window (KT-67b),
-                map **cùng PA** → 40 message/5 vòng, đầy/rỗng/khứ hồi IDL; (4) dọn tài nguyên
-                giữa pha (`LoadedInit::release` + `delete` cap tạm 13..28) để object layer 64 KiB/
-                96 object đủ cho pha ring — **chỉ sau khi đo**, không đổi TAP cũ.
-Bước          : 8/8 — baseline gate **PASS 661/87** (`kt69-baseline-gate.log`) → IDL+gen+stub →
-                red host (`kt69-red-host.log`) → harness + 2 ELF stub → **red QEMU** 24/29
-                (`kt69-red-qemu-ktest-user.log`) → ring/shim/2 tiến trình → xanh TAP 25..29 →
-                dọn tài nguyên (NoSlots/flush) → gate **PASS 675/92** + matrix **12/12** + soak
-                **0/1000** + clippy **4/4 EXIT=0** + L1 wall/thuần → docs `k6-idl.md` +
-                `k3b-core.md` §17 + journal → báo lead spawn reviewer, **đóng băng cây**.
-Cổng gần nhất : `./v2/bin/v2 gate --fast` **PASS 675 test/92 suite** (`JOURNAL/kt69-gate.log`,
-                sau vá DRIFT); L1 1.000 seed **wall cổng 1.343 ms** (máy bận, ghi nhận D2-100),
-                **chạy thuần 894 / 884 / 922 ms** (`kt69-l1-thuan.log`); `ktest.sh 1 matrix`
-                **12/12** boot, `ktest-user` **29/29** TAP (`kt69-ktest-matrix.log`); soak
-                **0/1000** wall **230 s**, sha256 `5c8ce032…` (`kt69-soak.log`); clippy kernel
-                **4/4** `-D warnings` `EXIT=0` (`kt69-clippy-kernel.log`); budget user **202.792**
-                ≤ 262.144; `??`=0 (`git add -N` đủ).
-Nợ đang mở    : (1) method id interface dịch vụ **không thuộc `spec/abi.toml`** (sinh từ IDL —
-                muốn thành ABI lõi phải mở spec, D2-22); (2) **MR4..MR63** qua IPC buffer vẫn
-                thiếu (IDL ≤4 scalar); (3) **chưa song song thật** (một hart, scheduler tuần tự;
-                Acquire/Release có test 2 thread host); (4) policy **copy** cap (KT-63) — move
-                cần `CNode.Delete` ngoài danh sách trắng; (5) capacity/slot_bytes của ring là hằng
-                dịch vụ, chưa cấu hình qua IDL; (6) nợ cũ K3.5/K3b/KT-67a giữ nguyên.
+HEAD          : **`43b19dfe`** (nhánh `main`; có commit ViScript của tab khác xen giữa — cây OS
+                **không** chạm `viscript/`, `crates/`, `review/`, `.agents/`, `out-b.log`).
+                **KT-70 DONE phần cài + đo**, chờ reviewer verdict trước commit `[KT-70]`.
+                Danh sách tệp + log: `JOURNAL/kt70-journal.md`; tài liệu `docs/k6-vfs-pager.md`,
+                `docs/k3b-core.md` §18.
+BUILD_ID      : ảnh **sản phẩm không đổi** (KT-70 chỉ thêm crate host `vifast-vfs` + module test/
+                user). Ảnh test `.data+.bss`: ktest **209.920**, guard **2.680**, user **202.832**,
+                proc **206.640** — trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin
+                **196.608 B** (không thêm field core).
+Task          : **KT-70 (K6 — pager + page cache `(file,page)`)** — DONE phần cài + đo (chờ
+                reviewer). (1) `vifast-vfs` host-testable `no_std` **không `unsafe`**: cache LRU
+                theo khoá, một bản/khoá, hit không đọc backend, `Reject` mã `InvalidArgument`,
+                12 test host; (2) IDL `pager.vidl` (5 method, stub sinh tự động, không `unsafe`,
+                đúng arity D2-104); (3) **pager server U-mode** nhận fault qua `FaultKind::Vm` +
+                message IDL, `Frame.Map` trang vào VSpace client rồi `served`; (4) **hai client
+                U-mode** chia sẻ cache: cùng `(file,page)` ⇒ cùng PA (một Frame, nhiều mapping),
+                trục xuất LRU rồi nạp lại đúng dữ liệu; (5) backend **thay thế được** dùng lại
+                `vifast_fs::BlockDev` (RAM hôm nay, virtio-blk KT-72 chỉ thêm impl); (6) TAP
+                30..34 + evidence `# pager:` fail-closed.
+Bước          : 9/9 — baseline gate **PASS 675/92** (`kt70-baseline-gate.log`) → red host
+                (`kt70-red-host.log`) → IDL + pager + 2 client + rig → red QEMU cả 5 TAP
+                (`kt70-red-qemu-ktest-user.log`) → xanh TAP 30..34 (`kt70-green-qemu-ktest-user.log`)
+                → matrix **12/12** + clippy 4/4 + gate (log cuối) → soak **0/1000** → docs +
+                journal → báo lead spawn reviewer, **đóng băng cây**.
+Cổng gần nhất : host **12 test** `vifast-vfs` + **7 test** `vifast-idl` PASS; QEMU 1 boot × 4 ảnh
+                **4/4 sạch**, `ktest-user` **35/35** TAP (`kt70-ktest-boot.log`); matrix
+                **12/12** (`kt70-ktest-matrix.log`); clippy kernel **4/4 `EXIT=0`**
+                (`kt70-clippy-kernel.log`); `gate --fast` **PASS 689 test/95 suite**, L1 1.000
+                seed **915 ms** trên cây cuối `43b19dfe` (`kt70-gate.log`); L1 thuần
+                **914/710/995 ms** (`kt70-l1-thuan.log`); soak **0/1000 wall 227 s**, BUILD_ID
+                `02ed5a1810ba59ce` (`kt70-soak.log`); budget user **202.832** ≤ 262.144.
+Nợ đang mở    : (1) **journal/writeback** trang bẩn + `Frame.Unmap` khi tiến trình chết + xử lý
+                nhiều fault đồng thời → **KT-71**; (2) **virtio-blk** → KT-72 (chỉ thêm
+                `impl BlockDev`); (3) method id interface dịch vụ vẫn sinh từ IDL, **không** thuộc
+                `spec/abi.toml` (nợ KT-69, muốn vào ABI lõi phải mở spec D2-22); (4) cache
+                hiện **chỉ đọc** (chưa có trang bẩn). Nợ cũ K3.5/K3b/KT-67a giữ nguyên.
+                TAP 35 (ca âm bắt buộc): aux = **CNode cap** `P_SELF` ⇒ `WrongObjectType` (2, **sửa theo số đo**);
+                map vào VA đã map ⇒ `AlreadyMapped` (10) + PTE không bị ghi đè (`pa_same=1`).
 ```
-
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
 
 **Vào**: KT-64 DONE; HEAD `954851b8`; `HEAD..origin/main` = 0; baseline `gate --fast` **PASS

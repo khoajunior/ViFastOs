@@ -28,6 +28,10 @@ mod generated;
 
 pub use generated::*;
 
+/// Interface **pager** (KT-70) — sinh từ `idl/pager.vidl`; tên `encode_*`/`decode` riêng module.
+#[path = "generated_pager.rs"]
+pub mod pager;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +157,92 @@ mod tests {
             decode_reply(METHOD_FINISH | REPLY_BIT, 1, &mr),
             Some((METHOD_FINISH, 0xdead_beef))
         );
+    }
+
+    /// KT-70: interface `pager` — arity chính xác, roundtrip fault/served, reply.
+    #[test]
+    fn pager_stub_arity_va_roundtrip() {
+        use pager::{
+            decode, encode_fault, encode_finish, encode_ready, encode_served, encode_stop, Request,
+            METHOD_FAULT, METHOD_FINISH, METHOD_READY, METHOD_SERVED, METHOD_STOP, REPLY_BIT,
+        };
+        assert_eq!(pager::IFACE_NAME, "pager");
+        assert_eq!(pager::IFACE_VERSION, 1);
+        assert_eq!(pager::METHOD_COUNT, 5);
+        assert_eq!(METHOD_FAULT, 0);
+        assert_eq!(METHOD_SERVED, 1);
+        assert_eq!(METHOD_READY, 2);
+        assert_eq!(METHOD_FINISH, 3);
+        assert_eq!(METHOD_STOP, 4);
+        assert_eq!(pager::arity(METHOD_FAULT), Some(4));
+        assert_eq!(pager::arity(METHOD_SERVED), Some(4));
+        assert_eq!(pager::arity(METHOD_READY), Some(0));
+        assert_eq!(pager::arity(METHOD_FINISH), Some(3));
+        assert_eq!(pager::arity(METHOD_STOP), Some(0));
+        assert_eq!(pager::cap_count(METHOD_FAULT), Some(0));
+
+        let (info, mr) = encode_fault(1, 0, 4, 0x4200_0000);
+        assert_eq!((info >> pager::INFO_LENGTH_SHIFT) & 0x7F, 4);
+        assert_eq!(
+            decode(METHOD_FAULT, 4, &mr),
+            Some(Request::Fault {
+                client: 1,
+                file: 0,
+                page: 4,
+                va: 0x4200_0000
+            })
+        );
+        // Thiếu/thừa/tràn u32 đều bị từ chối (D2-104).
+        assert_eq!(decode(METHOD_FAULT, 3, &mr), None);
+        assert_eq!(decode(METHOD_FAULT, 5, &mr), None);
+        let mut wide = mr;
+        wide[0] = 1 << 32;
+        assert_eq!(decode(METHOD_FAULT, 4, &wide), None);
+
+        let (info, mr) = encode_served(1, 4, 2, 5);
+        assert_eq!(
+            decode(METHOD_SERVED, 4, &mr),
+            Some(Request::Served {
+                client: 1,
+                page: 4,
+                slot: 2,
+                status: 5
+            })
+        );
+        let _ = info;
+        assert_eq!(decode(METHOD_SERVED | REPLY_BIT, 4, &mr), None);
+        let (info, mr) = encode_ready();
+        assert_eq!(decode(METHOD_READY, 0, &mr), Some(Request::Ready));
+        let _ = decode(METHOD_READY, 0, &mr);
+        let _ = info;
+        let (info, mr) = encode_finish(11, 2, 8);
+        assert_eq!(
+            decode(METHOD_FINISH, 3, &mr),
+            Some(Request::Finish {
+                faults: 11,
+                hits: 2,
+                misses: 8
+            })
+        );
+        let _ = decode(METHOD_FINISH, 3, &mr);
+        let _ = info;
+        let (info, mr) = encode_stop();
+        assert_eq!(decode(METHOD_STOP, 0, &mr), Some(Request::Stop));
+        let _ = decode(METHOD_STOP, 0, &mr);
+        let _ = info;
+    }
+
+    /// Tệp sinh của **cả hai** interface đều không `unsafe`/asm (D2-101 tinh thần).
+    #[test]
+    fn generated_pager_khong_unsafe() {
+        let text = include_str!("generated_pager.rs");
+        assert!(text.contains("SINH TỰ ĐỘNG"));
+        let code: String = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!code.contains("unsafe"));
+        assert!(!code.contains("asm!"));
     }
 }

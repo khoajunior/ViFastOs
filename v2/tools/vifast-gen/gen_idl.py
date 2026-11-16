@@ -136,8 +136,13 @@ def parse(path: Path) -> Iface:
     for index, method in enumerate(iface.methods):
         if len(method.params) > 4:
             die(f"{path.name}: method {method.name} có {len(method.params)} tham số > 4 (MR0..MR3)")
-    if not any(method.cap is not None for method in iface.methods):
-        die(f"{path.name}: interface phải có ít nhất MỘT method mang cap Frame/buffer (KT-69)")
+    if not any(method.cap is not None for method in iface.methods) and not any(
+        line.strip() == "# caps=none" for line in path.read_text().splitlines()
+    ):
+        die(
+            f"{path.name}: interface không có method mang cap thì phải ghi rõ `# caps=none` "
+            "(lý do cap do kernel cài lúc spawn)"
+        )
     return iface
 
 
@@ -216,7 +221,7 @@ def gen_rs(iface: Iface, source_name: str) -> str:
         caps = 1 if method.cap else 0
         add(f"/// Client encode `{method.name}`: trả `(MessageInfo, MR0..MR3)`.")
         add(f"pub fn encode_{method.name}({args}) -> (u64, [u64; 4]) {{")
-        add(f"    let mut mr = [0u64; 4];")
+        add(f"    let mr = [0u64; 4];" if not method.params else "    let mut mr = [0u64; 4];")
         for index, (name, _ty) in enumerate(method.params):
             add(f"    mr[{index}] = {name} as u64;")
         add(f"    (encode_info(METHOD_{method.name.upper()}, {caps}, {len(method.params)}), mr)")
@@ -328,23 +333,32 @@ def gen_rs(iface: Iface, source_name: str) -> str:
     return "\n".join(skipped) + "\n"
 
 
-def targets(root: Path) -> list[Path]:
-    return [root / "v2/lib/vifast-idl/src/generated.rs"]
+def targets(root: Path) -> list[tuple[Path, Path]]:
+    """Cặp `(tệp IDL, tệp sinh)` — mỗi interface một tệp sinh (KT-69 ringchan, KT-70 pager)."""
+    idl = root / "v2/lib/vifast-idl/idl"
+    src = root / "v2/lib/vifast-idl/src"
+    return [
+        (idl / "ring.vidl", src / "generated.rs"),
+        (idl / "pager.vidl", src / "generated_pager.rs"),
+    ]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("command", nargs="?", default="gen", choices=["gen"])
     ap.add_argument("--root", default=".")
-    ap.add_argument("--idl", default=None, help="mặc định <root>/v2/lib/vifast-idl/idl/ring.vidl")
+    ap.add_argument("--idl", default=None, help="chỉ sinh MỘT tệp IDL (mặc định: mọi target)")
     ap.add_argument("--check", action="store_true", help="so byte, không ghi (gen-check)")
     args = ap.parse_args()
     root = Path(args.root).resolve()
-    idl = Path(args.idl) if args.idl else root / "v2/lib/vifast-idl/idl/ring.vidl"
-    iface = parse(idl)
-    text = gen_rs(iface, idl.name)
+    pairs = targets(root)
+    if args.idl:
+        idl = Path(args.idl)
+        pairs = [(idl, root / "v2/lib/vifast-idl/src/generated.rs")]
     rc = 0
-    for path in targets(root):
+    for idl, path in pairs:
+        iface = parse(idl)
+        text = gen_rs(iface, idl.name)
         if args.check:
             have = path.read_text() if path.exists() else ""
             if have != text:

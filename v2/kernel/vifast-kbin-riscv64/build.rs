@@ -36,12 +36,26 @@ fn main() {
     println!("cargo:rerun-if-changed=init/capa_client_user.rs");
     println!("cargo:rerun-if-changed=init/ring_server_user.rs");
     println!("cargo:rerun-if-changed=init/ring_client_user.rs");
+    println!("cargo:rerun-if-changed=init/pager_common.rs");
+    println!("cargo:rerun-if-changed=init/pager_client_common.rs");
+    println!("cargo:rerun-if-changed=init/pager_server_user.rs");
+    println!("cargo:rerun-if-changed=init/pager_client_a_user.rs");
+    println!("cargo:rerun-if-changed=init/pager_client_b_user.rs");
     println!("cargo:rerun-if-changed=../vifast-plat-user/lib.rs");
     println!("cargo:rerun-if-changed=../../lib/vifast-abi/src/lib.rs");
     println!("cargo:rerun-if-changed=../../lib/vifast-abi/src/generated.rs");
     println!("cargo:rerun-if-changed=../../lib/vifast-ring/src/lib.rs");
     println!("cargo:rerun-if-changed=../../lib/vifast-idl/src/lib.rs");
     println!("cargo:rerun-if-changed=../../lib/vifast-idl/src/generated.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-idl/src/generated_pager.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/lib.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/cache.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/core.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/disk.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/layout.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/stats.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-vfs/src/status.rs");
+    println!("cargo:rerun-if-changed=../../lib/vifast-fs/src/lib.rs");
     println!("cargo:rerun-if-changed=init/init.ld");
     if std::env::var_os("CARGO_FEATURE_USER").is_none() {
         return;
@@ -55,15 +69,28 @@ fn main() {
     // KT-69: rlib `no_std` cho chương trình U-mode — hằng ABI sinh từ spec + stub IDL sinh từ
     // `.vidl` + ring (Acquire/Release, không unsafe). Không nằm trong workspace host vì mỗi
     // crate được biên dịch thẳng cho riscv64 ở đây (cùng toolchain, không cargo lồng).
-    let abi_lib = build_rlib(dir, "vifast_abi", "../../lib/vifast-abi/src/lib.rs");
-    let ring_lib = build_rlib(dir, "vifast_ring", "../../lib/vifast-ring/src/lib.rs");
-    let idl_lib = build_rlib(dir, "vifast_idl", "../../lib/vifast-idl/src/lib.rs");
+    let abi_lib = build_rlib(dir, "vifast_abi", "../../lib/vifast-abi/src/lib.rs", &[]);
+    let fs_lib = build_rlib(dir, "vifast_fs", "../../lib/vifast-fs/src/lib.rs", &[]);
+    let ring_lib = build_rlib(dir, "vifast_ring", "../../lib/vifast-ring/src/lib.rs", &[]);
+    let idl_lib = build_rlib(dir, "vifast_idl", "../../lib/vifast-idl/src/lib.rs", &[]);
+    // KT-70: pager/page-cache — **dùng lại** `vifast_fs::BlockDev` + bảng lỗi `vifast-abi`.
+    let vfs_lib = build_rlib(
+        dir,
+        "vifast_vfs",
+        "../../lib/vifast-vfs/src/lib.rs",
+        &[
+            ("vifast_fs", fs_lib.as_path()),
+            ("vifast_abi", abi_lib.as_path()),
+        ],
+    );
     let shim = [("vifast_user_abi", user_lib.as_path())];
     let shim_all = [
         ("vifast_user_abi", user_lib.as_path()),
         ("vifast_abi", abi_lib.as_path()),
         ("vifast_ring", ring_lib.as_path()),
         ("vifast_idl", idl_lib.as_path()),
+        ("vifast_vfs", vfs_lib.as_path()),
+        ("vifast_fs", fs_lib.as_path()),
     ];
     build_user_elf(dir, "init_user.rs", "init.elf", &[]);
     build_user_elf(dir, "procsrv_user.rs", "procsrv.elf", &shim);
@@ -81,6 +108,20 @@ fn main() {
     // chuyển qua cap; cả hai dùng stub IDL sinh từ `.vidl`.
     build_user_elf(dir, "ring_server_user.rs", "ring_server.elf", &shim_all);
     build_user_elf(dir, "ring_client_user.rs", "ring_client.elf", &shim_all);
+    // KT-70: **ba tiến trình** pager — server (page cache + LRU) và hai client.
+    build_user_elf(dir, "pager_server_user.rs", "pager_server.elf", &shim_all);
+    build_user_elf(
+        dir,
+        "pager_client_a_user.rs",
+        "pager_client_a.elf",
+        &shim_all,
+    );
+    build_user_elf(
+        dir,
+        "pager_client_b_user.rs",
+        "pager_client_b.elf",
+        &shim_all,
+    );
 }
 
 /// Biên dịch + liên kết một chương trình user thành ELF64 ở `$OUT_DIR/<out_name>`.
@@ -132,13 +173,13 @@ fn build_user_lib(dir: &Path) -> PathBuf {
 /// Biên dịch một crate `no_std` (`vifast-abi`/`vifast-ring`/`vifast-idl`) thành `rlib` riscv64.
 ///
 /// `source` tương đối với thư mục crate kbin; `-D warnings` để stub/ring không cảnh báo.
-fn build_rlib(dir: &Path, crate_name: &str, source: &str) -> PathBuf {
+fn build_rlib(dir: &Path, crate_name: &str, source: &str, externs: &[(&str, &Path)]) -> PathBuf {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let rlib = out_dir.join(format!("lib{crate_name}.rlib"));
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
     let source = dir.join(source);
-    let status = Command::new(&rustc)
-        .current_dir(dir)
+    let mut cmd = Command::new(&rustc);
+    cmd.current_dir(dir)
         .arg("--crate-name")
         .arg(crate_name)
         .arg("--crate-type")
@@ -155,13 +196,20 @@ fn build_rlib(dir: &Path, crate_name: &str, source: &str) -> PathBuf {
         .arg("debuginfo=0")
         .arg("-D")
         .arg("warnings")
+        .arg("-L")
+        .arg(format!("dependency={}", out_dir.display()));
+    for (name, lib) in externs {
+        cmd.arg("--extern")
+            .arg(format!("{}={}", name, lib.display()));
+    }
+    let status = cmd
         .arg("-o")
         .arg(&rlib)
         .arg(&source)
         .status()
-        .unwrap_or_else(|error| panic!("KT-69: không chạy được {:?}: {error}", rustc));
+        .unwrap_or_else(|error| panic!("KT-70: không chạy được {:?}: {error}", rustc));
     if !status.success() {
-        panic!("KT-69: build rlib {crate_name} FAIL (rustc {:?})", rustc);
+        panic!("KT-70: build rlib {crate_name} FAIL (rustc {:?})", rustc);
     }
     rlib
 }
@@ -196,6 +244,9 @@ fn build_user_elf(dir: &Path, source_name: &str, out_name: &str, externs: &[(&st
         .arg("link-arg=--no-relax")
         .arg("-o")
         .arg(&out);
+    // rlib bắc cầu (`vifast_vfs` → `vifast_fs`/`vifast_abi`) nằm cùng OUT_DIR.
+    cmd.arg("-L")
+        .arg(format!("dependency={}", out_dir.display()));
     for (name, lib) in externs {
         cmd.arg("--extern")
             .arg(format!("{}={}", name, lib.display()));

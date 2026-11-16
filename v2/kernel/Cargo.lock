@@ -22,6 +22,10 @@ name = "vifast-elf"
 version = "0.1.0"
 
 [[package]]
+name = "vifast-fs"
+version = "0.1.0"
+
+[[package]]
 name = "vifast-idl"
 version = "0.1.0"
 
@@ -29,6 +33,7 @@ version = "0.1.0"
 name = "vifast-kbin-riscv64"
 version = "0.1.0"
 dependencies = [
+ "vifast-abi",
  "vifast-core",
  "vifast-idl",
  "vifast-plat-common",
@@ -36,6 +41,7 @@ dependencies = [
  "vifast-ring",
  "vifast-scenario",
  "vifast-traceformat",
+ "vifast-vfs",
 ]
 
 [[package]]
@@ -71,3 +77,11 @@ version = "0.1.0"
 [[package]]
 name = "vifast-traceformat"
 version = "0.1.0"
+
+[[package]]
+name = "vifast-vfs"
+version = "0.1.0"
+dependencies = [
+ "vifast-abi",
+ "vifast-fs",
+]

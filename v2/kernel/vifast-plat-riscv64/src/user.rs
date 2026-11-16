@@ -298,6 +298,9 @@ pub enum Stop {
     Blocked(TcbState),
     /// Tác vụ gọi `DebugHalt` (13).
     Halt { code: u64 },
+    /// Tác vụ U-mode **fault VM** trong pha pager (KT-70): trapframe giữ `sepc` để **chạy lại
+    /// instruction** sau khi pager map trang; chi tiết qua [`pager_fault`]/[`pager_fault_count`].
+    Fault,
 }
 
 /// `1` ⇔ bật ngữ nghĩa đa nhiệm (chỉ pha demo KT-65). Mặc định `0` giữ nguyên KT-53/62: `Yield`
@@ -307,26 +310,19 @@ static MULTITASK: AtomicU32 = AtomicU32::new(0);
 static STOP_KIND: AtomicU32 = AtomicU32::new(0);
 /// Mã thoát của [`Stop::Exit`]/[`Stop::Halt`].
 static STOP_CODE: AtomicU64 = AtomicU64::new(0);
-/// Trapframe của tác vụ vừa dừng — scheduler đọc để chạy tiếp.
-static mut SAVED_TF: TrapFrame = TrapFrame::zeroed();
-
 /// Bật/tắt ngữ nghĩa đa nhiệm của runtime U-mode.
 pub fn enable_multitask(on: bool) {
     MULTITASK.store(u32::from(on), Ordering::Relaxed);
 }
 
-fn save_tf(tf: &TrapFrame) {
-    // SAFETY: một hart, `user_enter` đã trả về S-mode nên không có ai đọc/ghi đồng thời.
-    unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(SAVED_TF), *tf);
-    }
-}
-
+use crate::tf_store::save as save_tf;
 /// Bản sao trapframe của tác vụ vừa dừng ([`Stop::Yield`]/[`Stop::Exit`]).
-pub fn saved_tf() -> TrapFrame {
-    // SAFETY: như `save_tf` — chỉ đọc sau khi handler đã ghi xong trong cùng luồng.
-    unsafe { core::ptr::read(core::ptr::addr_of!(SAVED_TF)) }
-}
+pub use crate::tf_store::saved as saved_tf;
+
+/// KT-70: API pager-fault ở [`crate::pager_fault`] (tách để giữ luật R1); `user` giữ đường dẫn cũ.
+pub use crate::pager_fault::{
+    pager_fault, pager_fault_count, pager_faults, set_pager_faults, PagerFault,
+};
 
 fn stop(kind: u32, code: u64) {
     STOP_CODE.store(code, Ordering::Relaxed);
@@ -343,6 +339,7 @@ fn saved_stop() -> Stop {
         4 => Stop::Halt {
             code: STOP_CODE.load(Ordering::Relaxed),
         },
+        5 => Stop::Fault,
         _ => Stop::Blocked(TcbState::Inactive),
     }
 }
@@ -1046,6 +1043,28 @@ pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
         // `FaultKind` + `scause/stval` từ `FAULT_STATS`.
         exit_to_kernel(tf);
         return;
+    }
+    // KT-70: pha pager — fault VM **không fatal**: giữ trapframe (sepc = instruction lỗi), trả
+    // scheduler; pager map trang xong thì `run_task` chạy lại instruction lỗi.
+    if pager_faults() {
+        if let Some((asid, va, access, reason)) = kind.and_then(|kind| kind.vm()) {
+            crate::pager_fault::record(va, asid, access.code() as u32, reason.code() as u32);
+            let mut w = PlatformWriter(&Riscv64Virt);
+            let _ = writeln!(
+                w,
+                "# pager: fault kind=Vm va=0x{:x} asid={} access={} reason={} sepc=0x{:x}",
+                va,
+                asid,
+                access.name(),
+                reason.name(),
+                saved.sepc
+            );
+            save_tf(tf);
+            stop(5, 0);
+            crate::TRAP_STATS.record_exception(&saved, exc.kind, true);
+            exit_to_kernel(tf);
+            return;
+        }
     }
     vifast_plat_common::trap::report_u_fault(&Riscv64Virt, exc, tf)
 }

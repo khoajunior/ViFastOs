@@ -89,3 +89,11 @@ version = "0.1.0"
 dependencies = [
  "vifast-sim",
 ]
+
+[[package]]
+name = "vifast-vfs"
+version = "0.1.0"
+dependencies = [
+ "vifast-abi",
+ "vifast-fs",
+]

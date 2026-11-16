@@ -317,6 +317,12 @@ ring day
 ring rong
 ring thu tu va wrap
 ring race co kiem soat
+pager fault den server va nap trang
+pager hit khong doc backend
+pager eviction LRU khong mat du lieu
+pager hai client chia se mot trang
+pager page ngoai file tra ma
+pager ca am quyen va khong ghi de
 EOF
 }
 
@@ -550,7 +556,15 @@ EOF
 ^# ring: prod_sum=820 cons_sum=820 sum_equal=1 slot0=[0-9]+/[0-9]+/[0-9]+/[0-9]+ const:sum=820$
 ^# ring: map server=1 client=1 same_pa=1 pa=0x[0-9a-f]+ s_pa=0x[0-9a-f]+ c_pa=0x[0-9a-f]+ s_flags=1 c_flags=1 pre_walk=0/0$
 ^# ring: caps b4=1 b4_ty=Frame b4_alive=1 frame_obj=[0-9]+ installed=[0-9]+->[0-9]+ failed=[0-9]+->[0-9]+ caps=1 ipc=1 obj=1 bytes=1 steps=s[0-9]+/c[0-9]+ exits=0/0 run_steps=[0-9]+$
-^# ktest-user: taps=29 ok=1$
+^# pager: fault kind=Vm va=0x[0-9a-f]+ client=0 access=Read reason=NotMapped core_fault=1 faults=[1-9][0-9]* ready=1 const:page=4096 const:sector=512$
+^# pager: cache const:capacity=3 hits=2 misses=7 evictions=4 reads=7 sectors=56 served=9 rejected=1 entries=3 unique=3 \(=entries\(3\) nếu keys_unique\) shared=2 reloads=2 const:clients=2 magic=0x[0-9a-f]+ const:magic_expected=0x[0-9a-f]+$
+^# pager: map p2_a=0x[0-9a-f]+ p2_b=0x[0-9a-f]+ p2_same=1 \(=p2_a==p2_b\) hit_delta0=1 \(reads_before=[0-9]+ reads_after=[0-9]+\) mapping_bad=0 walks_ok=[1-9][0-9]*$
+^# pager: evict evictions=4 \(=misses\(7\)-min\(capacity\(3\),unique\(3\)\)\) walk_gone=1 \(file=0 page=1 va=0x[0-9a-f]+\) pa_changed=1 \(file=0 page=0 first=0x[0-9a-f]+ reload=0x[0-9a-f]+\) reloads=2 kernel_data_ok=[1-9][0-9]* kernel_data_bad=0 a_done=5 b_done=4$
+^# pager: data a_ok=5 a_bytes=20480 \(=a_ok\*4096\) a_bad=0 a_bad_bytes=0 b_ok=4 b_bytes=16384 \(=b_ok\*4096\) b_bad=0 b_bad_bytes=0$
+^# pager: reject client=1 page=99 status=5 name=InvalidArgument reads_before=[0-9]+ reads_after=[0-9]+ delta=0 \(=reads_after-reads_before\) exit=0x80000005$
+^# pager: exit pager=0 a=0 b=2147483653 steps=[0-9]+ const:starts=3 exits=3 \(=\(pager==0\)\+\(a==0\)\+\(b==0x8000_0000\|status\)\)$
+^# pager: neg aux_status=2 name=WrongObjectType over_status=10 name=AlreadyMapped pa_same=1 \(walk=0x[0-9a-f]+ exp=0x[0-9a-f]+\) magic=0x[0-9a-f]+ const:neg_over=10 \(aux=P_SELF là CNode cap, không phải VSpace ⇒ core trả WrongObjectType trước object layer\)$
+^# ktest-user: taps=35 ok=1$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -608,7 +622,7 @@ panic_allow_re() {
     case "$1" in
         ktest) printf '%s' '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$' ;;
         ktest-guard) printf '%s' '^PANIC: guard page fault scause=0xf stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+$' ;;
-        ktest-user) printf '%s' '^PANIC: KT-69 u-mode pha syscall, invocation, capalloc, IDL va ring xong \(29 TAP, 0 fail\)$' ;;
+        ktest-user) printf '%s' '^PANIC: KT-70 u-mode pha syscall, invocation, capalloc, IDL va ring va pager xong \(35 TAP, 0 fail\)$' ;;
         ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         *) return 1 ;;
     esac

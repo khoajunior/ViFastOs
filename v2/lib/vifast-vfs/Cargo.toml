@@ -1,0 +1,13 @@
+# lib/vifast-vfs — pager + page cache tầng 1 (KT-70, K6)
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "vifast-vfs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "KT-70: pager + page cache tầng 1 (BlockDev, LRU, stats) — no_std"
+
+[dependencies]
+vifast-fs = { path = "../vifast-fs" }
+vifast-abi = { path = "../vifast-abi" }

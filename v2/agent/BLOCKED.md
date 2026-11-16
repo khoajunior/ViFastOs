@@ -8,6 +8,7 @@ Quy tắc 2.5: kẹt **hai lần** cùng một ý ⇒ ghi vào đây, **đổi n
 | Task | Trạng thái | Nội dung chờ | Cần gì để mở |
 |---|---|---|---|
 | ~~KT-04d~~ | **APPROVED 2026-11-12 Agent 0** | Gói bản 2 + C1/C2; D2-35..39; `KT-05` mở | — |
+| KT-70 | **DONE phần cài + đo**, chờ reviewer | Pager U-mode + page cache `(file,page)` + 2 client; TAP 30..34 xanh, matrix 12/12, clippy 4/4, gate PASS; log `JOURNAL/kt70-journal.md` | Reviewer verdict → lead commit `[KT-70]` |
 
 **O1 (Exit) — ĐÃ CHỐT, không còn là câu hỏi mở.** Nguồn: **QD §1 Q-A + D2-25** (câu chữ QD ghi gọn "chuyển `Inactive` rồi gửi fault"; bản chốt đầy đủ là D2-25 + thiết kế §4.4 — `docs/v2/ViFastOs-v2-thiet-ke.md:285` và `:469`): `Exit` là **syscall 14 `Exit(code)`**; kernel lưu `exit_code`, TCB thành **`BlockedOnSend { ep: fault_ep, call: false }`** mang `FaultKind::Exit{code}` — giao qua **hàng gửi của `fault_ep`, không có Reply**; procsrv `Recv` xong TCB **mới** thành `Inactive`; không có `fault_ep` thì `Inactive` ngay. `Resume`/`Configure` xoá `exit_code`. `wait` là RPC của procsrv; `kill` = procsrv `Tcb.Suspend(Abort)` rồi Revoke cap TCB. Dải syscall **16..31 reserved** (15 = DebugGetInfo, D2-29). Không mở lại O1; **không** chép nguyên văn QD:23 vào `abi.toml` khi làm KT-04a.
 

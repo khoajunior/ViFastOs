@@ -60,3 +60,6 @@ vifast-traceformat = { path = "../../lib/vifast-traceformat", default-features =
 # Cả hai `no_std`, không phụ thuộc crate ngoài (D2-21).
 vifast-idl = { path = "../../lib/vifast-idl" }
 vifast-ring = { path = "../../lib/vifast-ring" }
+# KT-70: pager + page cache tầng 1 (dùng lại `vifast-fs::BlockDev`); bảng mã lỗi cho evidence.
+vifast-vfs = { path = "../../lib/vifast-vfs" }
+vifast-abi = { path = "../../lib/vifast-abi" }

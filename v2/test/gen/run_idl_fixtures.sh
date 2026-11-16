@@ -9,8 +9,8 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 gen() { local dir="$1"; shift; "$PY" "$ROOT/v2/tools/vifast-gen/gen_idl.py" --root "$dir" "$@"; }
 mk_tree() {
     mkdir -p "$tmp/$1/v2/lib/vifast-idl/idl" "$tmp/$1/v2/lib/vifast-idl/src"
-    cp "$ROOT/v2/lib/vifast-idl/idl/ring.vidl" "$tmp/$1/v2/lib/vifast-idl/idl/"
-    cp "$ROOT/v2/lib/vifast-idl/src/generated.rs" "$tmp/$1/v2/lib/vifast-idl/src/"
+    cp "$ROOT"/v2/lib/vifast-idl/idl/*.vidl "$tmp/$1/v2/lib/vifast-idl/idl/"
+    cp "$ROOT"/v2/lib/vifast-idl/src/generated*.rs "$tmp/$1/v2/lib/vifast-idl/src/"
 }
 echo "1..2"
 bad=0

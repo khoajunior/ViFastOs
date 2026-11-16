@@ -335,6 +335,10 @@ fn run_pair(rig: &Rig, server: &user::LoadedInit, client: &user::LoadedInit) -> 
                     task.exited = true;
                     task.code = 0x8000_0000 | code;
                 }
+                Stop::Fault => {
+                    // KT-70: pha capa/ring không bật fault→pager ⇒ Fault là lỗi nặng.
+                    task.exited = true;
+                }
                 Stop::Blocked(_) => {
                     // Không dùng IPC chặn: bỏ qua tác vụ ở vòng sau; TAP sẽ đỏ nếu kẹt.
                 }

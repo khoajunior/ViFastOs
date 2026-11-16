@@ -55,8 +55,13 @@ ktest-guard 3 3
 # Revoke xuyên CNode · ca âm mã lỗi · bất biến slot/cap) ⇒ **24 TAP**. **KT-69** (K6): ảnh user thêm **5 TAP IDL + ring** (25..29: stub IDL sinh từ `.vidl` + handshake
 # giữa hai tiến trình · ring đầy trả mã 9 · ring rỗng trả mã 14 · thứ tự 40 message + 5 vòng wrap ·
 # race có kiểm soát + mapping hai VSpace cùng PA + bất biến). ⇒ **29 TAP**; boot kết thúc bằng
-# `PANIC: KT-69 u-mode pha syscall, invocation, capalloc, IDL va ring xong (29 TAP, 0 fail)`.
-ktest-user 29 29
+# `PANIC: KT-70 u-mode pha syscall, invocation, capalloc, IDL va ring va pager xong (35 TAP, 0 fail)`.
+# **KT-70** (K6): ảnh user thêm **5 TAP pager + page cache** (30..34: fault→pager nạp trang ·
+# hit không đọc backend · eviction LRU không mất dữ liệu · hai client chia sẻ một Frame ·
+# page ngoài file trả mã `InvalidArgument`) + **1 TAP ca âm** (35: aux = CNode cap `P_SELF`
+# không phải VSpace ⇒ `WrongObjectType` (2); VA đã map ⇒ `AlreadyMapped` (10), không ghi đè)
+# ⇒ **35 TAP**.
+ktest-user 35 35
 
 # **KT-66** — ảnh demo thứ tư `vifast-kbin-ktest-proc` (bin riêng, cùng feature `ktest,user`):
 # đúng mười ca cũ **15..24** của `ktest-user`, đánh số lại **1..10** (TAP một ảnh phải liên tục

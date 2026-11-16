@@ -74,11 +74,14 @@ pub mod ipi;
 pub mod mem_bridge;
 pub mod mmu;
 pub mod obj;
+/// KT-70: trạng thái fault VM giao pager server U-mode (tách khỏi `user.rs`, luật R1).
+pub mod pager_fault;
 pub mod plic;
 /// KT-56: probe trap **thật** cho `FaultKind` (chỉ ảnh test — `#[cfg(feature = "ktest")]`).
 #[cfg(feature = "ktest")]
 pub mod probe;
 pub mod smp;
+pub mod tf_store;
 pub mod timer;
 pub mod tlb;
 /// KT-53: U-mode + nạp `init` ELF — chỉ biên dịch cho ảnh **test U-mode** (`feature = "user"`,

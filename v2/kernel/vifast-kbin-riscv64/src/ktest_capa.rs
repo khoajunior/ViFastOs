@@ -331,6 +331,10 @@ fn run_pair(rig: &Rig, server: &user::LoadedInit, client: &user::LoadedInit) -> 
                     task.exited = true;
                     task.code = 0x8000_0000 | code;
                 }
+                Stop::Fault => {
+                    // KT-70: pha capa/ring không bật fault→pager ⇒ Fault là lỗi nặng.
+                    task.exited = true;
+                }
                 Stop::Blocked(_) => {
                     task.exited = true;
                     task.code = 0x4000_0000;
