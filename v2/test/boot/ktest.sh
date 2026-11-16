@@ -70,7 +70,7 @@ EXPECTED_FILE="$HERE/expected.txt"
 LOGDIR="${KT54_LOGDIR:-/tmp/k3-ktest}"
 TARGET="riscv64gc-unknown-none-elf"
 IMG_DIR="$V2_ROOT/kernel/target/$TARGET/release"
-LABELS="ktest ktest-guard ktest-user ktest-proc ktest-vblk" # thứ tự in bảng + thứ tự boot trong một vòng
+LABELS="ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con" # thứ tự in bảng + thứ tự boot trong một vòng
 LABEL_COUNT=0                              # số ảnh (đếm từ LABELS; không hardcode 3/4)
 TIMEOUT_DS=200                        # 20 s/boot (D2-72 Q10), đơn vị 0,1 s
 QEMU_ICOUNT="-icount shift=6"         # D2-74 (shift CỐ ĐỊNH, không `auto`)
@@ -118,6 +118,7 @@ image_path() {
         ktest-user) printf '%s/vifast-kbin-ktest-user' "$IMG_DIR" ;;
         ktest-proc) printf '%s/vifast-kbin-ktest-proc' "$IMG_DIR" ;;
         ktest-vblk) printf '%s/vifast-kbin-ktest-vblk' "$IMG_DIR" ;;
+        ktest-con) printf '%s/vifast-kbin-ktest-con' "$IMG_DIR" ;;
         *) return 1 ;;
     esac
 }
@@ -364,6 +365,17 @@ vblk loi ngoai dai
 EOF
 }
 
+# KT-73: ảnh **console** (5 TAP) — UART RX IRQ → ring → U-mode + virtio-console hai queue.
+manifest_con() {
+    cat <<'EOF'
+con uart irq ring
+con u-mode doc ring
+con pci
+con ghi doc
+con ca am
+EOF
+}
+
 # Tên TAP 37 của KT-55 phụ thuộc smp: `-smp 1` không chạy ca 24 (cần 2 hart thật).
 conf37_name() {
     if [ "${1:-1}" -ge 2 ]; then printf 'conformance 5/5'; else printf 'conformance 4/5 + 1 skipped'; fi
@@ -377,6 +389,7 @@ manifest_for() {
         ktest-user) manifest_user ;;
         ktest-proc) manifest_proc ;;
         ktest-vblk) manifest_vblk ;;
+        ktest-con) manifest_con ;;
         *) return 1 ;;
     esac | sed -e "s|__SMP__|$2|g" -e "s|__IPI20__|$(ipi_name "$2")|g" \
         -e "s|__CONF37__|$(conf37_name "$2")|g"
@@ -615,6 +628,22 @@ EOF
 ^Platform HART Count *: *__SMP__$
 EOF
             ;;
+        ktest-con) cat <<'EOF'
+^# con image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 root=0x[0-9a-f]+ obj_arena=0x[0-9a-f]+-0x[0-9a-f]+ untyped=[0-9]+ tcb=[0-9]+ elf=[0-9]+$
+^# con plic: base=0x[0-9a-f]+ ndev=[0-9]+ hart=[0-9]+ ctx=[0-9]+ threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0$
+^# con ring: pa=0x[0-9a-f]+ phys=0x[0-9a-f]+ va=0x43000000 const:slots=32 const:slot_bytes=32 head=0 tail=0 check=1 const:capacity=768$
+^# con uart: irqs=[1-9][0-9]* bytes=30 const:payload=30 chunks=[1-9][0-9]* const:chunks_want=2 head=[0-9]+ const:head0=0 tail=0 used=[0-9]+ seq=[0-9]+ empty_polls=[0-9]+ empty_bytes=0 drops=0 timeouts=0 inject_ok=1 inject_ticks=[0-9]+ rx_begin=1 rx_end=1$
+^# con u: map=1 exit=0 match=1 head=[0-9]+ tail=[0-9]+ used=0 captured=[1-9][0-9]* prefix="[^"]*"$
+^# con pci: vendor=0x1af4 device=0x1003 bus=0 dev=[0-9]+ func=0 bar=4 kind=mem64 size=0x4000 assigned=0x40200000 readback=0x40200000 command=0x6 ecam=0x[0-9a-f]+ other_bars=[0-9]+ reserved=5 overlap=1 caps_in_bar=1 ecam_id=1 bar_id=1 const:assign=0x40200000$
+^# con queue: num_queues=64 rx_max=128 rx_size=8 rx_notify_off=[0-9]+ tx_max=128 tx_size=8 tx_notify_off=[0-9]+ notify_mul=4 device_features=0x[0-9a-f]+ driver_features=0x100000000 const:version1=1 multiport=0 status=0xf generations=[0-9]+/[0-9]+ .*$
+^# con tx: one=Ok\(14\) two=Ok\(10\) writes=2 write_bytes=24 const:tx_want=24 notifies=[0-9]+ last_tx_used_len=[0-9]+ const:tx_len_note=0..=24 driver_status=0xf$
+^# con rx: got=14 const:want=14 ok=1 busy=0 errors=0 timeouts=0 id_mismatch=0 last_rx_used_len=14 armed=1 head=[0-9]+/[0-9]+$
+^# con neg: busy=1 const:busy_code=14 read_try=Busy ring_slots_ok=32 const:slots_want=32 ring_bytes_ok=768 const:bytes_want=768 drops=2 const:drops_want=2 full_code=9 const:full_want=9 consumed=768 order_ok=1 head=[0-9]+ tail=[0-9]+ used=0 timeouts=0$
+^# con done: fails=0 const:plan=5 .*$
+^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
+^Platform HART Count *: *__SMP__$
+EOF
+            ;;
         ktest-proc) cat <<'EOF'
 ^# user core: static=188872 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
 ^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
@@ -644,6 +673,9 @@ EOF
 ^# stack: noload=1 block=[0-9]+ harts=__SMP__ distinct=1 canary=0 base=0x[0-9a-f]+$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
+^# proc plic: base=0x[0-9a-f]+ ndev=[0-9]+ hart=[0-9]+ ctx=[0-9]+ threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0 const:uart_irq=10$
+^# proc ring: pa=0x[0-9a-f]+ phys=0x[0-9a-f]+ va=0x43000000 const:slots=32 const:slot_bytes=32 head=0 tail=0 check=1 mapped_shell=1 const:capacity=768$
+^# con uart: irqs=[1-9][0-9]* bytes=45 const:script_bytes=45 lines=6 inject_ok=1 drops=0 timeouts=0 head=45 tail=45 used=0 empty_polls=[0-9]+ const:va=0x43000000 ring_ok=1$
 EOF
             ;;
         *) return 1 ;;
@@ -671,6 +703,7 @@ panic_allow_re() {
         ktest-user) printf '%s' '^PANIC: KT-70 u-mode pha syscall, invocation, capalloc, IDL va ring va pager xong \(35 TAP, 0 fail\)$' ;;
         ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         ktest-vblk) printf '%s' '^PANIC: KT-72 vblk xong \(6 TAP, 0 fail\)$' ;;
+        ktest-con) printf '%s' '^PANIC: KT-73 con xong \(5 TAP, 0 fail\)$' ;;
         *) return 1 ;;
     esac
 }
@@ -925,6 +958,9 @@ validate_norm() {
         ktest-vblk)
             check_evidence "$log" "$label" "$smp"
             ;;
+        ktest-con)
+            check_evidence "$log" "$label" "$smp"
+            ;;
     esac
     [ -z "$MISSING" ] || return 1
     return 0
@@ -972,6 +1008,7 @@ record_row() {
 # `run_one <ảnh> <smp> <boot-i>`: boot + kiểm + ghi bảng; 0 = sạch.
 run_one() {
     local label="$1" smp="$2" idx="$3" image="" log="" oks="" t0="" dt="" disk=""
+    local con_base="" con_feeder="" con_host=1 con_tx=""
     local -a qextra=()
     image="$(image_path "$label")"
     log="$(log_path "$label" "$smp" "$idx")"
@@ -992,6 +1029,37 @@ run_one() {
         fi
         qextra=(-drive "file=$disk,format=raw,if=none,id=hd0" -device virtio-blk-pci,drive=hd0)
     fi
+    # KT-73: ảnh `ktest-con` cần **virtio-console** trên bus virtio-serial + một `chardev pipe`:
+    # `.out` là bằng chứng **độc lập phía host** cho byte guest ghi (tx); `.in` (FIFO) là byte host
+    # bơm cho rx. FIFO được tạo mới mỗi boot; bơm **sau** khi guest in marker `# con: rx armed`.
+    if [ "$label" = "ktest-con" ]; then
+        con_base="$LOGDIR/con-smp$smp-boot$idx"
+        rm -f "$con_base.in" "$con_base.out"
+        if ! mkfifo "$con_base.in"; then
+            echo "not ok - $label smp=$smp boot $idx: không tạo được FIFO $con_base.in" >&2
+            fails=$((fails + 1))
+            RUN_RESULT=FAIL
+            record_row "$label" "$smp" "$idx" "-" FAIL "mkfifo"
+            return 1
+        fi
+        : >"$con_base.out"
+        qextra=(-device virtio-serial-pci,id=vser0 \
+            -chardev "pipe,id=ch0,path=$con_base" \
+            -device virtconsole,bus=vser0.0,chardev=ch0)
+    fi
+    # KT-73: bơm byte host → `chr` của virtio-console khi guest đã arm `rx` (đồng bộ theo log).
+    if [ -n "$con_base" ]; then
+        (
+            for _ in $(seq 1 400); do
+                if grep -qF '# con: rx armed' "$log" 2>/dev/null; then
+                    printf 'KT73-CON-RX-OK' >"$con_base.in" 2>/dev/null
+                    break
+                fi
+                sleep 0.05
+            done
+        ) &
+        con_feeder=$!
+    fi
     # bash 3.2 + `set -u`: mảng rỗng `"${a[@]}"` bị coi là unbound ⇒ dùng dạng có điều kiện.
     if ! boot_image "$image" "$log" "$smp" ${qextra[@]+"${qextra[@]}"}; then
         dt=$(($(now_s) - t0))
@@ -1002,19 +1070,32 @@ run_one() {
         echo "not ok - $label smp=$smp boot $idx: quá $((TIMEOUT_DS / 10)) s (treo, đã kill pid), log $log"
         return 1
     fi
+    [ -n "$con_feeder" ] && wait "$con_feeder" 2>/dev/null
     total_boots=$((total_boots + 1))
     dt=$(($(now_s) - t0))
     oks="$(grep -cE '^ok [0-9]+' "$log" || true)"
-    if validate_log "$label" "$log" "$smp"; then
+    # KT-73: bằng chứng **host** cho hàng `tx` của virtio-console — chardev `.out` phải chứa
+    # đúng byte guest ghi (không tin lời khai của guest). Đây là kiểm độc lập của runner.
+    if [ -n "$con_base" ]; then
+        if grep -qF 'KT73-CON-WRITE0123456789' "$con_base.out" 2>/dev/null; then
+            con_tx="con-host-tx=1"
+            echo "# con host: tx_file=$con_base.out bytes=$(wc -c <"$con_base.out" | tr -d ' ') ok=1"
+        else
+            con_host=0
+            con_tx="con-host-tx=0"
+            echo "not ok - $label: chardev .out thiếu byte guest ghi (bằng chứng host)" >&2
+        fi
+    fi
+    if [ "$con_host" -eq 1 ] && validate_log "$label" "$log" "$smp"; then
         RUN_RESULT=PASS
         clean_boots=$((clean_boots + 1))
-        record_row "$label" "$smp" "$idx" "${oks:-0}/$(expected_field "$label" 2)" PASS "$log"
+        record_row "$label" "$smp" "$idx" "${oks:-0}/$(expected_field "$label" 2)" PASS "$log $con_tx"
         echo "ok - $label smp=$smp boot $idx (${oks:-0} TAP, ${dt}s) log $log"
         return 0
     fi
     fails=$((fails + 1))
     RUN_RESULT=FAIL
-    record_row "$label" "$smp" "$idx" "${oks:-0}/$(expected_field "$label" 2)" FAIL "$log"
+    record_row "$label" "$smp" "$idx" "${oks:-0}/$(expected_field "$label" 2)" FAIL "$log $con_tx"
     echo "not ok - $label smp=$smp boot $idx: thiếu$MISSING, log $log"
     return 1
 }
@@ -1271,6 +1352,14 @@ run_matrix() {
         --target "$TARGET" --release >/tmp/k3-ktest-build-vblk.log 2>&1; then
         tail -20 /tmp/k3-ktest-build-vblk.log >&2
         die "build ảnh test vblk FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-vblk.log)"
+    fi
+    # KT-73: ảnh **console** (UART RX IRQ → ring → U-mode + virtio-console) — feature `ktest,user,con`.
+    echo "# build ảnh test con ($TARGET, release, --features ktest,user,con)"
+    if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
+        --bin vifast-kbin-ktest-con --features ktest,user,con \
+        --target "$TARGET" --release >/tmp/k3-ktest-build-con.log 2>&1; then
+        tail -20 /tmp/k3-ktest-build-con.log >&2
+        die "build ảnh test con FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-con.log)"
     fi
     # KT-53: ảnh user bật thêm feature `user` (module U-mode chỉ có trong ảnh này).
     echo "# build ảnh test user+proc ($TARGET, release, --features ktest,user)"

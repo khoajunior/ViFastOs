@@ -9,14 +9,16 @@ use vifast_virtio::blk::{
     ReqHeader, BLK_CONFIG_BYTES, FLUSH_MASK, F_FLUSH, S_IOERR, S_OK, S_UNSUPP, T_FLUSH, T_IN,
     T_OUT,
 };
+use vifast_virtio::conchan;
+use vifast_virtio::console;
 use vifast_virtio::features::{
     feature_high, features_ok, negotiate_readback_ok, ACK, DRIVER, DRIVER_OK, FAILED, FEATURES_OK,
     F_VERSION_1,
 };
 use vifast_virtio::pci::{
     bar_probe, find_blk_function, first_conflict, is_virtio_blk, parse_caps, range_overlaps,
-    resolve_cap, BarKind, CapType, PciCfg, PciError, CFG_BAR0, CFG_CAP_PTR, CFG_COMMAND,
-    CFG_DEVICE_ID, CFG_STATUS, CFG_VENDOR_ID, COMMAND_BUS_MASTER, COMMAND_MEMORY,
+    resolve_cap, BarKind, CapType, PciCfg, PciError, VirtioKind, CFG_BAR0, CFG_CAP_PTR,
+    CFG_COMMAND, CFG_DEVICE_ID, CFG_STATUS, CFG_VENDOR_ID, COMMAND_BUS_MASTER, COMMAND_MEMORY,
     CONFLICT_OTHER_BAR, CONFLICT_RESERVED, STATUS_CAP_LIST, VENDOR_VIRTIO, VIRTIO_BLK_MODERN,
     VIRTIO_BLK_MODERN_ONLY,
 };
@@ -440,4 +442,55 @@ fn blk_size_khac_512_bi_tu_choi() {
     );
     raw[20..24].copy_from_slice(&512u32.to_le_bytes());
     assert!(decode_config(&raw).is_some());
+}
+
+// ---------------------------------------------------------------- (D) KT-73 virtio-console
+
+#[test]
+fn console_kind_va_id_thiet_bi() {
+    // Cùng một hàm quyết định cho cả hai thiết bị ⇒ thêm console không nhân đôi đường quét.
+    assert!(VirtioKind::Console.matches(VENDOR_VIRTIO, 0x1003));
+    assert!(VirtioKind::Console.matches(VENDOR_VIRTIO, 0x1043));
+    assert!(!VirtioKind::Console.matches(VENDOR_VIRTIO, 0x1001));
+    assert!(!VirtioKind::Console.matches(0x1234, 0x1003));
+    assert!(VirtioKind::Blk.matches(VENDOR_VIRTIO, 0x1001));
+    assert!(!VirtioKind::Blk.matches(VENDOR_VIRTIO, 0x1003));
+    assert_eq!(VirtioKind::Blk.name(), "blk");
+    assert_eq!(VirtioKind::Console.name(), "console");
+    assert_eq!(console::negotiated_features(u64::MAX), 1u64 << 32);
+    assert!(!console::multiport_negotiated(
+        console::negotiated_features(u64::MAX)
+    ));
+    assert_eq!(console::queue_index(0, false, 0), Some(console::Q_RX));
+    assert_eq!(console::queue_index(0, true, 0), Some(console::Q_TX));
+    // D2-110B: port > 0 **không** có chỉ số queue khi chưa đàm phán MULTIPORT.
+    assert_eq!(console::queue_index(1, true, 0), None);
+    assert_eq!(console::queue_index(1, true, 1 << 1), Some(5));
+    assert_eq!(console::ConsoleError::MultiPort.name(), "MultiPort");
+    assert_eq!(console::rx_outcome(0, 24), Err(console::ConsoleError::Busy));
+    // §2.6.8: tx **không** có buffer device-writable ⇒ `used->len` không mang nghĩa số byte đã
+    // nhận; QEMU ghi 0. Chỉ cần không vượt số byte driver đã đưa (bằng chứng phân phối ở host).
+    assert!(console::tx_used_len_sane(0, 24));
+    assert!(console::tx_used_len_sane(24, 24));
+    assert!(!console::tx_used_len_sane(25, 24));
+}
+
+#[test]
+fn conchan_codec_byte_qua_slot_ring() {
+    let data = b"help\necho shell-that\n";
+    let mut got = Vec::new();
+    let mut index = 0usize;
+    while index < data.len() {
+        let end = (index + conchan::CHUNK_BYTES).min(data.len());
+        let (words, count) = conchan::pack(&data[index..end]);
+        assert_eq!(count, end - index);
+        let mut out = [0u8; conchan::CHUNK_BYTES];
+        let n = conchan::unpack(&words, &mut out);
+        assert_eq!(n, count);
+        got.extend_from_slice(&out[..n]);
+        index = end;
+    }
+    assert_eq!(got, data, "byte qua slot phải đúng thứ tự, không mất");
+    assert_eq!(conchan::channel_bytes(), 768);
+    assert_eq!(conchan::chunks_for(data.len()), data.len().div_ceil(24));
 }

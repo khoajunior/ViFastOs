@@ -20,6 +20,9 @@ user = ["ktest"]
 # PCIe (2 MiB) — nếu map trong ảnh `ktest` thì TAP 35 đỏ (`AlreadyMapped`). Vì vậy driver nằm ở
 # ảnh riêng; ảnh sản phẩm **không** có driver (KT-73 sẽ mở).
 vblk = ["ktest"]
+# KT-73: PCI (dùng lại của KT-72) + virtio-console 2 queue — chỉ ảnh `ktest-con`. Ảnh sản phẩm
+# **không** bật (chưa có người nhận U-mode — xem `docs/k6-console.md` §6, `BLOCKED` có `file:line`).
+vcon = ["ktest"]
 
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }
@@ -34,3 +37,6 @@ vifast-core = { path = "../vifast-core" }
 # `forbid(unsafe_code)`, test host đầy đủ (`v2/lib/vifast-virtio/tests/logic.rs`); crate arch chỉ
 # còn phần chạm thanh ghi.
 vifast-virtio = { path = "../../lib/vifast-virtio" }
+# KT-73: ring 1P/1C của KT-69 (header/slot/magic) dùng làm kênh byte UART → U-mode; kernel cài
+# `Mem` bằng physmap (`uart_console::PhysMem`). Crate `no_std`, không unsafe.
+vifast-ring = { path = "../../lib/vifast-ring" }

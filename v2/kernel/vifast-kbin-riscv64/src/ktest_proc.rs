@@ -13,7 +13,8 @@
 //!    (W^X, guard hở) từ Untyped U2 của pha demo.
 //! 2. `procsrv recv fault exit` — con `Exit(42)`; core đưa fault `Exit{42}` vào `fault_ep`;
 //!    procsrv `NBRecv` rồi kernel đọc `Tcb.last_fault` (D2-25/QD §1 Q-A), TCB con `Inactive`.
-//! 3. `shell help echo` — shell U-mode nhận dòng qua message `LINE` và in `# shell: help cmds=6`.
+//! 3. `shell help echo` — **KT-73**: shell U-mode đọc **byte** từ ring UART (ngắt RX) và in
+//!    `# shell: help cmds=6` (không còn message `LINE` do kernel cắm sẵn).
 //! 4. `shell ps tu core` — kernel đọc `Machine` khi `PS_REQ`, shell định dạng/in; TAP so từng
 //!    dòng `pid=… state=…` với snapshot (không bảng tĩnh).
 //! 5. `shell wait ma thoat` — giao thức procsrv `wait(pid)` trả `code=42`.
@@ -251,6 +252,27 @@ pub extern "C" fn rust_main() -> ! {
             }
         }
         let _ = writeln!(w, " ok={}", u8::from(exit_kind_ok));
+    }
+    // KT-73: **PLIC + UART RX IRQ** cho đường "bàn phím → ring → shell". `plic::init` probe
+    // `ndev` từ register, đặt threshold/priority/enable cho context của hart này; cổng external
+    // chỉ mở trong từng cửa sổ bơm byte (`uart_console::inject_loopback`), không mở thường trực.
+    let plic = vifast_plat_riscv64::plic::init();
+    {
+        let mut w = PlatformWriter(&PLATFORM);
+        let _ = writeln!(
+            w,
+            "# proc plic: base=0x{:x} ndev={} hart={} ctx={} threshold={} priority_uart={} \
+             enable_ctx={} enable_mmode={} claim_idle={} const:uart_irq=10",
+            plic.base,
+            plic.ndev,
+            plic.hart,
+            plic.context,
+            plic.threshold,
+            plic.priority_uart,
+            plic.enable_ctx as u8,
+            plic.enable_mmode as u8,
+            plic.claim_idle
+        );
     }
     // Demo procsrv/shell/con (TAP 1..7) rồi continuation fault/wx (TAP 8..10, PANIC fatal).
     proc_demo::run(

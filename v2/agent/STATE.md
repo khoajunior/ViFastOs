@@ -1,65 +1,38 @@
-# STATE — ViFastOs v2 (vòng 1)
+# STATE — ViFastOs v2 (vòng đầu)
 
 Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để nén ngữ cảnh bất cứ lúc nào).
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`f2edba6a`** (nhánh `main`; cây OS không chạm `viscript/`, `crates/`, `review/`,
-                `.agents/`, `out-b.log`). **KT-72 DONE phần cài + đo**, chờ reviewer verdict trước
-                commit `[KT-72]`. Danh sách tệp + log: `JOURNAL/kt72-journal.md`; tài liệu
-                `docs/k6-virtio-blk.md` (mới), `docs/k3b-core.md` §20.
-BUILD_ID      : ảnh **sản phẩm `.text` không đổi** — FNV-1a 64 **`02ed5a1810ba59ce`, text=49854**
-                (trùng KT-71/70; ELF sha256 `2e9550bd…` đổi chỉ vì metadata build, section sizes y
-                hệt: `.text=49854 .rodata=14424 .data=7824 .bss=192360`, `data+bss=200184`). Ảnh
-                test `.data+.bss`: ktest **242840** (không đổi), guard **2680**, user **202832**,
-                proc **206640**, **ktest-vblk 10976** (mới) — trần **262144**; `size_of::<Machine>()
-                = 188872 B` ≤ pin **196608 B** (không thêm field core).
-Task          : **KT-72 (K6 — virtio-blk THẬT trên QEMU)** — DONE phần cài + đo (chờ reviewer).
-                (1) **PCI ECAM** (`0x3000_0000`, chọn thay legacy I/O port vì RISC-V không có
-                `in/out`): quét bus 0, tìm `0x1af4:0x1001`, **firmware không enumerate ⇒ driver tự
-                đo cỡ BAR** (ghi `0xffff_ffff` hai dword), **kiểm chồng lấn** (BAR function khác +
-                vùng nền tảng + trang đã map) rồi mới **gán** BAR vào `0x4000_0000`, đọc lại
-                **che 4 bit thuộc tính**, bật `MEMORY|BUS_MASTER`, parse 4 capability;
-                (2) **virtqueue split** trong một trang 4 KiB căn 4096 (`.bss`, identity map nên
-                `VA == PA`, TAP kiểm `walk_sw`), đàm phán **`VIRTIO_F_VERSION_1`** (bit 32) +
-                **`VIRTIO_BLK_F_FLUSH`** (bit 9, chỉ khi thiết bị có ⇒ `driver_features=0x100000200`,
-                `flush()` từ chối nếu chưa đàm phán), `FEATURES_OK`/`DRIVER_OK` đọc lại, queue 8
-                (`queue_max ≥ 3`, `used` lấy offset theo `queue_size` thật), notify + poll `used`,
-                **kiểm `used->id` = head**; (3) **`impl BlockDev`** mới cho virtio (`read`/`write`/`flush`
-                thật) — **không sửa** `vifast-fs`/`vifast-vfs`; (4) **FS thật trên đĩa virtio**:
-                format → mount → ghi `/kt72.txt` (69 B) → fsck `found=0` → **drop + mount lại** đọc
-                so byte → đọc thô LBA 0/1 (`lba0_zero=1`, `lba1_magic=VF04`); (5) **TAP 6** trên
-                ảnh riêng `ktest-vblk` (task cho phép tách ảnh: `ktest` đã **242840** trên trần **262144**) + ca âm
-                **hai lớp** (`OutOfRange` không phát request; ép phát ⇒ thiết bị `IOERR`); (6)
-                bằng chứng **độc lập phía host**: `vifast-fsutil fsck/ls/get` trên ảnh đĩa QEMU.
-Bước          : 9/9 — baseline gate **PASS 703/96** (`kt72-baseline-gate.log`) → red host
-                (`kt72-red-host.log`) → crate logic thuần + test host (15) → PCI/driver → boot thật
-                đỏ **2 lần** (CapLoop; BarUnassigned stage=readback) → xanh 6 TAP
-                (`kt72-green-qemu-ktest.log`) → mutation host + QEMU → matrix **15/15** → gate +
-                clippy 6 ảnh → conformance → soak **0/1000** → docs + journal + verify số
-                (**D2-110A: quét mọi số theo từng tài liệu, fail=0**) → tự rà D2-102 (fs_err in từ hàm ánh xạ, `const:passes=2`) + cache
-                `notify_off` + `config_generation` fail-closed → chạy **lại** matrix/clippy/
-                verify → báo lead spawn reviewer, **đóng băng cây** → reviewer **DRIFT**: vá CAO-1
-                (đàm phán `VIRTIO_BLK_F_FLUSH`), CAO-2 (kiểm chồng lấn BAR **trước** khi ghi,
-                `PciError::BarConflict`), medium (set_desc bool, `queue_max ≥ 3`, `used` theo
-                `qsize`), verify D2-110A quét mọi số theo từng tài liệu, D2-102/106 đầu vào+công
-                thức → chạy **lại** gate (718/99) + matrix 15/15 + conformance + clippy 6 ảnh →
-                đóng băng lại, chờ verdict vòng 2.
-Cổng gần nhất : host **15 test** mới `vifast-virtio` PASS; QEMU ảnh `ktest-vblk` **6/6** TAP
-                (`kt72-green-qemu-ktest.log`); matrix **15/15** = 12 boot cũ + 3 vblk
-                (`kt72-ktest-matrix.log`); conformance **61/61 + 5/5** (`kt72-conformance.log`);
-                clippy host + kernel **6 ảnh `EXIT=0`** (`kt72-clippy-kernel.log`); `gate --fast`
-                **PASS 718 test/99 suite**, L1 cổng **900 ms** (`kt72-gate.log` +
-                `kt72-gate-summary.log`); L1 thuần **897/885/1107 ms** (`kt72-l1-thuan.log`); soak
-                **0/1000** (`kt72-soak.log`); ảnh `ktest` 242840, `ktest-vblk` 10976 ≤ 262144.
-Nợ đang mở    : (1) virtio-blk **poll chưa ngắt**, queue depth 1; (2) **flush** mới chứng minh ở
-                mức thiết bị (request thật + status OK + host đọc lại được) — bền qua reboot thuộc
-                KT-75; (3) bộ đếm `id_mismatch`/`timeouts` **chưa có ca âm** ⇒ ghi "chưa chứng
-                minh" (D2-108B), `errors` **có** ca dương (ca ép + mutation); (4) PCI một bus/một
-                function, BAR gán cố định, map leaf 2 MiB — chưa phải enumerator tổng quát;
-                (5) driver **chưa vào ảnh sản phẩm** (feature `vblk` chỉ ảnh test) → KT-73;
-                (6) ảnh `ktest-vblk` chưa in `# conf image:` — thêm khi KT-73/75 cần neo ảnh.
-                Nợ cũ K3.5/K3b/KT-67a/KT-69/KT-70/KT-71 giữ nguyên (xem các mục dưới).
+HEAD          : **`885e72ba`** (nhánh `main`) + cây KT-73 (commit `[KT-73]` do lead thực hiện sau
+                reviewer). Cây OS không chạm `viscript/`, `crates/`, `review/`, `.agents/`,
+                `out-b.log`, `spec/`. **KT-73 DONE phần cài + đo**; freeze lần ba sau khi vá
+                D2-112 + các mục D2..D9 của reviewer.
+BUILD_ID      : ảnh **sản phẩm** `.text` **trùng** KT-71/72 — băm FNV-1a **`02ed5a1810ba59ce`**;
+                **ELF sha256 đổi so KT-72** (`2e9550bdb6b49483…` → `545cfb64…`) — **không xác
+                định được** phần đổi từ artifact trong repo (ELF KT-72 không có trong repo;
+                `.rodata`/`.data` ngoài digest `.text`) ⇒ **không suy đoán nguyên nhân**; soak
+                chạy đúng bản `sha256=545cfb64…`. Ngưỡng: trần không đổi, pin `Machine` — số
+                nguyên văn trong mục KT-73 cuối tệp. Mọi số đo của task nằm trong **khối trích
+                nguyên văn** ở mục KT-73 (D2-112) — **không** có số đo viết tay ngoài khối.
+Task          : **KT-73 (K6 — virtio-console + UART IRQ → user)** — DONE phần cài + đo (chờ
+                reviewer kiểm delta). Tóm tắt: (a) **UART RX IRQ → ring → U-mode** — nhánh RX
+                trong `plic::on_external_interrupt` (chỉ khi `IER.RX` bật; TX của KT-48 giữ
+                nguyên), drain `RBR` có trần, codec byte trên slot bốn word của ring KT-69, map
+                Frame vào VSpace U-mode; cửa sổ ngắt hẹp `rx_begin`/`rx_end` + vét cạn `RBR`;
+                (b) **shell đọc bàn phím thật** — bỏ message `LINE`, shell đọc byte từ ring, TAP
+                `shell help echo` phụ thuộc `ok_uart_path`; (c) **virtio-console** qua PCI của
+                KT-72 (`VirtioKind`), feature chỉ `VIRTIO_F_VERSION_1`, hai queue; (d) **ca âm** —
+                `read_try` trả `Busy`, ring đầy mã `NotEnoughMemory`; (e) **mutation** — tắt
+                đường bơm ⇒ TAP đỏ; (f) **BLOCKED** console trong ảnh sản phẩm (thiếu người nhận,
+                không phải trần).
+Nguồn số     : `v2/docs/k6-console.md` (D2-112) + `JOURNAL/kt73-*`. Script kiểm
+                `JOURNAL/kt73-verify-numbers.sh` (tự phá: `kt73-verify-selfbreak.sh`).
+Cổng gần nhất : gate **PASS**, matrix **PASS**, conformance **PASS**, soak **PASS** — số nguyên
+                văn trong mục KT-73 cuối tệp.
+Nợ / BLOCKED  : console trong ảnh sản phẩm (thiếu U-mode/shell — `BLOCKED.md`); nguồn byte ca
+                kiểm là loopback (không phải bàn phím người); console poll chưa ngắt; chưa có ca
+                IRQ storm thật; coverage tích hợp mới một ảnh.
 ```
 ```
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
@@ -3136,3 +3109,80 @@ KT-75; `id_mismatch`/`timeouts` **chưa có ca âm** (D2-108B) — **TAP 6 khôn
 PCI một bus/một function, BAR gán cố định, kiểm chồng lấn **chưa đọc DT/`ranges`** (nợ KT-73);
 driver **chưa vào ảnh sản phẩm**; **coverage tích hợp không có** (driver + 70 TAP / U-mode /
 conformance); `ktest-vblk` chưa in `# conf image:`.
+
+
+## KT-73 — K6: virtio-console + UART IRQ → user (Agent 2)
+
+Chi tiết + lý do: [`docs/k6-console.md`](../docs/k6-console.md). Quy ước D2-112: **mọi số đo nằm
+trong khối trích nguyên văn** (mỗi dòng đúng một tệp log); ngoài khối chỉ có định danh. Script:
+`JOURNAL/kt73-verify-numbers.sh`; tự phá: `JOURNAL/kt73-verify-selfbreak.sh` (+ log).
+
+### Kết quả đo (nguyên văn)
+
+```text scope=kt73-qemu-ktest-con.log
+# con uart: irqs=31 bytes=30 const:payload=30 chunks=30 const:chunks_want=2 head=30 const:head0=0 tail=0 used=30 seq=30 empty_polls=1 empty_bytes=0 drops=0 timeouts=0 inject_ok=1 inject_ticks=64 rx_begin=1 rx_end=1
+# con u: map=1 exit=0 match=1 head=30 tail=30 used=0 captured=48 prefix="# con: u up.# con: u bytes=30 sum=2363 first=99 "
+# con pci: vendor=0x1af4 device=0x1003 bus=0 dev=1 func=0 bar=4 kind=mem64 size=0x4000 assigned=0x40200000 readback=0x40200000 command=0x6 ecam=0x30008000 other_bars=0 reserved=5 overlap=1 caps_in_bar=1 ecam_id=1 bar_id=1 const:assign=0x40200000
+# con queue: num_queues=64 rx_max=128 rx_size=8 rx_notify_off=0 tx_max=128 tx_size=8 tx_notify_off=1 notify_mul=4 device_features=0x10130000006 driver_features=0x100000000 const:version1=1 multiport=0 status=0xf generations=0/0 rx_buf=0x80253400 tx_buf=0x80253440 rx_desc=0x80253000 tx_desc=0x80253200
+# con tx: one=Ok(14) two=Ok(10) writes=2 write_bytes=24 const:tx_want=24 notifies=4 last_tx_used_len=0 const:tx_len_note=0..=24 driver_status=0xf
+# con rx: got=14 const:want=14 ok=1 busy=0 errors=0 timeouts=0 id_mismatch=0 last_rx_used_len=14 armed=1 head=2/2
+# con neg: busy=1 const:busy_code=14 read_try=Busy ring_slots_ok=32 const:slots_want=32 ring_bytes_ok=768 const:bytes_want=768 drops=2 const:drops_want=2 full_code=9 const:full_want=9 consumed=768 order_ok=1 head=62 tail=62 used=0 timeouts=0
+PANIC: KT-73 con xong (5 TAP, 0 fail)
+```
+
+```text scope=kt73-qemu-ktest-proc.log
+# con uart: irqs=45 bytes=45 const:script_bytes=45 lines=6 inject_ok=1 drops=0 timeouts=0 head=45 tail=45 used=0 empty_polls=0 const:va=0x43000000 ring_ok=1
+ok 3 - shell help echo
+```
+
+```text scope=kt73-ktest-matrix.log
+# image=ktest path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=712968 data+bss=242840 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# image=ktest-guard path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=54072 data+bss=2680 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# image=ktest-user path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=598064 data+bss=202832 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# image=ktest-proc path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-proc file=435872 data+bss=206736 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# image=ktest-vblk path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-vblk file=132104 data+bss=10976 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# image=ktest-con path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-con file=352240 data+bss=214152 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# KTEST: 18/18 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con)
+# con host: tx_file=/tmp/k3-ktest/con-smp1-boot1.out bytes=24 ok=1
+```
+
+```text scope=kt73-gate-summary.log
+TESTS=726 / SUITES=99
+```
+
+```text scope=kt73-conformance.log
+ok - trace-compare: 61/61 dòng khớp, 5/5 ca (22:16 23:19 24:7 25:7 26:12), build=3cc6bf36f3ac98b8
+```
+
+```text scope=kt73-soak.log
+# image=product path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 file=188552 data+bss=200184 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# soak: 0/1000 lỗi (PASS)
+```
+
+```text scope=kt73-product-digest.log
+build=02ed5a1810ba59ce text=49854
+```
+
+```text scope=kt73-product-sha.log
+545cfb64ff7067e76500b56c90234a5bc33aff7ad793ea6f9a9da127368c2bea  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+```
+
+### Ngưỡng (không nới)
+
+Hai ngưỡng của KT-73: **trần ảnh** (nguyên văn `budget=` trong khối ảnh ở trên — không đổi) và
+**pin `size_of::<Machine>()`**:
+
+```text scope=kt73-product-boot.log
+# core: product addr=0x80213000 bytes=188872 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
+```
+
+### Nợ / BLOCKED
+
+- **Console trong ảnh sản phẩm: BLOCKED** — ảnh sản phẩm không có U-mode/shell (`main.rs:360-361`,
+  `lib.rs:95-96`, `lib.rs:100-101`, `lib.rs:110-111`); trần không phải lý do. Hệ quả kiến trúc cho
+  KT-76: K6 "tương đương v1" sẽ **không** có shell trên ảnh sản phẩm nếu KT-74..75 không đưa U-mode
+  vào ảnh sản phẩm.
+- Nguồn byte ca kiểm = **loopback** (đường ngắt/thanh ghi/ring thật, không phải bàn phím người);
+  console **poll** chưa dùng ngắt; chưa có ca **IRQ storm** thật; coverage tích hợp mới **một** ảnh.
+- `timeouts`/`id_mismatch` của console **chưa có ca âm** ⇒ **không** dùng làm bằng chứng (giữ trong
+  `ok` như lưới hồi quy) — bảng ở `docs/k6-console.md` §5.2.

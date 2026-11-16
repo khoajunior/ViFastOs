@@ -84,3 +84,8 @@ ktest-user 35 35
 # Runner cấp `-drive` 4 MiB (8192 sector) **mới** mỗi boot ⇒ matrix thành **5 ảnh × smp 1/2/4**.
 ktest-vblk 6 6
 ktest-proc 10 10
+# **KT-73** (K6, console): ảnh **`ktest-con`** thứ sáu — UART RX IRQ thật (loopback 16550) → ring
+# KT-69 → U-mode đọc byte; virtio-console `0x1af4:0x1003` hai queue (rx 0 / tx 1) qua PCI ECAM của
+# KT-72; ghi/đọc byte (bằng chứng host: tệp `.out` của chardev có đúng byte guest ghi); ca âm
+# "không dữ liệu" (`Busy = 14`) và "ring đầy" (mã `9`, không ghi đè, đọc lại đúng thứ tự).
+ktest-con 5 5

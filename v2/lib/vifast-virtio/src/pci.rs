@@ -128,9 +128,51 @@ impl Bar {
     }
 }
 
+/// Loại thiết bị virtio mà driver K6 tìm (KT-72 blk; KT-73 console).
+///
+/// Một enum thay cho hai hàm quét riêng: driver PCI quét **một** vòng bus/device/function và so
+/// khớp theo `(vendor, device)` — thêm thiết bị thứ hai **không** nhân đôi code ECAM/BAR
+/// (D2-110A tinh thần "một chỗ quyết định").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VirtioKind {
+    /// `virtio-blk` (0x1001/0x1042).
+    Blk,
+    /// `virtio-console`/`virtio-serial` (0x1003/0x1043).
+    Console,
+}
+
+impl VirtioKind {
+    /// Tên để in evidence.
+    pub const fn name(self) -> &'static str {
+        match self {
+            VirtioKind::Blk => "blk",
+            VirtioKind::Console => "console",
+        }
+    }
+
+    /// `true` ⇔ `(vendor, device)` là thiết bị của loại này.
+    pub const fn matches(self, vendor: u16, device: u16) -> bool {
+        if vendor != VENDOR_VIRTIO {
+            return false;
+        }
+        match self {
+            VirtioKind::Blk => device == VIRTIO_BLK_MODERN || device == VIRTIO_BLK_MODERN_ONLY,
+            VirtioKind::Console => {
+                device == crate::console::VIRTIO_CONSOLE_MODERN
+                    || device == crate::console::VIRTIO_CONSOLE_MODERN_ONLY
+            }
+        }
+    }
+}
+
 /// `true` ⇔ `(vendor_id, device_id)` là virtio-blk mà KT-72 chấp nhận (0x1001/0x1042).
 pub const fn is_virtio_blk(vendor: u16, device: u16) -> bool {
-    vendor == VENDOR_VIRTIO && (device == VIRTIO_BLK_MODERN || device == VIRTIO_BLK_MODERN_ONLY)
+    VirtioKind::Blk.matches(vendor, device)
+}
+
+/// `true` ⇔ `(vendor_id, device_id)` là virtio-console mà KT-73 chấp nhận (0x1003/0x1043).
+pub const fn is_virtio_console(vendor: u16, device: u16) -> bool {
+    VirtioKind::Console.matches(vendor, device)
 }
 
 /// Đọc `(vendor_id, device_id)` từ config space.
@@ -138,15 +180,20 @@ pub fn read_ids(cfg: &impl PciCfg) -> (u16, u16) {
     (cfg.read16(CFG_VENDOR_ID), cfg.read16(CFG_DEVICE_ID))
 }
 
-/// `Some(())` ⇔ function này là virtio-blk. Chỉ trả "khớp/không khớp" — id đã đọc ở
+/// `Some(())` ⇔ function này là thiết bị `kind`. Chỉ trả "khớp/không khớp" — id đã đọc ở
 /// [`read_ids`] khi cần in evidence.
-pub fn find_blk_function(cfg: &impl PciCfg) -> Option<()> {
+pub fn find_function(cfg: &impl PciCfg, kind: VirtioKind) -> Option<()> {
     let (vendor, device) = read_ids(cfg);
-    if is_virtio_blk(vendor, device) {
+    if kind.matches(vendor, device) {
         Some(())
     } else {
         None
     }
+}
+
+/// `Some(())` ⇔ function này là virtio-blk (giữ API KT-72 cho `virtio_blk`/test cũ).
+pub fn find_blk_function(cfg: &impl PciCfg) -> Option<()> {
+    find_function(cfg, VirtioKind::Blk)
 }
 
 /// Hai khoảng `[a, a+alen)` và `[b, b+blen)` có chồng lấn không (khoảng rỗng ⇒ không).

@@ -36,6 +36,8 @@ fn main() {
     println!("cargo:rerun-if-changed=init/capa_client_user.rs");
     println!("cargo:rerun-if-changed=init/ring_server_user.rs");
     println!("cargo:rerun-if-changed=init/ring_client_user.rs");
+    // KT-73: consumer ring UART → U-mode (ảnh `ktest-con`).
+    println!("cargo:rerun-if-changed=init/con_client_user.rs");
     println!("cargo:rerun-if-changed=init/pager_common.rs");
     println!("cargo:rerun-if-changed=init/pager_client_common.rs");
     println!("cargo:rerun-if-changed=init/pager_server_user.rs");
@@ -73,6 +75,13 @@ fn main() {
     let fs_lib = build_rlib(dir, "vifast_fs", "../../lib/vifast-fs/src/lib.rs", &[]);
     let ring_lib = build_rlib(dir, "vifast_ring", "../../lib/vifast-ring/src/lib.rs", &[]);
     let idl_lib = build_rlib(dir, "vifast_idl", "../../lib/vifast-idl/src/lib.rs", &[]);
+    // KT-73: codec byte `conchan` + hằng console — **cùng** crate kernel dùng (`vifast-virtio`).
+    let virtio_lib = build_rlib(
+        dir,
+        "vifast_virtio",
+        "../../lib/vifast-virtio/src/lib.rs",
+        &[],
+    );
     // KT-70: pager/page-cache — **dùng lại** `vifast_fs::BlockDev` + bảng lỗi `vifast-abi`.
     let vfs_lib = build_rlib(
         dir,
@@ -94,7 +103,13 @@ fn main() {
     ];
     build_user_elf(dir, "init_user.rs", "init.elf", &[]);
     build_user_elf(dir, "procsrv_user.rs", "procsrv.elf", &shim);
-    build_user_elf(dir, "shell_user.rs", "shell.elf", &shim);
+    // KT-73: shell đọc **byte thật** từ ring UART → cần `vifast_ring` + codec `conchan`.
+    let shim_shell = [
+        ("vifast_user_abi", user_lib.as_path()),
+        ("vifast_ring", ring_lib.as_path()),
+        ("vifast_virtio", virtio_lib.as_path()),
+    ];
+    build_user_elf(dir, "shell_user.rs", "shell.elf", &shim_shell);
     build_user_elf(dir, "child_user.rs", "child.elf", &shim);
     // KT-67a: chương trình U-mode invocation/memsrv (D2-97).
     build_user_elf(dir, "inv_user.rs", "inv.elf", &shim);
@@ -108,6 +123,13 @@ fn main() {
     // chuyển qua cap; cả hai dùng stub IDL sinh từ `.vidl`.
     build_user_elf(dir, "ring_server_user.rs", "ring_server.elf", &shim_all);
     build_user_elf(dir, "ring_client_user.rs", "ring_client.elf", &shim_all);
+    // KT-73: **consumer U-mode** của kênh UART → ring (đọc byte thật, không message cắm sẵn).
+    let shim_con = [
+        ("vifast_user_abi", user_lib.as_path()),
+        ("vifast_ring", ring_lib.as_path()),
+        ("vifast_virtio", virtio_lib.as_path()),
+    ];
+    build_user_elf(dir, "con_client_user.rs", "con_client.elf", &shim_con);
     // KT-70: **ba tiến trình** pager — server (page cache + LRU) và hai client.
     build_user_elf(dir, "pager_server_user.rs", "pager_server.elf", &shim_all);
     build_user_elf(

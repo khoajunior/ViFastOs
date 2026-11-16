@@ -22,8 +22,8 @@
 use core::ptr::{read_volatile, write_volatile};
 
 use vifast_virtio::pci::{
-    bar_probe, first_conflict, is_virtio_blk, parse_caps, read_ids, BarKind, PciCfg, PciError,
-    VirtioCaps, BAR_COUNT, CFG_BAR0, CFG_COMMAND, CFG_VENDOR_ID, COMMAND_BUS_MASTER,
+    bar_probe, first_conflict, parse_caps, read_ids, BarKind, PciCfg, PciError, VirtioCaps,
+    VirtioKind, BAR_COUNT, CFG_BAR0, CFG_COMMAND, CFG_VENDOR_ID, COMMAND_BUS_MASTER,
     COMMAND_MEMORY,
 };
 
@@ -43,8 +43,21 @@ pub const PCI_MMIO_WINDOW_BASE: u64 = 0x4000_0000;
 pub const PCI_MMIO_WINDOW_BYTES: u64 = 1 << 30;
 /// Cỡ leaf 2 MiB dùng để map ECAM + BAR (đủ cho một BAR modern 0x4000).
 pub const PCI_MAP_LEAF_BYTES: u64 = 2 << 20;
-/// Địa chỉ driver **gán** cho BAR modern (đầu cửa sổ, căn 2 MiB).
+/// Địa chỉ driver **gán** cho BAR modern của virtio-blk (đầu cửa sổ, căn 2 MiB) — KT-72.
 pub const BAR_ASSIGN_BASE: u64 = PCI_MMIO_WINDOW_BASE;
+/// Địa chỉ driver **gán** cho BAR modern của virtio-console — KT-73: **khác** base của blk để hai
+/// driver (nếu cùng có mặt) không tranh một trang; vẫn trong cửa sổ PCIe và qua `first_conflict`.
+pub const BAR_ASSIGN_BASE_CONSOLE: u64 = PCI_MMIO_WINDOW_BASE + PCI_MAP_LEAF_BYTES;
+/// Số byte cửa sổ PCIe driver **identity-map** cho BAR của mình (`mmu::map_mmio`): một leaf 2 MiB
+/// cho blk; console gán BAR ở leaf **thứ hai** nên bản `vcon` map/miễn trừ hai leaf. Hai hằng phải
+/// khớp nhau, nếu lệch thì `mmu_range_conflict` báo `BarConflict` (fail-closed) — đúng ca KT-73
+/// đã bắt được trước khi chạy.
+pub const PCI_DRIVER_WINDOW_BYTES: u64 = if cfg!(feature = "vcon") {
+    2 * PCI_MAP_LEAF_BYTES
+} else {
+    PCI_MAP_LEAF_BYTES
+};
+
 /// Số bus quét (chỉ bus 0 — `virt` không có cầu nối sau).
 pub const SCAN_BUSES: u8 = 1;
 /// Số device tối đa trên một bus.
@@ -184,7 +197,7 @@ fn mmu_range_conflict(assigned: u64, size: u64) -> bool {
         if walk.valid {
             let leaf_bytes = 4096u64 << (9 * walk.level as u32);
             let own_window = walk.leaf
-                && (PCI_MMIO_WINDOW_BASE..PCI_MMIO_WINDOW_BASE + PCI_MAP_LEAF_BYTES)
+                && (PCI_MMIO_WINDOW_BASE..PCI_MMIO_WINDOW_BASE + PCI_DRIVER_WINDOW_BYTES)
                     .contains(&page)
                 && walk.phys <= page
                 && page - walk.phys < leaf_bytes;
@@ -269,10 +282,19 @@ impl PciFail {
     }
 }
 
-/// Quét bus/device, tìm virtio-blk, gán BAR và đọc capability.
+/// Quét bus/device, tìm **virtio-blk**, gán BAR và đọc capability (KT-72; giữ API cũ).
 ///
 /// Trả lỗi [`PciFail`] (không PANIC) để ảnh test in được lý do đo được; TAP sẽ đỏ.
 pub fn init() -> Result<PciReport, PciFail> {
+    init_for(VirtioKind::Blk)
+}
+
+/// Quét bus/device cho **loại thiết bị** `kind`, gán BAR và đọc capability.
+///
+/// Một đường quét duy nhất cho mọi thiết bị virtio (KT-72 blk, KT-73 console): không nhân đôi
+/// logic ECAM/BAR/cap (D2-110A). Chỉ khác **địa chỉ gán BAR** (mỗi loại một trang 2 MiB trong
+/// cửa sổ PCIe) — vẫn qua `first_conflict` + kiểm leaf page table như nhau.
+pub fn init_for(kind: VirtioKind) -> Result<PciReport, PciFail> {
     let mut functions_seen = 0u32;
     let mut found: Option<(u8, u8, u8)> = None;
     for bus in 0..SCAN_BUSES {
@@ -284,7 +306,7 @@ pub fn init() -> Result<PciReport, PciFail> {
                 }
                 functions_seen += 1;
                 let (vendor, device) = read_ids(&ecam);
-                if is_virtio_blk(vendor, device) {
+                if kind.matches(vendor, device) {
                     found = Some((bus, dev, func));
                     break;
                 }
@@ -352,8 +374,12 @@ pub fn init() -> Result<PciReport, PciFail> {
     if !cap_ranges_ok {
         return Err(PciFail::at(PciError::CapMissing, "caprange"));
     }
-    // Gán BAR: địa chỉ đầu cửa sổ MMIO (căn 2 MiB > mọi cỡ BAR hợp lệ ở đây).
-    let assigned = BAR_ASSIGN_BASE;
+    // Gán BAR: một trang 2 MiB riêng cho từng loại thiết bị (blk ở đầu cửa sổ, console ở trang
+    // kế) — căn 2 MiB > mọi cỡ BAR hợp lệ ở đây.
+    let assigned = match kind {
+        VirtioKind::Blk => BAR_ASSIGN_BASE,
+        VirtioKind::Console => BAR_ASSIGN_BASE_CONSOLE,
+    };
     if assigned < PCI_MMIO_WINDOW_BASE
         || assigned + bar_size > PCI_MMIO_WINDOW_BASE + PCI_MMIO_WINDOW_BYTES
     {

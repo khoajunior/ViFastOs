@@ -13,8 +13,10 @@
 //!    kernel đọc `last_fault` rồi gửi một **message chuyển tiếp** vào `fault_ep` bằng đúng
 //!    `NBSend` — procsrv nhận bằng `NBRecv` của mình (không thêm syscall; xem
 //!    `docs/k35-procsrv.md` §2 ghi rõ đây là cầu nối của arch, nợ ABI).
-//! 3. **UART → message**: chưa có IRQ→user; kernel bơm dòng script vào `uart_ep` của shell bằng
-//!    `NBSend` (phương án tối thiểu đề bài cho phép).
+//! 3. **UART RX IRQ → ring → shell (KT-73)**: kernel bơm byte của script vào **UART thật** qua
+//!    loopback 16550 (`MCR` bit 4) trong cửa sổ ngắn; byte quay lại `RBR` sinh **ngắt RX**, handler
+//!    đẩy vào ring KT-69, **shell U-mode** đọc byte từ ring và ghép dòng. Không còn message
+//!    `LINE` do kernel cắm sẵn — đây là đường IRQ → ring → U-mode thật (nợ K3.5 đã đóng).
 //! 4. **`ps`**: kernel đọc trạng thái TCB **từ `Machine`** khi shell gửi `PS_REQ`, trả bằng
 //!    message; shell tự định dạng/in — không có bảng tĩnh nào.
 //! 5. **`kill`**: procsrv quyết định theo giao thức; kernel thi hành `Tcb.Suspend(Abort)` khi
@@ -36,7 +38,7 @@ use vifast_plat_common::trap::{TrapFrame, REG_SP};
 use vifast_plat_common::{Platform, PlatformWriter};
 use vifast_plat_riscv64::obj as aobj;
 use vifast_plat_riscv64::user::{self, LoadedInit, Stop};
-use vifast_plat_riscv64::{core_bridge, Riscv64Virt};
+use vifast_plat_riscv64::{core_bridge, uart_console, Riscv64Virt};
 
 /// ELF U-mode do `build.rs` sinh (KT-65).
 static PROCSRV_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/procsrv.elf"));
@@ -65,8 +67,8 @@ const T_CHILD: usize = 2;
 const T_VICTIM: usize = 3;
 const T_KERN: usize = 4;
 
-/// Label message (trùng hằng trong 3 chương trình user).
-const LINE: u64 = 0x601;
+/// Label message (trùng hằng trong 3 chương trình user; `LINE` của KT-65 đã bỏ — KT-73 đọc byte
+/// từ ring thay vì message dòng do kernel cắm sẵn).
 const PS_REQ: u64 = 0x602;
 const PS_REPLY: u64 = 0x603;
 const EV_FAULT: u64 = 0x502;
@@ -113,6 +115,12 @@ struct Demo {
     victim_suspended: bool,
     kill_suspend_ok: bool,
     events: usize,
+    /// Byte script đã bơm **qua UART thật** (kể cả `\n`) — đối chiếu `uart_console::stats().bytes`.
+    uart_bytes: usize,
+    /// Số dòng script đã bơm.
+    uart_lines: usize,
+    /// Mọi lần bơm đều qua loopback + ngắt RX thật + ring.
+    uart_inject_ok: bool,
     procsrv_started: bool,
     shell_started: bool,
     child_started: bool,
@@ -138,6 +146,9 @@ impl Demo {
             victim_suspended: false,
             kill_suspend_ok: false,
             events: 0,
+            uart_bytes: 0,
+            uart_lines: 0,
+            uart_inject_ok: true,
             procsrv_started: false,
             shell_started: false,
             child_started: false,
@@ -149,7 +160,11 @@ impl Demo {
 struct Rig {
     tcb: [SlotRef; 5],
     tcb_obj: [ObjId; 5],
-    ep: [ObjId; 6], // fault, proc, uart, reply, ps, events
+    /// Object của endpoint theo **đúng** cspace slot 1..8 (fault, proc, uart, reply, ps, events).
+    /// KT-73: đường `LINE` qua `uart_ep` đã bỏ (shell đọc byte từ ring) ⇒ driver demo không đọc
+    /// `_ep` nữa, nhưng **vẫn giữ** endpoint trong cspace để bố cục slot của chương trình U-mode
+    /// không đổi (EP_PROC/EP_REPLY/EP_PS/EP_EVENTS vẫn dùng).
+    _ep: [ObjId; 6],
     ep_slot: [SlotRef; 6],
 }
 
@@ -217,7 +232,7 @@ fn build_rig(untyped: ObjId) -> Rig {
         Rig {
             tcb,
             tcb_obj,
-            ep,
+            _ep: ep,
             ep_slot,
         }
     })
@@ -352,25 +367,22 @@ fn service(m: &mut Machine, rig: &Rig, demo: &mut Demo, script: &[([u8; 24], usi
             demo.ps_replies += 1;
         }
     }
-    // 4) UART → message cho shell (một dòng mỗi lần, giữ thứ tự; chưa có IRQ→user).
+    // 4) **KT-73** UART thật → ring → shell: bơm **một dòng** script mỗi lượt (giữ thứ tự) khi
+    // ring đang **rỗng** (shell đã tiêu thụ dòng trước), qua loopback 16550 + ngắt RX thật.
     let shell_alive = m
         .tcb_state(rig.tcb_obj[T_SHELL])
         .map(|state| state.is_live())
         .unwrap_or(false);
-    let empty = m
-        .endpoint_send_len(rig.ep[2])
-        .map(|len| len == 0)
-        .unwrap_or(false);
-    if shell_alive && empty && demo.uart_idx < script.len() {
+    let (_, _, ring_used, _) = uart_console::ring_stats();
+    if shell_alive && ring_used == 0 && demo.uart_idx < script.len() {
         let (bytes, len) = script[demo.uart_idx];
-        let mut w = [0u64; 4];
-        w[..3].copy_from_slice(&[
-            u64::from_le_bytes(bytes[0..8].try_into().unwrap()),
-            u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
-            u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
-        ]);
-        w[3] = len as u64;
-        let _ = m.nb_send(rig.tcb_obj[T_KERN], rig.ep_slot[2], msg(LINE, &w));
+        let mut line = [0u8; 25];
+        line[..len].copy_from_slice(&bytes[..len]);
+        line[len] = b'\n';
+        let (ok, _chunks, _ticks) = uart_console::inject_loopback(&line[..len + 1]);
+        demo.uart_inject_ok &= ok;
+        demo.uart_bytes += len + 1;
+        demo.uart_lines += 1;
         demo.uart_idx += 1;
     }
 }
@@ -475,9 +487,22 @@ pub fn run(
     // --- nạp 3 chương trình U-mode vào 3 VSpace thật (Untyped U2 của pha demo).
     // U2 **của object layer** cấp Frame/PageTable cho 3 VSpace; core rig dùng Untyped riêng
     // (`core_untyped`) như KT-61/KT-62.
-    let _u2 = aobj::machine()
+    let u2 = aobj::machine()
         .add_untyped(DEMO_ARENA_BASE, DEMO_ARENA_BYTES, DEMO_PA_BASE)
         .expect("KT-65: add_untyped U2");
+    // KT-73: Frame ring UART (4 KiB) từ cùng Untyped; header/layout là của `vifast_ring` (KT-69).
+    let con_ring = match uart_console::init_ring(u2) {
+        Ok(report) => report,
+        Err(stage) => {
+            let mut w = PlatformWriter(platform);
+            let _ = writeln!(
+                w,
+                "not ok 1 - procsrv/shell/con load u-mode: ring stage={stage}"
+            );
+            platform.put_str("# ktest halt\n");
+            platform.halt(1)
+        }
+    };
     let procsrv = match user::load_init_slot(PROCSRV_ELF, load_untyped, SLOT_PROCSRV) {
         Ok(loaded) => loaded,
         Err(e) => {
@@ -553,6 +578,27 @@ pub fn run(
         );
     }
 
+    // KT-73: map Frame ring UART vào VSpace **của shell** — shell đọc byte từ đây (kernel làm
+    // producer qua ngắt RX; shell không có invocation `Frame.Map` cho cap lạ nên kernel map hộ).
+    let shell_ring = uart_console::attach(shell.vspace);
+    {
+        let mut w = PlatformWriter(platform);
+        let _ = writeln!(
+            w,
+            "# proc ring: pa=0x{:x} phys=0x{:x} va=0x{:x} const:slots={} const:slot_bytes={} \
+             head={} tail={} check={} mapped_shell={} const:capacity={}",
+            con_ring.pa,
+            con_ring.phys,
+            con_ring.va,
+            con_ring.slots,
+            con_ring.slot_bytes,
+            con_ring.head,
+            con_ring.tail,
+            con_ring.check as u8,
+            shell_ring as u8,
+            vifast_virtio::conchan::channel_bytes()
+        );
+    }
     // --- rig core: cspace dùng chung + 6 endpoint + 5 TCB + 5 SC + SchedControl.
     let rig = build_rig(core_untyped);
     let (lines, n_lines) = build_script(&rig);
@@ -703,13 +749,50 @@ pub fn run(
         let _ = writeln!(w, "not ok 2 - procsrv recv fault exit: core/chuoi sai");
         ok_all = false;
     }
-    // 17 — help + echo do shell U-mode in.
+    // 17 — help + echo do shell U-mode in, **và** byte tới shell qua đúng đường UART thật:
+    // ngắt RX (PLIC) → handler → ring KT-69 → U-mode đọc. Điều kiện đo được: số byte vào ring
+    // bằng số byte script đã bơm, có ngắt, không rơi slot, ring đã được tiêu thụ hết.
+    let con_stats = uart_console::stats();
+    let (ring_head, ring_tail, ring_used, _) = uart_console::ring_stats();
+    let ok_uart_path = demo.uart_inject_ok
+        && demo.uart_bytes > 0
+        && con_stats.irqs > 0
+        && con_stats.bytes == demo.uart_bytes as u64
+        && con_stats.drops == 0
+        && con_stats.timeouts == 0
+        && ring_used == 0
+        && ring_tail == ring_head;
+    {
+        let mut w = PlatformWriter(platform);
+        let _ = writeln!(
+            w,
+            "# con uart: irqs={} bytes={} const:script_bytes={} lines={} inject_ok={} drops={} \
+             timeouts={} head={} tail={} used={} empty_polls={} const:va=0x{:x} ring_ok={}",
+            con_stats.irqs,
+            con_stats.bytes,
+            demo.uart_bytes,
+            demo.uart_lines,
+            demo.uart_inject_ok as u8,
+            con_stats.drops,
+            con_stats.timeouts,
+            ring_head,
+            ring_tail,
+            ring_used,
+            con_stats.empty_polls,
+            con_ring.va,
+            uart_console::ring_check() as u8
+        );
+    }
     let ok17 = user::captured_contains(SLOT_SHELL, b"# shell: help cmds=6")
-        && user::captured_contains(SLOT_SHELL, b"# shell: echo shell-that");
+        && user::captured_contains(SLOT_SHELL, b"# shell: echo shell-that")
+        && ok_uart_path;
     if ok17 {
         let _ = writeln!(w, "ok 3 - shell help echo");
     } else {
-        let _ = writeln!(w, "not ok 3 - shell help echo: thieu output U-mode");
+        let _ = writeln!(
+            w,
+            "not ok 3 - shell help echo: thieu output U-mode hoac duong UART->ring->shell sai"
+        );
         ok_all = false;
     }
     // 18 — ps từ core: snapshot kernel lúc `PS_REQ` phải khớp **từng dòng** shell in.

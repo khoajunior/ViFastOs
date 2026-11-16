@@ -17,6 +17,9 @@ ktest = ["vifast-plat-riscv64/ktest"]
 vblk = ["vifast-plat-riscv64/vblk"]
 # KT-53: ảnh test U-mode (kèm ktest) — tách để ảnh chính/guard không link module U-mode.
 user = ["vifast-plat-riscv64/user"]
+# KT-73: ảnh `ktest-con` — UART RX IRQ → ring → U-mode + virtio-console hai queue. Ảnh sản phẩm
+# và các ảnh cũ **không** bật (giữ nguyên `.text`/mapping; xem `docs/k6-console.md` §6).
+con = ["ktest", "user", "vifast-plat-riscv64/vcon"]
 
 [[bin]]
 name = "vifast-kbin-riscv64"
@@ -55,6 +58,14 @@ required-features = ["ktest", "user"]
 name = "vifast-kbin-ktest-vblk"
 path = "src/ktest_vblk.rs"
 required-features = ["ktest", "vblk"]
+
+# KT-73: ảnh **console** riêng — UART RX IRQ → ring → U-mode + virtio-console (`-device
+# virtio-serial-pci` + `-chardev pipe`). Tách khỏi 15 boot matrix cũ để `.text`/mapping của chúng
+# không đổi (D2-109: ảnh `ktest` 92,6 % trần; task cho phép tách ảnh).
+[[bin]]
+name = "vifast-kbin-ktest-con"
+path = "src/ktest_con.rs"
+required-features = ["ktest", "user", "con"]
 
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }

@@ -373,6 +373,17 @@ pub fn on_external_interrupt() -> ClaimOutcome {
             let iir = uart_read(UART_IIR) as u32;
             // `IIR & 0x0f` = mã nguồn (0x2 = TX-empty); bit 7:6 là trạng thái FIFO của firmware.
             stats.note_iir(iir);
+            // KT-73: ngắt **RX** (data available / character timeout) đi đường ring của
+            // `uart_console` — chỉ khi module đó đã bật `IER.RX` (ảnh có U-mode). Ảnh sản phẩm
+            // (không có module) giữ nguyên hành vi TX-empty của KT-48.
+            #[cfg(feature = "user")]
+            if crate::uart_console::rx_enabled() && crate::uart_console::iir_is_rx(iir) {
+                let _bytes = crate::uart_console::on_rx_irq();
+                plic_write(claim_offset(context), claim);
+                fence();
+                stats.note_complete();
+                return outcome;
+            }
             if uart_limit_reached(stats.snapshot().uart_irqs) {
                 let _ = uart_disable_tx_irq();
                 let _ = disable_irq(UART0_IRQ);

@@ -62,6 +62,7 @@ dependencies = [
  "vifast-core",
  "vifast-elf",
  "vifast-plat-common",
+ "vifast-ring",
  "vifast-virtio",
 ]
 

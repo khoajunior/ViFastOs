@@ -78,7 +78,9 @@ pub mod obj;
 pub mod pager_fault;
 /// **KT-72** PCI ECAM + gán BAR (`virtio-blk`) — **chỉ ảnh test** (`feature = "ktest"`): ảnh
 /// sản phẩm chưa mở K6-driver nên giữ nguyên `.text` (KT-73 mở cho sản phẩm).
-#[cfg(feature = "vblk")]
+/// KT-73: console **dùng lại** module này (`init_for(VirtioKind::Console)`) — một đường quét
+/// ECAM/BAR/cap cho mọi thiết bị virtio.
+#[cfg(any(feature = "vblk", feature = "vcon"))]
 pub mod pci;
 pub mod plic;
 /// KT-56: probe trap **thật** cho `FaultKind` (chỉ ảnh test — `#[cfg(feature = "ktest")]`).
@@ -88,6 +90,10 @@ pub mod smp;
 pub mod tf_store;
 pub mod timer;
 pub mod tlb;
+/// **KT-73** UART RX IRQ → ring của KT-69 → U-mode đọc byte thật (`feature = "user"` — chỉ ảnh
+/// có chương trình U-mode; ảnh sản phẩm không có người nhận nên không link module này).
+#[cfg(feature = "user")]
+pub mod uart_console;
 /// KT-53: U-mode + nạp `init` ELF — chỉ biên dịch cho ảnh **test U-mode** (`feature = "user"`,
 /// kéo theo `ktest`); ảnh sản phẩm và ảnh test chính/guard không có đường `sret` xuống U-mode,
 /// nên không link module này (giữ nguyên 37+3 TAP cũ, procsrv/shell là K3.5).
@@ -99,6 +105,10 @@ pub mod user_stack;
 /// **KT-72** driver virtio-blk thật (virtqueue + read/write/flush) — chỉ ảnh test.
 #[cfg(feature = "vblk")]
 pub mod virtio_blk;
+/// **KT-73** driver virtio-console (`0x1003`) — hai virtqueue rx/tx, dùng lại `pci.rs` của KT-72
+/// (không nhân đôi đường ECAM/BAR). Chỉ ảnh test `ktest-con` (`feature = "vcon"`).
+#[cfg(feature = "vcon")]
+pub mod virtio_console;
 
 /// UART0 của QEMU `virt` (16550A) — dữ kiện nền tảng, D2-72 Q7.
 pub const UART0_BASE: usize = 0x1000_0000;

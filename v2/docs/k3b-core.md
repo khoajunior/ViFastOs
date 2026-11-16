@@ -1617,3 +1617,75 @@ Nguồn chi tiết: [`k6-virtio-blk.md`](k6-virtio-blk.md). Tóm tắt phần **
   chứng); driver **chưa vào ảnh sản phẩm** (`strings` = 0 lần `virtio|vblk`; KT-73 mở);
   **coverage tích hợp không có** (không boot nào chạy driver + 70 TAP / U-mode / conformance);
   kiểm chồng lấn BAR **chưa đọc DT/`ranges`** — vẫn là hằng `PCI_MMIO_WINDOW_BASE` (nợ thật).
+
+## 21. KT-73 — UART RX IRQ → ring → U-mode (shell đọc bàn phím thật) + virtio-console hai queue (K6)
+
+Chi tiết: [`k6-console.md`](k6-console.md). Quy ước (D2-112): **mọi số đo nằm trong khối** ```text scope=`<tệp-log>`
+**và trích nguyên văn**; ngoài khối chỉ có **định danh** (hex, số hiệu spec `x.y`, mã task, ngày,
+tên chip).
+
+- **Đóng nợ "shell chưa UART IRQ" (K3, bản trước)**: `kernel/vifast-plat-riscv64/src/uart_console.rs` nhận
+  ngắt **RX** của UART0 (PLIC line của UART, context của hart (dành cho chế độ S)) trong `plic::on_external_interrupt`;
+  đọc `RBR` tới khi `LSR.DataReady` tắt rồi `Ring::send` vào ring của **KT-69** (`vifast-ring`:
+  magic/header/slot **không** đổi; codec byte trên slot bốn word do `vifast-virtio::conchan`
+  quyết). Cửa sổ ngắt **hẹp** (`rx_begin`/`rx_end`), `rx_end` vét cạn `RBR`; handler có trần nên
+  không quay vô hạn. Nhánh TX-empty của KT-48 giữ nguyên.
+- **Kernel map ring vào VSpace U-mode** (`VA_CON_RING`, R|W|U, NX) — U-mode **không** nhận cap,
+  **không** tự map, **không** lệnh đặc quyền; consumer chỉ đọc ring.
+- **Nguồn byte ca kiểm = loopback 16550** (bit loopback của `MCR`): kernel ghi `THR`, byte quay lại `RBR`
+  **qua thiết bị** ⇒ ngắt RX thật. Đây là đường ngắt **thật**, không phải bàn phím người — ghi rõ
+  ở `k6-console.md` §3.
+- **Shell U-mode (`ktest-proc`) đọc byte từ ring**: bỏ message `LINE`; demo bơm từng dòng script
+  vào UART; TAP `shell help echo` chỉ xanh khi `ok_uart_path` (đường UART → ring → shell đúng),
+  không chỉ khi chuỗi output đúng. **Ca âm** (`kt73-mutation-tap3.log`): bỏ lời gọi bơm ⇒ shell
+  không in gì ⇒ TAP đỏ.
+- **Tái dùng PCI của KT-72, không nhân đôi**: `vifast-virtio::pci` thêm `VirtioKind{Blk,Console}`
+  + `find_function`; kernel `pci::init_for(kind)` là một đường ECAM → BAR → chồng lấn → gán BAR →
+  capability. Console gán BAR ở leaf thứ hai của cửa sổ PCIe; `PCI_DRIVER_WINDOW_BYTES` mô tả đúng
+  số leaf driver tự map (lệch ⇒ `BarConflict` fail-closed). Miễn trừ KHÔNG fail-open: chỉ leaf
+  trong đúng hai leaf driver tự map, là `leaf`, và **identity**; hai lớp kiểm khác không nới và
+  chạy **trước khi ghi BAR**.
+- **Đàm phán feature (D2-110B)**: chỉ `VIRTIO_F_VERSION_1` ⇒ không `MULTIPORT`/`SIZE` ⇒ một port,
+  `rx` = queue đầu, `tx` = queue thứ hai; không lệnh control; cổng khác cổng đầu ⇒ `MultiPort` fail-closed.
+  `queue_size` theo `queue_max` đọc từ thiết bị; `notify_off` đọc riêng từng queue.
+- **`used->len` của `tx`**: spec chỉ định nghĩa `len` cho buffer device-writable; `tx` không có ⇒
+  không đòi `len == want` (QEMU ghi rỗng); bằng chứng phân phối lấy từ **host** (tệp `.out` của
+  chardev). Với `rx`, `len` có nghĩa và kiểm `≤` cỡ đệm.
+- **Ca âm**: `read_try` trả `Busy` ngay khi không dữ liệu; ring đầy ⇒ mã `NotEnoughMemory`, không
+  ghi đè, đọc lại đúng thứ tự.
+- **Ảnh sản phẩm**: driver console **không** vào (BLOCKED có `file:line`); trần không phải lý do.
+  **Hệ quả kiến trúc cho KT-76**: K6 "tương đương v1" sẽ **không** có shell trên ảnh sản phẩm nếu
+  KT-74..75 không đưa U-mode vào ảnh sản phẩm.
+
+Bằng chứng (nguyên văn từ log trong repo):
+
+```text scope=kt73-qemu-ktest-con.log
+# con uart: irqs=31 bytes=30 const:payload=30 chunks=30 const:chunks_want=2 head=30 const:head0=0 tail=0 used=30 seq=30 empty_polls=1 empty_bytes=0 drops=0 timeouts=0 inject_ok=1 inject_ticks=64 rx_begin=1 rx_end=1
+# con pci: vendor=0x1af4 device=0x1003 bus=0 dev=1 func=0 bar=4 kind=mem64 size=0x4000 assigned=0x40200000 readback=0x40200000 command=0x6 ecam=0x30008000 other_bars=0 reserved=5 overlap=1 caps_in_bar=1 ecam_id=1 bar_id=1 const:assign=0x40200000
+# con queue: num_queues=64 rx_max=128 rx_size=8 rx_notify_off=0 tx_max=128 tx_size=8 tx_notify_off=1 notify_mul=4 device_features=0x10130000006 driver_features=0x100000000 const:version1=1 multiport=0 status=0xf generations=0/0 rx_buf=0x80253400 tx_buf=0x80253440 rx_desc=0x80253000 tx_desc=0x80253200
+# con tx: one=Ok(14) two=Ok(10) writes=2 write_bytes=24 const:tx_want=24 notifies=4 last_tx_used_len=0 const:tx_len_note=0..=24 driver_status=0xf
+# con rx: got=14 const:want=14 ok=1 busy=0 errors=0 timeouts=0 id_mismatch=0 last_rx_used_len=14 armed=1 head=2/2
+# con neg: busy=1 const:busy_code=14 read_try=Busy ring_slots_ok=32 const:slots_want=32 ring_bytes_ok=768 const:bytes_want=768 drops=2 const:drops_want=2 full_code=9 const:full_want=9 consumed=768 order_ok=1 head=62 tail=62 used=0 timeouts=0
+```
+
+```text scope=kt73-qemu-ktest-proc.log
+# con uart: irqs=45 bytes=45 const:script_bytes=45 lines=6 inject_ok=1 drops=0 timeouts=0 head=45 tail=45 used=0 empty_polls=0 const:va=0x43000000 ring_ok=1
+ok 3 - shell help echo
+```
+
+```text scope=kt73-ktest-matrix.log
+# KTEST: 18/18 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con)
+# con host: tx_file=/tmp/k3-ktest/con-smp1-boot1.out bytes=24 ok=1
+```
+
+```text scope=kt73-gate-summary.log
+TESTS=726 / SUITES=99
+```
+
+```text scope=kt73-conformance.log
+ok - trace-compare: 61/61 dòng khớp, 5/5 ca (22:16 23:19 24:7 25:7 26:12), build=3cc6bf36f3ac98b8
+```
+
+```text scope=kt73-soak.log
+# soak: 0/1000 lỗi (PASS)
+```
