@@ -169,9 +169,10 @@ stability = "stable-draft"
 version = 1
 
 [method_signature."Untyped.Retype"]
-params = ["cap", "type", "size_bits", "flags"]
-returns = []
-# Giá trị trả `cap` chưa có nguồn thiết kế và 21 .scn không dùng; để K1a chốt riêng (D2-35).
+params = ["cap", "dst", "type", "size_bits", "flags"]
+returns = ["slot"]
+# D2-99: `dst` = MR0 (slot đích trong CSpace của caller), `type` = MR1, `size_bits` = MR2,
+# `flags` = MR3; trả `a1` = slot. Chữ ký hợp thức hoá layout invocation đã cài (D2-97).
 note = "`flags` = tập TÊN cờ (bit GUEST reserved, D2-32); KHÔNG gán số bit ở đây. type = VSpace + GUEST ⇒ NotSupported tới H1"
 
 [method_signature."CNode.Copy"]
@@ -193,6 +194,17 @@ returns = []
 [method_signature."CNode.Delete"]
 params = ["cnode", "slot"]
 returns = []
+
+[method_signature."Frame.Map"]
+params = ["frame", "vspace", "va", "flags"]
+returns = []
+# D2-99(d): gọi trên cap Frame (11.0); MR0 = cap VSpace, MR1 = va, MR2 = flags.
+note = "Map Frame vào VSpace; cap VSpace ở MR0 phải có RIGHT_WRITE (D2-99(e))"
+
+[method_signature."Frame.Unmap"]
+params = ["frame", "vspace", "va"]
+returns = []
+# D2-99(d): 11.1; MR0 = cap VSpace, MR1 = va. Leaf tại va phải thuộc đúng cap Frame (D2-99(f)).
 
 [method_signature."Tcb.Configure"]
 params = ["tcb", "cspace?", "vspace?", "entry?", "ipc_buffer?", "priority?"]

@@ -174,9 +174,8 @@ là **cài đặt** đường invocation.
 > vào VSpace ở `MR0`). Không thêm method id mới.
 
 Kênh tham số (core `v2/kernel/vifast-core/src/invoke.rs`) — **quy ước D2-99** (lead, 2026-11-16):
-`MR0..MR3` + trả `a1`; đây **không phải** “không có ABI mới” — chữ ký tham số **chưa** có trong
-`spec/`, **KT-67b** sẽ cập nhật `spec/` **một lần** (`Untyped.Retype` + `Frame.Map/Unmap`) cho
-khớp D2-99:
+`MR0..MR3` + trả `a1`; **KT-67b đã cập nhật `spec/` đúng một lần** theo D2-99 (`Untyped.Retype`
+thêm `dst` + `returns=["slot"]`, thêm `Frame.Map`/`Frame.Unmap`) — chi tiết + diff ở **§8.1**:
 
 | Method | `MR0` | `MR1` | `MR2` | `MR3` |
 |---|---|---|---|---|
@@ -191,8 +190,9 @@ Kiểm quyền/bất biến trên đường invocation (reviewer-kt67a M1/M2):
 - `Frame.Unmap` **ràng buộc Frame ↔ mapping**: leaf tại `va` phải thuộc **đúng** cap Frame được
   gọi (so PA — PA Frame là duy nhất); VA đang map Frame khác/không map ⇒ `InvalidCapability` **1**
   hoặc `NotMapped` **11**, mapping **không** bị gỡ (test âm trong TAP 17);
-- `MessageInfo.caps > 0` (chuyển cap qua invocation — KT-67b) ⇒ `NotSupported` **18** + đếm
-  (D2-99(g)); method/loại ngoài danh sách cũng **18** + đếm.
+- `MessageInfo.caps > 0` trên **invocation** ⇒ `NotSupported` **18** + đếm (D2-99(g)) — **giữ
+  nguyên** sau KT-67b: chuyển cap đi đường **Endpoint** bằng header IPC buffer (§8), không đi
+  đường invocation; method/loại ngoài danh sách cũng **18** + đếm.
 
 Biên giới D2-83 giữ nguyên: core **không** đọc/ghi PTE/byte; nó kiểm cap/quyền/loại, giải mã
 method rồi gọi hook `SyscallEnv::invoke` — arch cài bằng object layer (`mem_bridge::invoke` →
@@ -229,7 +229,8 @@ thật của Frame, kernel đọc 8 B **vật lý** tại PA (đúng giá trị 
 
 ### 7.4 TAP + bằng chứng (`# inv:`, KT-67a)
 
-TAP 15..18 của ảnh `ktest-user` (18 TAP; `expected.txt` `ktest-user 18 18`); dòng log lấy từ
+TAP 15..18 của ảnh `ktest-user` (**ở thời điểm KT-67a**: 18 TAP, `expected.txt` khi đó
+`ktest-user 18 18`; từ KT-67b ảnh có **19 TAP** — xem §8.5); dòng log lấy từ
 boot thật (`v2/agent/JOURNAL/kt67a-journal.md` §3, D2-80):
 
 ```text
@@ -255,10 +256,10 @@ Red-before (log trong `v2/agent/JOURNAL/`):
 `kt67a-red-retype-unregistered.log` + `kt67a-red-satp-kernel-fault.log` (đường memsrv thật hỏng:
 bridge chưa đăng ký ⇒ `err=1`; và kernel fault khi chạm object layer lúc `satp` = root user).
 
-### 7.5 Còn BLOCKED (file:line)
+### 7.5 Còn BLOCKED (file:line) — mục 1 **đã đóng** ở §8 (KT-67b)
 
-1. **Chuyển cap Frame từ memsrv U-mode sang một client TCB khác** — **không phải thiếu ABI**
-   (D2-98): receive window **đã** nằm trong ABI — `spec/abi.toml`
+1. ~~**Chuyển cap Frame từ memsrv U-mode sang một client TCB khác**~~ — **ĐÓNG Ở §8** (KT-67b,
+   TAP 19). Giữ lại đoạn dưới làm mốc lịch sử: **không phải thiếu ABI** (D2-98): receive window **đã** nằm trong ABI — `spec/abi.toml`
    `[calling.riscv64].ipc_buffer = "Frame bind qua Tcb.Configure; header chứa receive window
    (CPTR, ≤4 cap)"` (dòng 58) — và core đã có `tcb_set_recv_window`/`plan_cap_transfer`/
    `deliver_caps` (`v2/kernel/vifast-core/src/core_ipc.rs`, `core_capxfer.rs`). Phần **thiếu là
@@ -272,3 +273,167 @@ bridge chưa đăng ký ⇒ `err=1`; và kernel fault khi chạm object layer l�
    `spec/abi.toml` (`Copy=0, Mint=1, Move=2, Mutate=3, Delete=4, Revoke=5, Rotate=6`; `spec/`
    đóng băng) ⇒ chưa cài, `NotSupported`. Core **đã có** API `Machine::copy/mint/delete/revoke`
    nên task sau chỉ cần gắn method id có sẵn (0/1/2/4/5) — không thêm id mới.
+
+## 8. KT-67b — header IPC buffer U-mode + chuyển cap Frame giữa **hai tiến trình** (đóng §7.5)
+
+**Trạng thái: DONE** — ảnh `ktest-user` lên **19 TAP** (`ok 19 - ipc capx hai tien trinh`), hai
+**ELF riêng** `memsrv.elf`/`client.elf`, hai VSpace, hai TCB, **hai CNode/cspace riêng**. Không
+thêm syscall, không đổi 16 số hiệu, `MessageInfo` vẫn **35 bit**, `unsafe` vẫn chỉ
+`kernel/vifast-plat-*` (shim + arch), không nới ngưỡng nào.
+
+### 8.1 `spec/` — mở **đúng một lần** theo D2-99 (và chỉ 3 mục)
+
+`git diff spec/abi.toml` = **một tệp**, **`+15 −3`**, đúng **3 entry** trong `[method_signature]`
+(kèm **3 khối comment** của chính 3 entry đó — `Retype` thay 1 dòng cũ bằng 2, `Map`/`Unmap` mỗi
+entry 1 dòng — vì comment cũ nói “`returns=[]`, chưa có nguồn” đã **mâu thuẫn** với D2-99):
+
+| Entry | Trước | Sau |
+|---|---|---|
+| `Untyped.Retype` | `params=["cap","type","size_bits","flags"]`, `returns=[]`, comment “Giá trị trả `cap` chưa có nguồn thiết kế … (D2-35)” | `params=["cap","dst","type","size_bits","flags"]`, `returns=["slot"]`, comment D2-99: `dst`=MR0, `type`=MR1, `size_bits`=MR2, `flags`=MR3, `a1`=slot |
+| `Frame.Map` (**mới**) | — | `params=["frame","vspace","va","flags"]`, `returns=[]`, comment `# D2-99(d): 11.0; MR0=cap VSpace, MR1=va, MR2=flags` + 1 dòng `note` (metadata như mọi entry khác — **trong** phạm vi lần mở D2-99 này) |
+| `Frame.Unmap` (**mới**) | — | `params=["frame","vspace","va"]`, `returns=[]`, comment `# D2-99(d): 11.1; leaf tại va phải thuộc đúng cap Frame (f)` |
+
+**Không** đổi syscall/error/object/`[message]`/`[calling]`/`[debug_info]` — `Frame`/`PageTable`/
+`VSpace` trong `[object]` vẫn `stability="reserved"`, `unsupported=true` (D2-98 giữ nguyên phạm
+vi). Artifact sinh lại bằng `./v2/bin/vifast-gen gen`: `v2/lib/vifast-abi/src/generated.rs`
+(`METHOD_SIGNATURES` 13 → **15**), `docs/abi.md`; `./v2/bin/vifast-gen --check` **PASS**.
+
+Máy kiểm ABI (`v2/test/abi/check_abi.py`) trước đây **pin cứng** `len(methods) == 13` (đặt từ
+KT-05). KT-67b thay pin bằng **suy dẫn**: `expected` = các khoá `[method_signature."X.Y"]` đọc từ
+spec lúc parse, so **tập** với entry có `params`, và cross-check **số phần tử**
+`METHOD_SIGNATURES` trong `generated.rs` (nguồn thứ hai cùng pipeline). Thêm chữ ký sau này
+không phải sửa pin; `gen-check` vẫn là chốt **byte**.
+
+### 8.2 Header IPC buffer (shim U-mode — `v2/kernel/vifast-plat-user/lib.rs`)
+
+`spec/abi.toml` dòng 58 đã có câu *“header chứa receive window (CPTR, ≤4 cap)”*; KT-67b cài
+**nơi đặt** header + API đọc/ghi (model `[TK]`, không phải ABI mới):
+
+| Word | Nội dung |
+|---|---|
+| 0 | magic `b"KT67b"` little-endian (`IPC_HEADER_MAGIC`) — 0 = chưa dùng header ⇒ kernel bỏ qua |
+| 1 | `MessageInfo` 35 bit (bản ghi của shim; **nguồn ABI vẫn là `a2`**) |
+| 2..5 | **receive window** — 4 CPTR đích khi nhận cap (spec dòng 58) |
+| 6..9 | **send caps** — 4 CPTR nguồn cap của message đang gửi |
+
+Trang 4 KiB tại VA **0x4002_0000** (`USER_IPC_BUFFER_VA`) do **loader kernel** map `R|W|U|NX` +
+zero cho **mọi** ELF U-mode (`user::load_init_slot`, cùng bảng cấp 1 với ảnh/stack nên **không**
+thêm bảng trang); dải này được đăng ký vào `active_ranges` để đường đọc của kernel không fault
+S-mode. Shim cấp: `init_ipc_buffer`, `set_recv_window([CPTR;4])`, `recv_window`,
+`set_send_caps(&[CPTR])`, `send_caps`, `info(label,caps,no_reply,length)` (+ `info_label/caps/
+length`), `note_received(info)`, `received_info`, `read_received_caps() -> ReceivedCaps{count,
+slots}`, `call/nb_send/recv`, `peek_u64/poke_u64`, `yield_now`. Chương trình Rust vì vậy **không**
+cần `unsafe`/`asm!` (R5) mà vẫn ghi/đọc thật vùng đã map.
+
+### 8.2b `unsafe` của shim — đúng D2-101 (không lệnh đặc quyền)
+
+Shim U-mode **được** dùng `unsafe` cho đúng hai việc: `ecall` (chuyển syscall) và
+`read_volatile`/`write_volatile` trên **địa chỉ user** (IPC buffer của chính nó, VA do chương
+trình truyền) — shim chạy **U-mode** với page table user nên **không** với tới kernel. **Cấm**
+`csrr/csrw/sfence/sret/mret/satp/wfi`, CSR, truy cập vật lý/physmap (D2-101 thay D2-93).
+Bằng chứng máy: `llvm-objdump -d` cả `memsrv.elf`/`client.elf`/`inv.elf` — hợp mnemonic chỉ
+`addi auipc beqz bgeu bltu bne bnez ecall j jalr ld li lui mv pause ret sd slli srli`, **0** dòng
+lệnh đặc quyền/CSR/satp (`JOURNAL/kt67b-udisasm-no-priv.log`). Chương trình Rust vì vậy không có
+`unsafe`/`asm!` trong mã nguồn (R5) — chỉ shim (`kernel/vifast-plat-*`, danh sách đóng D2-17).
+
+### 8.3 Kernel: window + cap **lấy từ header**, không đặt ngoài băng
+
+1. `SyscallEnv::ipc_header(tcb)` (mặc định `None`) — arch `UserMemAccess` đọc 10 word ở VA cố
+   định bằng `sstatus.SUM` **chỉ khi** trang đã đăng ký + magic khớp; **không** đọc byte nào từ
+   core (D2-83). Header zero (mọi ảnh cũ) ⇒ `None` ⇒ hành vi KT-67a giữ nguyên 100 %.
+2. `syscall::apply_ipc_header` (chỗ **duy nhất** window vào core): 4 CPTR → `cap_slot` → 
+   `Machine::tcb_set_recv_window_obj` (API mới, cùng thân kiểm với bản `SlotRef` của KT-63:
+   CNode sống, 4 ô **khác nhau**; sai ⇒ lỗi).
+3. `syscall::build_message(m, tcb, info, MR0..3, header)`:
+   - `info.caps() == 0` ⇒ đường cũ (`Message::new`) không đổi;
+   - `caps > 0` ⇒ lấy CPTR nguồn ở **word 6..9 của header**, `cap_slot` → `cap_at` (rỗng/chết ⇒
+     `InvalidCapability` **1**), `Message::with_caps`; **không có header** ⇒ `InvalidArgument` **5**.
+4. Giao message vẫn **nguyên** KT-63: `resolve_caps` → `prepare_caps` theo **window của bên nhận**
+   → `deliver_caps` cài cap con **bỏ `RIGHT_GRANT`** vào window và cập nhật `MessageInfo.caps` =
+   số cap **thật sự** cài. `MessageInfo.caps > 0` trên **invocation** vẫn `NotSupported` 18
+   (D2-99(g)) — không đổi.
+
+### 8.4 Hai tiến trình thật (rig `src/ktest_capx.rs`)
+
+| | memsrv (TCB A, `memsrv.elf`) | client (TCB B, `client.elf`) |
+|---|---|---|
+| CNode/cspace | riêng (16 slot) | riêng (16 slot) |
+| slot 0 | cap CNode tự thân (cspace của A) | cap CNode tự thân (cspace của B) |
+| slot 1 | `Endpoint` E | `Endpoint` E (**copy** cùng obj, không phải obj khác) |
+| slot 2 | cap `VSpace` **của A** | cap `VSpace` **của B** |
+| slot 3 | cap `Untyped` (tự Retype) | — |
+| slot 5 / 6 | `Frame` (retype) / `Frame` **thiếu `GRANT`** (rig cấp) | — |
+| window | [8,9,10,11] (header) | **[4,5,6,7]** (header) |
+
+Luồng: (1) A `Untyped.Retype` Frame vào slot 5 (invocation 1.0); (2) ca âm `caps=1` + CPTR nguồn
+rỗng ⇒ **1**; (3) A `NBSend` message `caps=1` mang Frame (cap có `GRANT`); (4) A `NBSend` message
+mang Frame **thiếu `GRANT`** ⇒ chuyển **mềm** 0 cap; (5) A `NBSend` message `caps=0`; (6) A
+**`Yield`** — *không* `Exit`, vì `Exit` **huỷ** message đang chờ trong hàng Endpoint (D2-25) và
+TCB chết không còn là “hai tiến trình đang nói chuyện”; (7) B `Recv` → window header của **B**
+được áp → cap cài vào **cspace B** slot 4; B `Frame.Map` vào VSpace **của B** tại `0x4100_0000`,
+`poke/peek` 8 B, `Frame.Unmap` bằng chính cap nhận, map lại + ghi giá trị 2, `Recv` 2 message đối
+chứng (0 cap), `Exit(0)`.
+
+**Policy `copy`**: cap nhận là **cap con** bỏ `RIGHT_GRANT`; memsrv **vẫn** giữ cap nguồn
+(`src_alive=1`). “Chuyển hết” (move) không thuộc ABI/KT-63 — muốn move phải có `CNode.Delete`
+(method 4, **ngoài** danh sách trắng invocation) hoặc `CNode.Revoke`; ghi nợ §8.8, **không** giả
+vờ đã move.
+
+### 8.5 Bằng chứng đo (`# capx:` — log boot thật, D2-80)
+
+```text
+U: memsrv chuyen cap Frame
+U: client nhan cap va map/ghi/doc
+# capx: pre cspace_b4=empty cspace_b5=empty walk=0 a5=Frame src_alive=1 policy=copy
+# capx: recv slot=4 ty=Frame rights=0xb obj=29 from_obj=29 from_rights=0xf installed=1 failed=1
+# capx: map va=0x41000000 pa=0x82030000 bits=12 walk=1 walk_pa=0x82030000 phys=0x8877665544332211 caps=1 ipc=1 obj=1 src_alive=1
+ok 19 - ipc capx hai tien trinh
+```
+
+Đọc từng nhóm: `pre` = **trước** `Recv` của B, cspace B **rỗng** ở slot 4/5 và VSpace B **chưa**
+map VA; `recv` = sau `Recv`, cap ở **cspace B** slot 4, loại `Frame`, `rights=0xb` = `R|W|G`
+(`RIGHTS_ALL & !RIGHT_GRANT`), `obj/from_obj` **cùng một** object Frame, `installed=1` (đúng **1**
+cap cài — `cap_transfer_installed` delta) và `failed=1` (message thiếu `GRANT` bị bỏ **mềm**);
+`map` = kernel walk VSpace **B** thấy leaf hợp lệ tại VA, `pa` thật `0x82030000`, kernel đọc
+**physmap** tại PA = `0x8877665544332211` (giá trị **B** ghi qua mapping), `caps/ipc/obj` = ba bất
+biến core (`check_caps`/`check_ipc`/`check_objmem`) xanh, `src_alive=1` = policy copy.
+
+### 8.6 Red-before (D2-05)
+
+`JOURNAL/kt67b-red-before-caps-rejected.log` + `kt67b-red-before-ktest-user.log`: tạm tắt
+`UserMemAccess::ipc_header` (đúng trạng thái trước KT-67b) ⇒ memsrv `NBSend caps=1` nhận
+`InvalidArgument` **5**, thoát **71**, `not ok 19 - … memsrv khong Yield`; TAP 1..18 vẫn xanh ⇒
+đỏ **đúng chỗ** (`caps>0` bị từ chối), không phải đỏ vì lý do khác.
+
+### 8.7 Ngưỡng + hồi quy (số chép từ log, không viết tay)
+
+- **Hai ngưỡng (D2-85a)**: `size_of::<Machine>()` **không đổi 188.872 B** ≤ pin **196.608 B**
+  (TAP `# core: link` vẫn `bytes=188872 pin=196608`); ảnh `ktest-user` `.data+.bss` =
+  **202.488 B** ≤ **262.144 B** (trần D2-72 Q5; `ktest` 209.920, `ktest-proc` 206.624 — như
+  KT-67a). Hai ELF mới 8.560 B/tệp chỉ vào `.rodata` (+17.120 B file ảnh), **không** vào
+  `.data/.bss`.
+- **Matrix 12/12** boot (4 ảnh × smp 1/2/4): `ktest 65/65`, `ktest-guard 3/3`,
+  **`ktest-user 19/19`**, `ktest-proc 10/10` — `JOURNAL/kt67b-ktest-matrix.log`.
+- **Gate `--fast`**: **PASS** — 661 test / 87 suite (bằng mốc KT-67a) + L1 1.000 seed
+  (`JOURNAL/kt67b-gate.log`); core test riêng `cargo test -p vifast-core` **32 passed**
+  (`kt67b-core-tests.log`); clippy kernel **4 tổ hợp `EXIT=0`** (`kt67b-clippy-kernel.log`).
+- **Soak**: `soak.sh 1000 3` → **0/1000**, wall **229 s**, BUILD_ID `02ed5a1810ba59ce`,
+  sha256 `435e0f9d…` (ảnh sản phẩm hiện tại **đúng** sha256 đó) — `JOURNAL/kt67b-soak.log`.
+- **L1 của cổng — đọc đúng D2-100**: gate sau vá in **L1 wall = 1.183 ms** (cây ấm). Lần gate
+  **trước** (cùng mã, máy bận) in **171.115 ms** — đã kiểm là **artifact biên dịch/khoá build
+  trong cửa sổ đo**, không phải số chạy: chạy thuần cùng lệnh = **0.80 / 0.82 / 0.85 s** (3 lần;
+  tái lập đúng thứ tự cổng L0→L1 cũng 0.85 s; 2 lần sau vá = 1.00/1.01 s). Ghi **cả hai** số;
+  **không** dùng 171 s làm số hiệu năng; chạy thuần ≪ 60 s nên AGENTS §6 **không** phải giảm
+  seed.
+
+### 8.8 Nợ mở (có chủ, không tô hồng)
+
+1. **Policy move**: chuyển cap hiện là **copy** (KT-63); “memsrv không giữ cap” chỉ đúng nếu có
+   policy move ⇒ cần `CNode.Delete`/`Revoke` có method id trong invocation (hiện ngoài danh sách
+   trắng). Không tự thêm id (spec đóng băng).
+2. **MR4..MR63 qua IPC buffer** vẫn chưa đọc/ghi (chỉ 4 MR thanh ghi) — header mới chỉ dùng cho
+   window + cap, không phải vùng MR.
+3. **`CNode.Insert`** vẫn `NotSupported` (không có method id, D2-98).
+4. **Multi-hart U-mode**: rig chạy tuần tự một hart (như KT-65/66); chưa có preemption U-mode
+   thật, nên “hai tiến trình” là hai **TCB/cspace/VSpace** chạy lần lượt dưới điều khiển kernel
+   test — không phải SMP scheduling.

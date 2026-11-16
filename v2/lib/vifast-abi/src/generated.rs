@@ -132,12 +132,14 @@ pub const OBJ_TCB_BYTES: usize = 512;
 #[rustfmt::skip]
 /// (method, params, returns) — từ `[method_signature]` (stable-draft).
 #[rustfmt::skip]
-pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 13] = [
+pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 15] = [
     ("CNode.Copy", &["cnode", "src", "dst", "rights?"], &[]),
     ("CNode.Delete", &["cnode", "slot"], &[]),
     ("CNode.Mint", &["cnode", "src", "dst", "rights?", "badge?"], &[]),
     ("CNode.Move", &["cnode", "src", "dst"], &[]),
     ("CNode.Revoke", &["cnode", "slot?"], &[]),
+    ("Frame.Map", &["frame", "vspace", "va", "flags"], &[]),
+    ("Frame.Unmap", &["frame", "vspace", "va"], &[]),
     ("SchedContext.Bind", &["sched", "target"], &[]),
     ("SchedControl.Configure", &["sched_control", "sched", "budget?", "period?", "refills?"], &[]),
     ("Tcb.Configure", &["tcb", "cspace?", "vspace?", "entry?", "ipc_buffer?", "priority?"], &[]),
@@ -145,7 +147,7 @@ pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 13] = [
     ("Tcb.Resume", &["tcb"], &[]),
     ("Tcb.SetFaultEp", &["tcb", "cap"], &[]),
     ("Tcb.Suspend", &["tcb", "mode"], &[]),
-    ("Untyped.Retype", &["cap", "type", "size_bits", "flags"], &[]),
+    ("Untyped.Retype", &["cap", "dst", "type", "size_bits", "flags"], &["slot"]),
 ];
 pub const TRACE_RECORD_BYTES: usize = 32;
 #[rustfmt::skip]

@@ -270,9 +270,20 @@ receive window (CPTR, ≤4 cap)"` (dòng 58), và core đã có mô hình
 `tcb_set_recv_window`/`plan_cap_transfer`/`deliver_caps` (`v2/kernel/vifast-core/src/core_ipc.rs`,
 `core_capxfer.rs`). Phần **thiếu là shim U-mode**: `syscall7`
 (`v2/kernel/vifast-plat-user/lib.rs:28`) **không** ghi header IPC buffer (nơi khai `caps` + CPTR
-nguồn), và `build_message` (`v2/kernel/vifast-core/src/syscall.rs`) từ chối `MessageInfo.caps > 0`
-thay vì lấy window từ header. Vì vậy KT-67a chứng minh **memsrv+client trong một cspace**;
+nguồn); chỗ **từ chối** `MessageInfo.caps > 0` là nhánh **invocation**
+(`v2/kernel/vifast-core/src/invoke.rs`, D2-99(g)), còn `build_message`
+(`v2/kernel/vifast-core/src/syscall.rs`) **không** kiểm `caps` — nó chưa có đường đọc CPTR
+nguồn/window từ header. *(Đính chính nit reviewer-kt67a: câu cũ ghi sai chỗ từ chối.)*
+Vì vậy KT-67a chứng minh **memsrv+client trong một cspace**;
 **KT-67b (D2-98)** cài header IPC buffer + receive window trong shim để tách hai tiến trình —
-**không** cần sửa `spec/`. Ngoài ra `CNode.Insert` mà D2-96/97 nhắc **không có method id** trong
+**không** cần sửa `spec/`.
+
+**ĐÓNG BLOCKED NÀY — KT-67b (2026-11-16, Agent 2)**: header IPC buffer (spec `abi.toml` dòng 58)
+đã được cài trong shim (`kernel/vifast-plat-user/lib.rs`) + kernel đọc qua
+`SyscallEnv::ipc_header`/`apply_ipc_header`/`build_message`; **hai tiến trình riêng**
+(`memsrv.elf` → `client.elf`, 2 TCB/2 cspace/2 VSpace) chuyển cap Frame, cap nằm trong **cspace
+bên nhận** và map/ghi/đọc thật (TAP 19, `# capx:` evidence). Chi tiết + bằng chứng:
+`docs/k6-memsrv.md` §8, `JOURNAL/kt67b-journal.md`. Nợ còn lại của đường cap: policy **copy**
+move chưa có (`CNode.Delete`/`Revoke` ngoài danh sách trắng) — ghi ở journal §11. Ngoài ra `CNode.Insert` mà D2-96/97 nhắc **không có method id** trong
 bảng `CNode` của spec (`Copy=0..Rotate=6`, spec đóng băng) nên giữ `NotSupported`; core đã có API
 `copy/mint/delete/revoke` để gắn id có sẵn ở task sau.

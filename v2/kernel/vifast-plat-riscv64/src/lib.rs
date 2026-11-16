@@ -64,6 +64,9 @@ use vifast_plat_common::trap::{
 use vifast_plat_common::{Platform, PlatformWriter};
 
 pub mod core_bridge;
+/// KT-67b: đọc header IPC buffer của U-mode (chỉ ảnh có `user`; tách khỏi `user` cho R1).
+#[cfg(feature = "user")]
+pub mod ipc_buffer;
 pub mod ipi;
 // KT-67: cầu nối D2-83 (core giữ cap ↔ object layer giữ Frame/PA) cho memsrv.
 pub mod mem_bridge;

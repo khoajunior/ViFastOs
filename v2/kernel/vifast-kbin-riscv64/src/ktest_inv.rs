@@ -305,9 +305,12 @@ pub fn invocation_phase(
             snap.syscalls,
             snap.entries
         );
+        // Ca âm “VSpace chỉ READ ⇒ 3” và “caps=1 ⇒ 18” do **chương trình** kiểm (`inv_user.S`
+        // mã thoát 97/96); dòng này chỉ in số **đo được** ở kernel, không nhãn hard-code
+        // (reviewer-kt67a nit 3).
         let _ = writeln!(
             w,
-            "# inv: deny2 ran={} frame_a_maps={} frame_b_maps={} ro_vspace=1 caps_msg=1 walk_after={}",
+            "# inv: deny2 ran={} frame_a_maps={} frame_b_maps={} walk_after={}",
             u8::from(snap.state == TaskState::Faulted),
             frame_a_maps,
             frame_b_maps,

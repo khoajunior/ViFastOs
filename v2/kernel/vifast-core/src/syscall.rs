@@ -40,16 +40,24 @@
 //!
 //! # Chưa làm (nợ K3.5, có chủ)
 //!
-//! - **Chuyển cap** trong message (`MessageInfo.caps > 0`) vẫn `InvalidArgument` — KT-63.
 //! - **MR > 4** (MR4..MR63 qua IPC buffer) chưa đọc được ra/ghi vào user buffer ⇒ `InvalidArgument`
 //!   ghi nợ; 4 MR thanh ghi `a3..a6` chạy đầy đủ.
-//! - **Invocation** (Call trên cap không phải Endpoint) trả `NotSupported` theo D2-53 Q11, chưa
-//!   mở bảng method.
+//! - **Invocation** ngoài danh sách trắng `Untyped.Retype`/`Frame.Map`/`Frame.Unmap` trả
+//!   `NotSupported` (D2-53 Q11) — xem [`crate::invoke`].
+//!
+//! # KT-67b — chuyển cap qua U-mode (`MessageInfo.caps > 0`)
+//!
+//! **KT-63** đã có cơ chế kernel (`resolve_caps`/`prepare_caps`/`deliver_caps`); phần thiếu là
+//! phía U-mode: header IPC buffer (`spec/abi.toml` dòng 58) + [`build_message`] đọc từ đó. Từ
+//! KT-67b [`build_message`] **lấy receive window từ IPC buffer** của TCB gọi (qua hook
+//! [`SyscallEnv::ipc_header`], arch đọc user memory — D2-83) thay vì window do `Machine` đặt
+//! ngoài băng, và giải mã `MessageInfo.caps` + CPTR nguồn trong header thành `CapId` của CSpace
+//! caller. Không đổi `MessageInfo` 35 bit, không thêm syscall.
 //!
 //! `#![forbid(unsafe_code)]` của crate áp dụng nguyên vẹn: tệp này chỉ gọi API an toàn.
 
 use crate::error::{KError, ObjId, ObjType, SlotRef};
-use crate::ipc::{Message, MessageInfo, WORDS_IN_REGISTERS};
+use crate::ipc::{IpcHeader, Message, MessageInfo, MAX_CAPS, WORDS_IN_REGISTERS};
 use crate::machine::Machine;
 use crate::spec::SYSCALL_COUNT;
 use crate::tcb::TcbState;
@@ -184,6 +192,14 @@ pub trait SyscallEnv {
     /// Rollback object vừa cấp bên object layer khi core **không** dựng nổi object đại diện
     /// (bảng đầy) — giữ nguyên tử của `Untyped.Retype`. Mặc định không làm gì.
     fn release_object(&mut self, _key: u64) {}
+
+    /// **KT-67b** — header **IPC buffer** của TCB gọi (D2-98): magic + `MessageInfo` bản ghi +
+    /// receive window 4 CPTR + 4 CPTR nguồn cap. Arch đọc **bộ nhớ user** (D2-83: core không
+    /// đọc/ghi bộ nhớ user) sau khi kiểm trang đã map; `None` = chưa dùng header (magic 0 —
+    /// mọi ảnh cũ giữ nguyên hành vi) hoặc nền tảng không có IPC buffer.
+    fn ipc_header(&mut self, _tcb: ObjId) -> Option<IpcHeader> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -222,17 +238,82 @@ fn cap_type_at(m: &Machine, slot: SlotRef) -> Result<ObjType, KError> {
     Ok(info.ty)
 }
 
-/// Dựng `Message` từ `MessageInfo` thô + tối đa 4 MR thanh ghi.
+/// Đọc header IPC buffer của TCB gọi và **áp** receive window của nó vào `Machine` — KT-67b.
 ///
-/// `length > mr.len()` ⇒ `InvalidArgument` (MR4..MR63 qua IPC buffer là nợ K3.5 — ghi ở đầu tệp);
-/// `info.caps > 0` ⇒ `InvalidArgument` (chuyển cap = KT-63).
-fn build_message(raw_info: u64, mrs: &[u64]) -> Result<Message, KError> {
+/// Đây là chỗ duy nhất window vào core: trước KT-67b window do kernel đặt ngoài băng
+/// (`Machine::tcb_set_recv_window` gọi trực tiếp từ rig); từ KT-67b nó **lấy từ header IPC
+/// buffer** (spec `abi.toml` dòng 58) qua hook arch. Header có magic ⇒ cả 4 CPTR phải là ô hợp
+/// lệ của CSpace caller (sai ⇒ lỗi, không im lặng).
+fn apply_ipc_header(
+    m: &mut Machine,
+    tcb: ObjId,
+    env: &mut impl SyscallEnv,
+) -> Result<Option<IpcHeader>, KError> {
+    let Some(header) = env.ipc_header(tcb) else {
+        return Ok(None);
+    };
+    let mut window = [SlotRef::new(0, 0); MAX_CAPS];
+    for (index, cptr) in header.recv_window.iter().enumerate() {
+        window[index] = cap_slot(m, tcb, *cptr)?;
+    }
+    m.tcb_set_recv_window_obj(tcb, window)?;
+    Ok(Some(header))
+}
+
+/// Dựng `Message` từ `MessageInfo` thô + tối đa 4 MR thanh ghi (+ header IPC buffer nếu có).
+///
+/// `length > mr.len()` ⇒ `InvalidArgument` (MR4..MR63 qua IPC buffer là nợ K3.5 — ghi ở đầu tệp).
+/// **KT-67b**: `info.caps() > 0` ⇒ giải mã `caps` CPTR nguồn từ header (không có header ⇒
+/// `InvalidArgument`), cap nguồn phải sống trong CSpace caller (rỗng/chết ⇒ `InvalidCapability`).
+/// Cap **không** được kiểm quyền `RIGHT_GRANT` ở đây — `plan_cap_transfer` xử lý **mềm** khi giao
+/// (D2-53 Q6).
+fn build_message(
+    m: &Machine,
+    tcb: ObjId,
+    raw_info: u64,
+    mrs: &[u64],
+    header: Option<IpcHeader>,
+) -> Result<Message, KError> {
     let info = MessageInfo::unpack(raw_info)?;
     let len = info.length() as usize;
     if len > mrs.len() {
         return Err(KError::InvalidArgument);
     }
-    Message::new(info, &mrs[..len])
+    let n_caps = usize::from(info.caps());
+    if n_caps == 0 {
+        return Message::new(info, &mrs[..len]);
+    }
+    let Some(header) = header else {
+        return Err(KError::InvalidArgument);
+    };
+    let mut caps = [0u32; MAX_CAPS];
+    for (index, cptr) in header.send_caps.iter().enumerate().take(n_caps) {
+        let slot = cap_slot(m, tcb, *cptr)?;
+        let cap = m
+            .cap_at(slot.cnode, slot.slot)
+            .map_err(|error| match error {
+                KError::SlotEmpty => KError::InvalidCapability,
+                other => other,
+            })?;
+        if !m.cap_info(cap)?.alive {
+            return Err(KError::InvalidCapability);
+        }
+        caps[index] = cap;
+    }
+    Message::with_caps(info, &mrs[..len], &caps[..n_caps], 0)
+}
+
+/// [`apply_ipc_header`] rồi [`build_message`] — đường chuẩn của mọi syscall IPC **gửi** (0/1/2/
+/// 5/6/7) sau KT-67b.
+fn build_with_header(
+    m: &mut Machine,
+    tcb: ObjId,
+    raw_info: u64,
+    mrs: &[u64; 4],
+    env: &mut impl SyscallEnv,
+) -> Result<Message, KError> {
+    let header = apply_ipc_header(m, tcb, env)?;
+    build_message(m, tcb, raw_info, mrs, header)
 }
 
 /// `true` ⇔ cap tại `slot` là **Notification** (nhánh trả `word/badge`, không có `MessageInfo`).
@@ -330,7 +411,13 @@ pub fn dispatch(
                         Err(code) => SyscallOutcome::Return(SyscallReturn::err(code)),
                     }
                 }
-                Ok(_) => match build_message(args[1], &args[2..6]) {
+                Ok(_) => match build_with_header(
+                    m,
+                    tcb,
+                    args[1],
+                    &[args[2], args[3], args[4], args[5]],
+                    env,
+                ) {
                     Ok(msg) => match m.call_msg(tcb, slot, msg) {
                         Ok(()) => after_ipc(m, tcb, hart, SyscallReturn::new(0, 0)),
                         Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
@@ -341,18 +428,20 @@ pub fn dispatch(
             },
             Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
         },
-        1 => match cap_slot(m, tcb, args[0])
-            .and_then(|cap| build_message(args[1], &args[2..6]).map(|msg| (cap, msg)))
-        {
+        1 => match cap_slot(m, tcb, args[0]).and_then(|cap| {
+            build_with_header(m, tcb, args[1], &[args[2], args[3], args[4], args[5]], env)
+                .map(|msg| (cap, msg))
+        }) {
             Ok((cap, msg)) => match m.send(tcb, cap, msg) {
                 Ok(()) => after_ipc(m, tcb, hart, SyscallReturn::new(0, 0)),
                 Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
             },
             Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
         },
-        2 => match cap_slot(m, tcb, args[0])
-            .and_then(|cap| build_message(args[1], &args[2..6]).map(|msg| (cap, msg)))
-        {
+        2 => match cap_slot(m, tcb, args[0]).and_then(|cap| {
+            build_with_header(m, tcb, args[1], &[args[2], args[3], args[4], args[5]], env)
+                .map(|msg| (cap, msg))
+        }) {
             Ok((cap, msg)) => match m.nb_send(tcb, cap, msg) {
                 Ok(()) => after_ipc(m, tcb, hart, SyscallReturn::new(0, 0)),
                 Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
@@ -374,6 +463,13 @@ pub fn dispatch(
                 Ok(slot) => (slot, cap_is_notification(m, slot)),
                 Err(e) => return SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
             };
+            // KT-67b: receive window lấy từ header IPC buffer **trước** khi giao (message có
+            // cap cần window). Notification không dùng window ⇒ bỏ qua.
+            if !is_ntfn {
+                if let Err(e) = apply_ipc_header(m, tcb, env) {
+                    return SyscallOutcome::Return(SyscallReturn::err(e.id() as u64));
+                }
+            }
             match m.recv(tcb, target, reply) {
                 Ok(()) => {
                     // Notification: payload `(word, badge)` trong `tcb.notif` — **không** đọc
@@ -404,6 +500,11 @@ pub fn dispatch(
                 Ok(slot) => (slot, cap_is_notification(m, slot)),
                 Err(e) => return SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
             };
+            if !is_ntfn {
+                if let Err(e) = apply_ipc_header(m, tcb, env) {
+                    return SyscallOutcome::Return(SyscallReturn::err(e.id() as u64));
+                }
+            }
             match m.nb_recv(tcb, target) {
                 Ok(Some(msg)) => {
                     if is_ntfn {
@@ -422,8 +523,10 @@ pub fn dispatch(
         }
         5 => {
             let built = cap_slot(m, tcb, args[0]).and_then(|reply| {
-                cap_slot(m, tcb, args[1])
-                    .and_then(|ep| build_message(args[2], &args[3..6]).map(|msg| (reply, ep, msg)))
+                cap_slot(m, tcb, args[1]).and_then(|ep| {
+                    build_with_header(m, tcb, args[2], &[args[3], args[4], args[5], 0], env)
+                        .map(|msg| (reply, ep, msg))
+                })
             });
             match built {
                 Ok((reply, ep, msg)) => match m.reply_recv(tcb, reply, ep, msg, None) {
@@ -447,7 +550,8 @@ pub fn dispatch(
             };
             let built = cap_slot(m, tcb, args[0]).and_then(|send| {
                 cap_slot(m, tcb, args[1]).and_then(|recv| {
-                    build_message(args[3], &args[4..6]).map(|msg| (send, recv, msg))
+                    build_with_header(m, tcb, args[3], &[args[4], args[5], 0, 0], env)
+                        .map(|msg| (send, recv, msg))
                 })
             });
             match built {
@@ -464,7 +568,8 @@ pub fn dispatch(
         7 => {
             let built = cap_slot(m, tcb, args[0]).and_then(|send| {
                 cap_slot(m, tcb, args[1]).and_then(|ntfn| {
-                    build_message(args[2], &args[3..6]).map(|msg| (send, ntfn, msg))
+                    build_with_header(m, tcb, args[2], &[args[3], args[4], args[5], 0], env)
+                        .map(|msg| (send, ntfn, msg))
                 })
             });
             match built {
@@ -563,3 +668,169 @@ pub fn tcb_has_cspace(m: &Machine, tcb: ObjId) -> bool {
 
 /// `WORDS_IN_REGISTERS` — số MR đi trong thanh ghi (`spec/abi.toml` = 4).
 pub const MR_IN_REGS: usize = WORDS_IN_REGISTERS;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::CapId;
+    use crate::ipc::IPC_HEADER_MAGIC;
+
+    /// Env giả chỉ trả **header IPC buffer** — các hook khác không dùng trong test KT-67b
+    /// (giữ `no_std`-an toàn, không chạm bộ nhớ user).
+    struct HeaderEnv(Option<IpcHeader>);
+
+    impl SyscallEnv for HeaderEnv {
+        fn put_str(&mut self, _ptr: u64, _len: u64) -> Result<u64, u64> {
+            Ok(0)
+        }
+        fn resolve_addr(&mut self, _va: u64) -> Result<(u32, u32), u64> {
+            Err(KError::NotMapped.id() as u64)
+        }
+        fn now_ns(&mut self) -> u64 {
+            0
+        }
+        fn features(&mut self) -> u64 {
+            0
+        }
+        fn num_harts(&mut self) -> u64 {
+            1
+        }
+        fn ipc_header(&mut self, _tcb: ObjId) -> Option<IpcHeader> {
+            self.0
+        }
+    }
+
+    fn header(window: [u64; 4], send_caps: [u64; 4]) -> IpcHeader {
+        IpcHeader {
+            info: 0,
+            recv_window: window,
+            send_caps,
+        }
+    }
+
+    /// Machine nhỏ: CNode 16 ô (0 Untyped, 1 TCB, 2 cap cspace, 3 Endpoint), TCB đã configure.
+    fn fixture() -> (Machine, ObjId, ObjId, CapId) {
+        let mut m = Machine::new();
+        let root = m.add_cnode(16);
+        let u = m.add_untyped(0x1000, 1 << 16);
+        let ucap = m.root_cap(u);
+        let us = SlotRef::new(root, 0);
+        m.put_cap(root, 0, ucap).expect("cap Untyped");
+        let cs = m.root_cap(root);
+        m.put_cap(root, 2, cs).expect("cap cspace");
+        let tcb_cap = m.retype(us, ObjType::Tcb, 0, 0).expect("retype Tcb");
+        m.put_cap(root, 1, tcb_cap).expect("cap Tcb");
+        let tcb = m.cap_obj(tcb_cap).expect("obj Tcb");
+        m.tcb_configure(SlotRef::new(root, 1), Some(SlotRef::new(root, 2)))
+            .expect("cspace cua TCB");
+        let ep_cap = m
+            .retype(us, ObjType::Endpoint, 0, 0)
+            .expect("retype Endpoint");
+        m.put_cap(root, 3, ep_cap).expect("cap Endpoint");
+        (m, root, tcb, ep_cap)
+    }
+
+    /// Magic trong core phải **đúng** chuỗi `b"KT67b"` little-endian (shim ghi cùng hằng — nếu
+    /// một bên đổi, TAP 19 đỏ ngay vì magic không khớp).
+    #[test]
+    fn magic_header_khop_b_kt67b() {
+        assert_eq!(IPC_HEADER_MAGIC.to_le_bytes(), *b"KT67b\0\0\0");
+    }
+
+    /// `apply_ipc_header` áp **cả 4** CPTR vào receive window của TCB.
+    #[test]
+    fn window_tu_header_vao_tcb() {
+        let (mut m, root, tcb, _ep) = fixture();
+        let mut env = HeaderEnv(Some(header([8, 9, 10, 11], [0; 4])));
+        assert!(apply_ipc_header(&mut m, tcb, &mut env)
+            .expect("header hợp lệ")
+            .is_some());
+        let window = m
+            .tcb_recv_window(tcb)
+            .expect("đọc window")
+            .expect("đã bind");
+        assert_eq!(
+            window,
+            [
+                SlotRef::new(root, 8),
+                SlotRef::new(root, 9),
+                SlotRef::new(root, 10),
+                SlotRef::new(root, 11),
+            ]
+        );
+    }
+
+    /// CPTR ngoài bảng CSpace ⇒ `InvalidCapability` (1) — không im lặng bỏ qua window.
+    #[test]
+    fn window_ngoai_bang_la_invalid_capability() {
+        let (mut m, _root, tcb, _ep) = fixture();
+        let mut env = HeaderEnv(Some(header([99, 0, 0, 0], [0; 4])));
+        assert_eq!(
+            apply_ipc_header(&mut m, tcb, &mut env),
+            Err(KError::InvalidCapability)
+        );
+    }
+
+    /// Hai CPTR trùng nhau ⇒ `InvalidArgument` (5): hai cap cài cùng ô sẽ đè nhau.
+    #[test]
+    fn window_trung_o_la_invalid_argument() {
+        let (mut m, _root, tcb, _ep) = fixture();
+        let mut env = HeaderEnv(Some(header([8, 8, 9, 10], [0; 4])));
+        assert_eq!(
+            apply_ipc_header(&mut m, tcb, &mut env),
+            Err(KError::InvalidArgument)
+        );
+    }
+
+    /// `caps = 1` + header ⇒ message mang **đúng** cap nguồn từ CPTR trong header.
+    #[test]
+    fn build_message_lay_cap_tu_header() {
+        let (m, _root, tcb, ep_cap) = fixture();
+        let info = MessageInfo::new(0x670, 1, false, 0, 1)
+            .expect("MessageInfo hợp lệ")
+            .pack();
+        let msg = build_message(
+            &m,
+            tcb,
+            info,
+            &[0xAA, 0, 0, 0],
+            Some(header([8, 9, 10, 11], [3, 0, 0, 0])),
+        )
+        .expect("message mang cap");
+        assert_eq!(msg.cap_count(), 1);
+        assert_eq!(msg.cap_ids(), &[ep_cap]);
+        assert_eq!(msg.words(), &[0xAA]);
+    }
+
+    /// `caps > 0` mà **không** có header ⇒ `InvalidArgument` (5): không đoán CPTR nguồn.
+    #[test]
+    fn caps_khong_header_la_invalid_argument() {
+        let (m, _root, tcb, _ep) = fixture();
+        let info = MessageInfo::new(0, 1, false, 0, 0)
+            .expect("MessageInfo hợp lệ")
+            .pack();
+        assert_eq!(
+            build_message(&m, tcb, info, &[0; 4], None),
+            Err(KError::InvalidArgument)
+        );
+    }
+
+    /// CPTR nguồn trỏ ô **rỗng** ⇒ `InvalidCapability` (1) — ca âm của memsrv trong TAP 19.
+    #[test]
+    fn cap_nguon_rong_la_invalid_capability() {
+        let (m, _root, tcb, _ep) = fixture();
+        let info = MessageInfo::new(0, 1, false, 0, 0)
+            .expect("MessageInfo hợp lệ")
+            .pack();
+        assert_eq!(
+            build_message(
+                &m,
+                tcb,
+                info,
+                &[0; 4],
+                Some(header([8, 9, 10, 11], [9, 0, 0, 0]))
+            ),
+            Err(KError::InvalidCapability)
+        );
+    }
+}

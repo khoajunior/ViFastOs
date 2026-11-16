@@ -9,8 +9,12 @@ Dùng: `python3 check_abi.py [--file spec/abi.toml]`  (cần Python ≥3.11 có 
 """
 
 import sys
+from pathlib import Path
 
 SPDX = "SPDX-License-Identifier"
+
+# Gốc repo (tệp nằm ở `v2/test/abi/check_abi.py`) — để cross-check artifact do `vifast-gen` sinh.
+ROOT = Path(__file__).resolve().parents[3]
 
 SYSCALLS = {
     0: "Call",
@@ -177,8 +181,28 @@ def main():
     sig = doc.get("method_signature") or {}
     check(sig.get("stability") == "stable-draft",
           "thiếu [method_signature].stability = 'stable-draft' (KT-05 bước 0)")
+    # KT-67b: **không** pin số viết tay (pin 13 cũ đã lỗi thời khi spec mở theo D2-99).
+    # Số kỳ vọng **suy ra** từ spec: mọi khoá `[method_signature."X.Y"]` phải là một entry có
+    # `params` (đúng quy ước D2-33); so **tập** để bắt cả entry thiếu `params` lẫn entry lạ.
+    sig_keys = sorted(k for k in sig if isinstance(k, str) and "." in k)
     methods = {k: v for k, v in sig.items() if isinstance(v, dict) and "params" in v}
-    check(len(methods) == 13, f"phải có 13 chữ ký method, đang {len(methods)}")
+    check(sorted(methods) == sig_keys,
+          "mọi [method_signature.\"X.Y\"] phải có `params` (spec có "
+          f"{len(sig_keys)} khoá, thấy {len(methods)} chữ ký)")
+    # Nguồn thứ hai (cùng pipeline): số phần tử của `METHOD_SIGNATURES` do `vifast-gen` sinh.
+    # Gen-check so **byte**; đây so **số lượng** để máy kiểm ABI tự đứng một mình vẫn có răng.
+    generated = (ROOT / "v2/lib/vifast-abi/src/generated.rs")
+    if generated.exists():
+        text = generated.read_text(encoding="utf-8")
+        marker = "METHOD_SIGNATURES:"
+        line = next((ln for ln in text.splitlines() if marker in ln), "")
+        count = ""
+        for part in line.split(";"):
+            digits = "".join(ch for ch in part if ch.isdigit())
+            if digits:
+                count = digits
+        check(count != "" and int(count) == len(sig_keys),
+              f"generated.rs phải có đúng {len(sig_keys)} chữ ký (METHOD_SIGNATURES), đang {count or '?'}")
     objs = doc.get("object", {})
     for name, entry in methods.items():
         obj, _, meth = name.partition(".")

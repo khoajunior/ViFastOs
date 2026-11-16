@@ -34,9 +34,25 @@ mod tests {
         assert_eq!(ERRORS[18].1, 19);
     }
 
+    /// KT-67b: **không** pin số chữ ký (pin 13 cũ đã lỗi thời khi spec mở theo D2-99) — số kỳ
+    /// vọng **suy từ `spec/abi.toml`** (đếm khoá `[method_signature."X.Y"]`), nên thêm chữ ký
+    /// không phải sửa test mà vẫn bắt được generated.rs lệch spec.
     #[test]
-    fn chu_ky_method_du_13_va_co_read_state() {
-        assert_eq!(METHOD_SIGNATURES.len(), 13);
+    fn chu_ky_method_sinh_tu_spec_va_co_read_state() {
+        let spec = include_str!("../../../../spec/abi.toml");
+        let expected = spec
+            .lines()
+            .filter(|line| line.trim_start().starts_with("[method_signature.\""))
+            .count();
+        assert_eq!(METHOD_SIGNATURES.len(), expected);
+        let mut names: Vec<&str> = METHOD_SIGNATURES.iter().map(|(n, _, _)| *n).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            METHOD_SIGNATURES.len(),
+            "tên chữ ký phải không trùng"
+        );
         let rs = METHOD_SIGNATURES
             .iter()
             .find(|(n, _, _)| *n == "Tcb.ReadState")
@@ -47,6 +63,13 @@ mod tests {
             .find(|(n, _, _)| *n == "Untyped.Retype")
             .expect("phải có Untyped.Retype");
         assert!(retype.1.contains(&"type"));
+        // KT-67b (D2-99): Retype có `dst` và trả `slot` (hợp đồng ABI, không còn `returns=[]`).
+        assert!(retype.1.contains(&"dst"), "Retype phải có dst (D2-99)");
+        assert_eq!(retype.2, &["slot"], "Retype trả slot (D2-99)");
+        assert!(METHOD_SIGNATURES.iter().any(|(n, _, _)| *n == "Frame.Map"));
+        assert!(METHOD_SIGNATURES
+            .iter()
+            .any(|(n, _, _)| *n == "Frame.Unmap"));
     }
 
     #[test]

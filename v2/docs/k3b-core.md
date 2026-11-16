@@ -1287,17 +1287,99 @@ invocation ⇒ TAP 15..18 đỏ, mọi `Call` non-Endpoint trả 18), `kt67a-red
 
 ### 14.6 Nợ còn lại (không tô hồng)
 
-1. **Chuyển cap giữa hai TCB U-mode**: **ABI đã đủ** — receive window nằm trong IPC buffer
-   header (`spec/abi.toml` `[calling.riscv64].ipc_buffer`, dòng 58) và core đã có
-   `tcb_set_recv_window`/`plan_cap_transfer`/`deliver_caps`. Thiếu là **shim U-mode**: `syscall7`
-   (`v2/kernel/vifast-plat-user/lib.rs:28`) không ghi header; chỗ **từ chối** `caps > 0` hiện là
-   nhánh invocation (`v2/kernel/vifast-core/src/invoke.rs`), còn `build_message`
-   (`v2/kernel/vifast-core/src/syscall.rs`) **không** kiểm `caps` ⇒
-   pha này memsrv+client là **một** chương trình; **KT-67b (D2-98)** cài header IPC buffer +
-   receive window trong shim, **không** sửa `spec/`.
+1. ~~**Chuyển cap giữa hai TCB U-mode**~~ — **ĐÓNG ở §15** (KT-67b): **ABI đã đủ** — receive
+   window nằm trong IPC buffer header (`spec/abi.toml` `[calling.riscv64].ipc_buffer`, dòng 58) và
+   core đã có `tcb_set_recv_window`/`plan_cap_transfer`/`deliver_caps`; phần thiếu là **shim
+   U-mode** + `build_message` đọc header — KT-67b cài cả hai (TAP 19: memsrv.elf → client.elf,
+   cap cài vào **cspace B**).
 2. **`CNode.Insert`** không có method id trong `spec/abi.toml` (bảng CNode 0..6) ⇒ chưa cài,
    `NotSupported`; core đã có API `copy/mint/delete/revoke` để gắn method id có sẵn sau này.
 3. **Revoke xuyên invocation** (`CNode.Revoke`/`Untyped` revoke qua invocation) chưa mở; chỉ
    TAP/test kernel gọi API core. `release_object` chỉ là rollback nội bộ của Retype.
 4. `Frame.Map` chỉ nhận cap `Frame` **đại diện** (foreign) — map Frame core-owned (nếu có) trả
    `WrongObjectType`; object layer vẫn kiểm W^X/Device/căn lề và trả mã ABI đúng.
+
+## 15. KT-67b — header IPC buffer trong core: `build_message` lấy window + cap từ header (D2-98)
+
+Mục tiêu: **hai tiến trình U-mode** thật sự trao đổi **cap Frame** qua Endpoint, cap nhận nằm
+trong **cspace của bên nhận**. ABI đã đủ (receive window trong header IPC buffer — `spec/abi.toml`
+dòng 58); task này cài phần **core + shim** còn thiếu, không thêm syscall, không đổi
+`MessageInfo` 35 bit, không nới ngưỡng.
+
+### 15.1 Model: `IpcHeader` + hook arch (D2-83)
+
+`v2/kernel/vifast-core/src/ipc.rs` thêm (model `[TK]`, không phải ABI):
+
+| Hằng/kiểu | Nội dung |
+|---|---|
+| `IPC_HEADER_MAGIC` | `0x0000_0062_3736_544b` = `b"KT67b"` little-endian |
+| `IPC_HEADER_WORDS = 10` | magic + info + window(4) + send caps(4) |
+| `IPC_HEADER_W_INFO = 1`, `W_WINDOW = 2`, `W_SEND_CAPS = 6` | offset word |
+| `IpcHeader { info, recv_window: [u64;4], send_caps: [u64;4] }` | bản đọc từ bộ nhớ user |
+
+`SyscallEnv` thêm `fn ipc_header(&mut self, _tcb: ObjId) -> Option<IpcHeader> { None }` — **mặc
+định `None`** nên mọi ảnh/nền tảng chưa dùng header giữ nguyên hành vi cũ (kể cả test kernel-level
+với `TestEnv`). Arch `vifast-plat-riscv64::user::UserMemAccess` cài: chỉ đọc khi `LAST_VSPACE` đã
+có (đang trong syscall U-mode), trang nằm trong `active_ranges` (đăng ký lúc nạp), đọc 10 word
+bằng `sstatus.SUM` rồi tắt ngay; magic không khớp ⇒ `None`. Core **không** đọc/ghi byte user
+(D2-83 giữ nguyên).
+
+### 15.2 Đường syscall (`v2/kernel/vifast-core/src/syscall.rs`)
+
+- `apply_ipc_header(m, tcb, env)` — **chỗ duy nhất** window vào core: 4 CPTR → `cap_slot` →
+  `Machine::tcb_set_recv_window_obj` (API mới dùng `ObjId`; thân kiểm dùng chung với bản
+  `SlotRef` của KT-63: CNode còn sống, 4 ô khác nhau; sai ⇒ `InvalidCapability` **1** /
+  `InvalidArgument` **5**, không im lặng).
+- `build_message(m, tcb, info, MR0..3, header)`:
+  - `info.caps() == 0` ⇒ `Message::new` (đường cũ, không đổi);
+  - `caps > 0` ⇒ CPTR **word 6..9** của header → `cap_slot` → `cap_at` (rỗng/chết ⇒
+    `InvalidCapability`); `Message::with_caps(info, words, caps, 0)`; **không header** ⇒
+    `InvalidArgument` **5**;
+  - `length > 4` vẫn `InvalidArgument` (MR4..MR63 qua IPC buffer vẫn là nợ).
+- Nhánh **gửi** (0 Endpoint/1/2/5/6/7) dùng `build_with_header`; nhánh **nhận** (3/4) áp window
+  **trước khi giao** (message có cap cần window — KT-63 kiểm ở `prepare_caps` lúc `recv`, không
+  phải lúc `send`); Notification không áp window.
+- Nhánh **invocation** (Call trên cap không phải Endpoint) **không** đổi: `MessageInfo.caps > 0`
+  vẫn `NotSupported` **18** + đếm (D2-99(g)) — chuyển cap đi đường Endpoint, không đi invocation.
+
+### 15.3 Không nhân đôi chủ sở hữu (D2-83)
+
+Core vẫn **không** sở hữu `Frame`/`PageTable`/`VSpace`: nó chỉ thấy `CapId` của object **đại
+diện** (foreign) do `mem_bridge` dựng và chuyển nguyên qua KT-63. Cap cài vào window là **cap
+con** của object đại diện (bỏ `RIGHT_GRANT`); PA/PTE vẫn chỉ object layer biết — TAP đọc PA qua
+`mem_bridge::resolve` rồi `read_phys_u64`, không đi qua core.
+
+### 15.4 Test host mới (`cargo test -p vifast-core`)
+
+`syscall.rs` thêm 6 test (đếm ở log `JOURNAL/kt67b-core-tests.log`):
+
+1. `apply_ipc_header` ghi đúng window 4 CPTR vào TCB (so `tcb_recv_window`);
+2. window có CPTR ngoài bảng CSpace ⇒ `InvalidCapability`;
+3. window trùng ô ⇒ `InvalidArgument`;
+4. `build_message` `caps=1` + header → `Message` có đúng 1 cap nguồn (so `cap_ids`);
+5. `caps>0` **không** header ⇒ `InvalidArgument`;
+6. CPTR nguồn trỏ ô rỗng ⇒ `InvalidCapability`.
+
+### 15.5 Không hồi quy
+
+TAP KT-63 (`ktest` 53..55) và toàn bộ ảnh `ktest` vẫn **65/65**; `ktest-user` lên **19 TAP**
+(KT-67a 15..18 + KT-67b 19); `ktest-guard` 3/3; `ktest-proc` 10/10; matrix **12/12** boot
+(smp 1/2/4). Gate `--fast` **PASS 661/87**; soak **0/1000** (BUILD_ID `02ed5a1810ba59ce`);
+`cargo test -p vifast-core` **32 passed** (7 test mới §15.4); clippy kernel **4 tổ hợp `EXIT=0`**;
+hai ngưỡng giữ nguyên (`size_of::<Machine>() = 188.872 B` ≤ 196.608; ảnh user 202.488 ≤ 262.144).
+Header chỉ được đọc khi magic khớp nên mọi chương trình cũ (`init`, `procsrv`, `shell`, `child`,
+`inv`) **không** đổi hành vi. Số đo chi tiết + red-before + nợ: `v2/agent/JOURNAL/kt67b-journal.md`.
+
+### 15.6 Chạy lại
+
+```bash
+./v2/bin/v2 gate --fast                    # L0 + L1 (chạy thuần — xem D2-100 về artifact biên dịch)
+cargo test -p vifast-core --manifest-path v2/Cargo.toml     # 6 test mới của §15.4
+bash v2/test/boot/ktest.sh 1 matrix        # 4 ảnh × smp 1/2/4 = 12 boot
+bash v2/test/boot/soak.sh 1000 3           # 0/1000
+```
+
+Log tương ứng: `v2/agent/JOURNAL/kt67b-{gate,ktest-matrix,soak,core-tests,clippy-kernel,
+red-before-ktest-user,red-before-matrix1,udisasm-no-priv}.log`; chi tiết phía memsrv/ABI ở
+`v2/docs/k6-memsrv.md` §8. Ba ELF U-mode được disassemble (F2, D2-101): chỉ `ecall` + load/store
+thường, **0** lệnh đặc quyền/CSR/satp.

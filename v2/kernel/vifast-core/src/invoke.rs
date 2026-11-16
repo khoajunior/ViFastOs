@@ -336,8 +336,9 @@ fn retype(
                 Ok(()) => {
                     bump(&RETYPE);
                     bump(&ALLOWED);
-                    // `a1` = slot đích (quy ước D2-99; `returns = []` của spec nên giá trị này
-                    // **không** phải hợp đồng ABI).
+                    // `a1` = slot đích — **hợp đồng ABI** từ D2-99: `spec/abi.toml`
+                    // `[method_signature."Untyped.Retype"].returns = ["slot"]` (KT-67b cập nhật
+                    // spec đúng một lần theo D2-99).
                     Ok((0, dst as u64))
                 }
                 Err(e) => {

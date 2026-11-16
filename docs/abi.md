@@ -79,6 +79,8 @@ SINH TỰ ĐỘNG bởi `v2/tools/vifast-gen` từ `spec/abi.toml` — **đừng
 | `CNode.Mint` | cnode, src, dst, rights?, badge? | — |
 | `CNode.Move` | cnode, src, dst | — |
 | `CNode.Revoke` | cnode, slot? | — |
+| `Frame.Map` | frame, vspace, va, flags | — |
+| `Frame.Unmap` | frame, vspace, va | — |
 | `SchedContext.Bind` | sched, target | — |
 | `SchedControl.Configure` | sched_control, sched, budget?, period?, refills? | — |
 | `Tcb.Configure` | tcb, cspace?, vspace?, entry?, ipc_buffer?, priority? | — |
@@ -86,7 +88,7 @@ SINH TỰ ĐỘNG bởi `v2/tools/vifast-gen` từ `spec/abi.toml` — **đừng
 | `Tcb.Resume` | tcb | — |
 | `Tcb.SetFaultEp` | tcb, cap | — |
 | `Tcb.Suspend` | tcb, mode | — |
-| `Untyped.Retype` | cap, type, size_bits, flags | — |
+| `Untyped.Retype` | cap, dst, type, size_bits, flags | slot |
 
 ## `FaultKind` (D2-56a, `[method_signature.fault_kind]`)
 

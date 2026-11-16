@@ -518,3 +518,35 @@ pub fn transfer(msg: &Message, area: &mut IpcArea) -> usize {
     area.msg_id = Some(msg.msg_id);
     len
 }
+
+// ---------------------------------------------------------------------------------------------
+// KT-67b — header **IPC buffer** của U-mode (D2-98; spec dòng 58 "header chứa receive window")
+// ---------------------------------------------------------------------------------------------
+
+/// Magic của header IPC buffer — `b"KT67b"` little-endian. Shim U-mode
+/// (`v2/kernel/vifast-plat-user/lib.rs`, `HEADER_MAGIC`) ghi **đúng** hằng này; kernel chỉ đọc
+/// header khi khớp (vùng zero = chương trình chưa dùng header ⇒ bỏ qua, không phá ảnh cũ).
+pub const IPC_HEADER_MAGIC: u64 = 0x0000_0062_3736_544b;
+/// Số word qword của header: magic + info + receive window (4) + send caps (4).
+pub const IPC_HEADER_WORDS: usize = 10;
+/// Word `MessageInfo` (bản ghi của shim; ABI vẫn lấy `a2` — D2-15).
+pub const IPC_HEADER_W_INFO: usize = 1;
+/// Word đầu của receive window (4 CPTR) — spec `abi.toml` dòng 58.
+pub const IPC_HEADER_W_WINDOW: usize = 2;
+/// Word đầu của CPTR nguồn cap của message đang gửi (4 CPTR) — `[TK]` KT-67b.
+pub const IPC_HEADER_W_SEND_CAPS: usize = 6;
+
+/// Header IPC buffer của **một** TCB (model `[TK]`, không phải ABI): `MessageInfo` (bản ghi) +
+/// receive window 4 CPTR + 4 CPTR nguồn cap.
+///
+/// Arch đọc từ **bộ nhớ user** (D2-83: core không đọc user memory) rồi trả qua
+/// [`crate::syscall::SyscallEnv::ipc_header`]; `None` = ảnh không dùng header (magic 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IpcHeader {
+    /// `MessageInfo` 35 bit bản ghi của shim (không phải nguồn ABI — nguồn là `a2`).
+    pub info: u64,
+    /// 4 CPTR đích khi **nhận** cap (receive window).
+    pub recv_window: [u64; MAX_CAPS],
+    /// 4 CPTR nguồn cap của message đang **gửi**.
+    pub send_caps: [u64; MAX_CAPS],
+}

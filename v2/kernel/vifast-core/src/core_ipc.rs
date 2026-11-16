@@ -1400,6 +1400,28 @@ impl Machine {
         window: [SlotRef; MAX_CAPS],
     ) -> Result<(), KError> {
         let tcb_obj = self.require_type(tcb, ObjType::Tcb)?;
+        self.set_recv_window_for(tcb_obj, window)
+    }
+
+    /// **KT-67b** — như [`Machine::tcb_set_recv_window`] nhưng nhận **`ObjId`** của TCB, dùng cho
+    /// đường syscall: `build_message` lấy receive window từ **header IPC buffer** của chính TCB
+    /// gọi (D2-98) — core không có (và không cần) một slot cap TCB của caller.
+    pub fn tcb_set_recv_window_obj(
+        &mut self,
+        tcb: ObjId,
+        window: [SlotRef; MAX_CAPS],
+    ) -> Result<(), KError> {
+        // `tcb_data` kiểm đúng loại TCB (cùng ngữ nghĩa `require_type`).
+        let _ = self.tcb_data(tcb)?;
+        self.set_recv_window_for(tcb, window)
+    }
+
+    /// Phần chung: kiểm 4 ô window (CNode còn sống, ô khác nhau) rồi gán.
+    fn set_recv_window_for(
+        &mut self,
+        tcb_obj: ObjId,
+        window: [SlotRef; MAX_CAPS],
+    ) -> Result<(), KError> {
         for (i, w) in window.iter().enumerate() {
             self.check_cnode_slot(w.cnode, w.slot)?;
             if window[..i].contains(w) {

@@ -13,11 +13,13 @@
 #                     trap lồng fatal (56).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
-#   - `ktest-user`  : 18 TAP (KT-62 + KT-67a) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
+#   - `ktest-user`  : 19 TAP (KT-62 + KT-67a + KT-67b) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
 #                     `Machine` thật (DebugGetInfo 15, Yield 8, Exit 14 + 5 lần ngoài dải ⇒ 19), TAP
 #                     kernel-level cho bảng 16 syscall/cap sai/IPC/NB/WaitAddr/Clock/Yield (7..13),
 #                     `Exit` không Reply (14); **KT-67a** invocation hẹp (15..18: Retype/Map/Unmap/
-#                     method lạ ⇒ 18) trên U-mode thật; kết thúc sạch bằng PANIC có chủ đích.
+#                     method lạ ⇒ 18) trên U-mode thật; **KT-67b** chuyển cap Frame giữa hai tiến
+#                     trình U-mode (19: memsrv.elf → client.elf, cap trong cspace B, map/ghi/đọc);
+#                     kết thúc sạch bằng PANIC có chủ đích.
 #   - `ktest-proc`  : 10 TAP (KT-65, **tách ảnh KT-66**) — đúng mười ca cũ 15..24 của ảnh user:
 #                     procsrv/shell/con U-mode (1..7) + 3 TAP fault/wx (8..10, PANIC `u-mode fault`).
 #                     `ktest-user` trả ~40 KiB headroom nhờ bỏ `proc_demo` + 3 ELF demo khỏi ảnh đó.
@@ -303,6 +305,7 @@ invocation untyped retype
 invocation frame map
 invocation frame unmap va fault
 invocation ngoai danh sach
+ipc capx hai tien trinh
 EOF
 }
 
@@ -516,9 +519,12 @@ EOF
 ^# inv: map method=0 va=0x41000000 pa=0x[0-9a-f]+ err=0 stats=1 phys=0x1122334455667788$
 ^# inv: unmap method=1 va=0x41000000 err=0 stats=1 walk_after=0 objmem=1 caps=1$
 ^# inv: deny err=18 stats=3 allowed=3 last_err=18 syscalls=[0-9]+ entries=2$
-^# inv: deny2 ran=1 frame_a_maps=0 frame_b_maps=0 ro_vspace=1 caps_msg=1 walk_after=0$
+^# inv: deny2 ran=1 frame_a_maps=0 frame_b_maps=0 walk_after=0$
 ^# inv: fault va=0x41000000 kind=Vm\{NotMapped,Read\} ok=1 snap_state=Faulted$
-^# ktest-user: taps=18 ok=1$
+^# capx: pre cspace_b4=empty cspace_b5=empty walk=0 a5=Frame src_alive=1 policy=copy$
+^# capx: recv slot=4 ty=Frame rights=0xb obj=[0-9]+ from_obj=[0-9]+ from_rights=0xf installed=1 failed=1$
+^# capx: map va=0x41000000 pa=0x[0-9a-f]+ bits=12 walk=1 walk_pa=0x[0-9a-f]+ phys=0x8877665544332211 caps=1 ipc=1 obj=1 src_alive=1$
+^# ktest-user: taps=19 ok=1$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -576,7 +582,7 @@ panic_allow_re() {
     case "$1" in
         ktest) printf '%s' '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$' ;;
         ktest-guard) printf '%s' '^PANIC: guard page fault scause=0xf stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+$' ;;
-        ktest-user) printf '%s' '^PANIC: KT-67a u-mode pha syscall va invocation xong \(18 TAP, 0 fail\)$' ;;
+        ktest-user) printf '%s' '^PANIC: KT-67b u-mode pha syscall, invocation va chuyen cap xong \(19 TAP, 0 fail\)$' ;;
         ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         *) return 1 ;;
     esac

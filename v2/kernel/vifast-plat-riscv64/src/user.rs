@@ -89,8 +89,8 @@ pub const USER_STACK_GUARD_BOTTOM: u64 = USER_STACK_TOP - USER_STACK_BYTES - 0x1
 /// Đỉnh trang guard (đáy stack).
 pub const USER_STACK_GUARD_TOP: u64 = USER_STACK_TOP - USER_STACK_BYTES;
 
-/// Số dải VA user được phép đọc trong `DebugPutStr`: mỗi `PT_LOAD` một dải + stack user.
-const MAX_USER_RANGES: usize = vifast_elf::MAX_LOAD_SEGMENTS + 1;
+/// Số dải VA user đọc được (`DebugPutStr`): mỗi `PT_LOAD` một dải + stack + trang IPC buffer.
+const MAX_USER_RANGES: usize = vifast_elf::MAX_LOAD_SEGMENTS + 2;
 
 /// VSpace của lượt U-mode gần nhất (để phân loại fault **sau khi** khôi phục root kernel).
 static LAST_VSPACE: AtomicU32 = AtomicU32::new(u32::MAX);
@@ -623,6 +623,24 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
         stack_va += 4096;
     }
 
+    // **KT-67b** — trang **IPC buffer** (một Frame 4 KiB, `R|W|U|NX`, zero):
+    // `spec/abi.toml` dòng 58 chốt header IPC buffer chứa receive window (CPTR, ≤4 cap); shim
+    // U-mode + kernel đọc/ghi cùng VA cố định này. Nằm trong cùng bảng cấp 1 với ảnh/stack
+    // (0x4002_0000 ⇒ level-1 index 0) nên **không** cần bảng trang mới.
+    let ipc_frame = m
+        .retype(untyped, ObjKind::Frame, 12)
+        .map_err(LoadError::Obj)?;
+    let ipc_pa = m.frame_pa(ipc_frame).map_err(LoadError::Obj)?;
+    if !write_page(ipc_pa, &[]) {
+        return Err(LoadError::Physmap);
+    }
+    let ipc_va = crate::ipc_buffer::USER_IPC_BUFFER_VA;
+    m.map(vspace, ipc_va, ipc_frame, MapFlags::RW_NX_USER)
+        .map_err(LoadError::Obj)?;
+    if !loading_ranges().push(ipc_va, ipc_va + 4096) {
+        return Err(LoadError::Image);
+    }
+
     // Đi lại PTE thật để chứng minh quyền leaf (không tin cờ lúc map): `W+X` = 0, text có X,
     // data có W, mọi leaf user có `U`; đây là bằng chứng `# init load: … wx=0 flags=1`.
     let mut wx_pages = 0usize;
@@ -1124,6 +1142,12 @@ fn tcb_state_name(state: TcbState) -> &'static str {
     }
 }
 
+/// `[va, va+len)` nằm trong một dải **đã map** của tác vụ đang chạy (một nguồn: `active_ranges`)
+/// — cho `ipc_buffer::read_header` (KT-67b) và `put_str`.
+pub(crate) fn user_range_mapped(va: u64, len: u64) -> bool {
+    active_ranges().contains(va, len)
+}
+
 impl SyscallEnv for UserMemAccess {
     /// KT-62: `DebugPutStr` (12) — cùng đường đọc user như KT-53 (dải đã map + `sstatus.SUM`).
     fn put_str(&mut self, ptr: u64, len: u64) -> Result<u64, u64> {
@@ -1253,6 +1277,17 @@ impl SyscallEnv for UserMemAccess {
     /// Rollback object vừa retype khi core không dựng nổi object đại diện (bảng cap đầy).
     fn release_object(&mut self, key: u64) {
         let _ = with_kernel_root(|| crate::mem_bridge::release_key(key));
+    }
+
+    /// **KT-67b** — header **IPC buffer** của TCB gọi (D2-98/spec dòng 58): magic +
+    /// `MessageInfo` bản ghi + receive window 4 CPTR + 4 CPTR nguồn cap. Đọc qua
+    /// [`crate::ipc_buffer::read_header`] (trang `USER_IPC_BUFFER_VA`, SUM, chỉ trong syscall
+    /// U-mode). `None` = chưa có lượt U-mode / chưa map / magic 0 (ảnh cũ giữ nguyên hành vi).
+    fn ipc_header(&mut self, _tcb: ObjId) -> Option<vifast_core::ipc::IpcHeader> {
+        if LAST_VSPACE.load(Ordering::Relaxed) == u32::MAX {
+            return None;
+        }
+        crate::ipc_buffer::read_header()
     }
 }
 

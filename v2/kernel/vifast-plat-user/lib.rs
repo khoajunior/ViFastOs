@@ -6,14 +6,45 @@
 //! `ecall` vào **một** crate nền tảng, các chương trình U-mode chỉ còn lời gọi an toàn:
 //! [`syscall7`]/[`syscall2`]/[`put`]/[`exit`]. ABI đúng bảng syscall hiện có (không thêm syscall).
 //!
+//! # KT-67b — header **IPC buffer** của U-mode (D2-98)
+//!
+//! `spec/abi.toml` `[calling.riscv64].ipc_buffer` đã chốt: *"Frame bind qua Tcb.Configure; header
+//! chứa receive window (CPTR, ≤4 cap)"*. KT-63 đã có cơ chế chuyển cap ở kernel
+//! (`plan_cap_transfer`/`deliver_caps`) nhưng phía U-mode **chưa** ghi/đọc header đó. Task này
+//! cài phần còn thiếu:
+//!
+//! - loader kernel map **một trang 4 KiB** tại VA cố định [`IPC_BUFFER_VA`] (`R|W|U|NX`) cho
+//!   **mọi** chương trình U-mode (không phải ABI mới — chỉ là nơi đặt buffer);
+//! - 10 word đầu của buffer là **header** `[TK]`:
+//!
+//! ```text
+//! word 0     : magic [`HEADER_MAGIC`]  (0 = header chưa dùng ⇒ kernel bỏ qua)
+//! word 1     : MessageInfo 35 bit (bản ghi của shim: info gửi đi hoặc info **nhận** được)
+//! word 2..5  : receive window — 4 CPTR (đích cài cap khi **nhận**; spec dòng 58)
+//! word 6..9  : send caps — 4 CPTR nguồn cap của message đang **gửi**
+//! ```
+//!
+//! [`set_recv_window`] ghi window + magic; [`read_received_caps`] đọc số cap đã cài
+//! (`MessageInfo.caps` do kernel cập nhật theo số cap **thật sự** cài được) và các CPTR tương ứng.
+//! Kernel (`vifast-core/src/syscall.rs`, `build_message`) đọc header qua hook `SyscallEnv`
+//! (`build_message` **lấy window từ đây**, không lấy từ `Machine` trực tiếp) và giải mã
+//! `MessageInfo.caps` + CPTR nguồn thành `CapId` trong CSpace của caller.
+//!
+//! `MessageInfo` **vẫn** là thanh ghi `a2` theo ABI đóng băng (D2-15); header chỉ là **bản ghi**
+//! giúp shim/kernel trao đổi window + cap slot, không đổi layout 35 bit.
+//!
 //! Crate được `build.rs` của `vifast-kbin-riscv64` biên dịch thành `rlib` riscv64 rồi truyền
 //! `--extern` cho từng ELF user; **không** là thành viên workspace (không build cho host).
 #![no_std]
 
 use core::arch::asm;
 
-/// Syscall `NBSend` (bảng syscall KT-62).
+/// Syscall `Call` — Endpoint: IPC; object khác: invocation (D2-97).
+pub const SYS_CALL: u64 = 0;
+/// Syscall `NBSend`.
 pub const SYS_NB_SEND: u64 = 2;
+/// Syscall `Recv`.
+pub const SYS_RECV: u64 = 3;
 /// Syscall `NBRecv`.
 pub const SYS_NB_RECV: u64 = 4;
 /// Syscall `Yield`.
@@ -22,6 +53,179 @@ pub const SYS_YIELD: u64 = 8;
 pub const SYS_DEBUG_PUT_STR: u64 = 12;
 /// Syscall `Exit` — core ghi `FaultKind::Exit{code}` vào `fault_ep` (QD §1 Q-A).
 pub const SYS_EXIT: u64 = 14;
+
+/// `a1` của `Recv` khi **không** có cap Reply (`vifast-core::syscall::REPLY_NONE`).
+pub const REPLY_NONE: u64 = u64::MAX;
+
+// ---------------------------------------------------------------------------------------------
+// KT-67b — header IPC buffer (spec dòng 58: header chứa receive window CPTR, ≤4 cap)
+// ---------------------------------------------------------------------------------------------
+
+/// VA cố định của trang **IPC buffer** — loader map `R|W|U|NX` cho mọi ELF U-mode.
+pub const IPC_BUFFER_VA: u64 = 0x4002_0000;
+/// Cỡ IPC buffer — `spec/abi.toml` `[message].ipc_buffer_bytes = 4096`.
+pub const IPC_BUFFER_BYTES: usize = 4096;
+/// Số CPTR của receive window — `spec/abi.toml` `[message].max_caps = 4`.
+pub const MAX_CAPS: usize = 4;
+/// Số word của header (magic + info + window 4 + send caps 4).
+pub const HEADER_WORDS: usize = 10;
+/// Magic `b"KT67b"` little-endian — kernel chỉ đọc header khi khớp (vùng zero = chưa dùng).
+pub const HEADER_MAGIC: u64 = 0x0000_0062_3736_544b;
+
+/// Vị trí word của `MessageInfo` trong header.
+const W_INFO: usize = 1;
+/// Vị trí word đầu của receive window.
+const W_WINDOW: usize = 2;
+/// Vị trí word đầu của send caps.
+const W_SEND_CAPS: usize = 6;
+
+/// Bit `label` trong `MessageInfo` (spec `[message_info].label_bits = 20`).
+pub const INFO_LABEL_BITS: u32 = 20;
+/// Dịch bit của `caps` (spec `[message_info].caps:20..22`).
+pub const INFO_CAPS_SHIFT: u32 = 20;
+/// Dịch bit của `no_reply` (spec `[message_info].no_reply = 23`).
+pub const INFO_NO_REPLY_SHIFT: u32 = 23;
+/// Dịch bit của `length` (spec `[message_info].length:28..34`).
+pub const INFO_LENGTH_SHIFT: u32 = 28;
+
+fn read_word(index: usize) -> u64 {
+    // SAFETY: trang IPC buffer đã được loader map `R|W|U|NX` tại VA cố định cho **mọi** ELF
+    // U-mode; `index < HEADER_WORDS` nên địa chỉ nằm trong 10 word đầu của trang. Một tiến trình
+    // U-mode một luồng ⇒ không có writer đồng thời.
+    unsafe { core::ptr::read_volatile((IPC_BUFFER_VA + (index as u64) * 8) as *const u64) }
+}
+
+fn write_word(index: usize, value: u64) {
+    // SAFETY: như [`read_word`] — ghi trong 10 word đầu của trang RW của chính tiến trình.
+    unsafe { core::ptr::write_volatile((IPC_BUFFER_VA + (index as u64) * 8) as *mut u64, value) }
+}
+
+/// Địa chỉ IPC buffer của tiến trình (bằng [`IPC_BUFFER_VA`]; có hàm để chương trình in/log).
+pub const fn ipc_buffer_addr() -> u64 {
+    IPC_BUFFER_VA
+}
+
+/// Đặt header về 0 rồi bật magic (chưa có window ⇒ kernel sẽ **từ chối** IPC cho tới khi
+/// [`set_recv_window`] được gọi — fail-closed, không im lặng).
+pub fn init_ipc_buffer() {
+    let mut index = 1;
+    while index < HEADER_WORDS {
+        write_word(index, 0);
+        index += 1;
+    }
+    write_word(0, HEADER_MAGIC);
+}
+
+/// Ghi **receive window** (4 CPTR) vào header và bật magic — đây là 4 ô CSpace nơi kernel cài
+/// cap của message **nhận** (`spec` dòng 58). Bốn CPTR phải **khác nhau** và hợp lệ trong CSpace
+/// của tiến trình; kernel kiểm lại (`tcb_set_recv_window`) và trả lỗi nếu sai.
+pub fn set_recv_window(window: [u64; MAX_CAPS]) {
+    let mut index = 0;
+    while index < MAX_CAPS {
+        write_word(W_WINDOW + index, window[index]);
+        index += 1;
+    }
+    write_word(0, HEADER_MAGIC);
+}
+
+/// Receive window hiện tại trong header.
+pub fn recv_window() -> [u64; MAX_CAPS] {
+    let mut window = [0u64; MAX_CAPS];
+    let mut index = 0;
+    while index < MAX_CAPS {
+        window[index] = read_word(W_WINDOW + index);
+        index += 1;
+    }
+    window
+}
+
+/// Ghi CPTR nguồn cho `MessageInfo.caps` cap của message **đang gửi** (word 6..9), phần thừa
+/// zero-hoá. Trả số cap đã ghi (≤ 4, biên `spec` `max_caps = 4`).
+pub fn set_send_caps(caps: &[u64]) -> usize {
+    let n = if caps.len() > MAX_CAPS {
+        MAX_CAPS
+    } else {
+        caps.len()
+    };
+    let mut index = 0;
+    while index < MAX_CAPS {
+        write_word(
+            W_SEND_CAPS + index,
+            if index < n { caps[index] } else { 0 },
+        );
+        index += 1;
+    }
+    n
+}
+
+/// CPTR nguồn cap đang ghi trong header (word 6..9).
+pub fn send_caps() -> [u64; MAX_CAPS] {
+    let mut caps = [0u64; MAX_CAPS];
+    let mut index = 0;
+    while index < MAX_CAPS {
+        caps[index] = read_word(W_SEND_CAPS + index);
+        index += 1;
+    }
+    caps
+}
+
+/// Đóng gói `MessageInfo` 35 bit (layout `spec/abi.toml` `[message_info]`): `label` bit 0..19,
+/// `caps` 20..22, `no_reply` 23, `length` 28..34.
+pub const fn info(label: u32, caps: u8, no_reply: bool, length: u8) -> u64 {
+    let mut value = (label as u64) & 0xF_FFFF;
+    value |= ((caps as u64) & 0x7) << INFO_CAPS_SHIFT;
+    if no_reply {
+        value |= 1 << INFO_NO_REPLY_SHIFT;
+    }
+    value |= ((length as u64) & 0x7F) << INFO_LENGTH_SHIFT;
+    value
+}
+
+/// `label` của một `MessageInfo` đã đóng gói.
+pub const fn info_label(raw: u64) -> u32 {
+    (raw & 0xF_FFFF) as u32
+}
+
+/// Số cap của một `MessageInfo` đã đóng gói.
+pub const fn info_caps(raw: u64) -> u8 {
+    ((raw >> INFO_CAPS_SHIFT) & 0x7) as u8
+}
+
+/// Số MR (`length`) của một `MessageInfo` đã đóng gói.
+pub const fn info_length(raw: u64) -> u8 {
+    ((raw >> INFO_LENGTH_SHIFT) & 0x7F) as u8
+}
+
+/// Ghi `MessageInfo` của message **vừa nhận** vào header (sau `Recv`/`NBRecv`/`ReplyRecv`), để
+/// [`read_received_caps`] đọc được **số cap đã cài thật**.
+pub fn note_received(raw_info: u64) {
+    write_word(W_INFO, raw_info);
+}
+
+/// `MessageInfo` của message vừa nhận (0 = chưa nhận).
+pub fn received_info() -> u64 {
+    read_word(W_INFO)
+}
+
+/// Cap **nhận được** trong message gần nhất: `count` = `MessageInfo.caps` (kernel cập nhật theo
+/// số cap **thật sự** cài vào window), `slots[..count]` = CPTR đích trong CSpace của tiến trình.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReceivedCaps {
+    /// Số cap nhận được (0..=4).
+    pub count: usize,
+    /// CPTR nơi cap được cài (`slots[..count]` có nghĩa).
+    pub slots: [u64; MAX_CAPS],
+}
+
+/// Đọc cap nhận được từ header (xem [`ReceivedCaps`]).
+pub fn read_received_caps() -> ReceivedCaps {
+    let count = usize::from(info_caps(received_info())).min(MAX_CAPS);
+    let window = recv_window();
+    ReceivedCaps {
+        count,
+        slots: window,
+    }
+}
 
 /// Gọi syscall 7 tham số; trả `[error, value, info, MR0..MR3]` theo façade hiện có.
 #[inline(always)]
@@ -69,6 +273,21 @@ pub fn syscall2(nr: u64, a0: u64, a1: u64) -> [u64; 2] {
     [r0, r1]
 }
 
+/// `Call(cap, MessageInfo, MR0..MR3)` — IPC trên Endpoint hoặc invocation (D2-97).
+pub fn call(cap: u64, raw_info: u64, mrs: [u64; 4]) -> [u64; 7] {
+    syscall7(SYS_CALL, cap, raw_info, mrs[0], mrs[1], mrs[2], mrs[3])
+}
+
+/// `NBSend(cap, MessageInfo, MR0..MR3)` — không chặn.
+pub fn nb_send(cap: u64, raw_info: u64, mrs: [u64; 4]) -> [u64; 7] {
+    syscall7(SYS_NB_SEND, cap, raw_info, mrs[0], mrs[1], mrs[2], mrs[3])
+}
+
+/// `Recv(cap, reply_cptr?)` — `reply = `[`REPLY_NONE`] khi không có cap Reply.
+pub fn recv(cap: u64, reply: u64) -> [u64; 7] {
+    syscall7(SYS_RECV, cap, reply, 0, 0, 0, 0)
+}
+
 /// In một lát `&[u8]` của chính tiến trình (vùng đã map `U|R`) qua syscall `DebugPutStr`.
 pub fn put(bytes: &[u8]) {
     if bytes.is_empty() {
@@ -83,6 +302,29 @@ pub fn put(bytes: &[u8]) {
         0,
         0,
     );
+}
+
+/// Đọc 8 B tại `va` của **chính** tiến trình — dùng cho chương trình test cần chứng minh
+/// Frame vừa map đọc/ghi được mà không phải viết `asm!`/`unsafe` ngoài danh sách D2-17.
+///
+/// # Safety nội bộ
+/// `va` phải là địa chỉ **đã map và đọc được** trong VSpace của tiến trình gọi (caller chịu
+/// trách nhiệm); đọc địa chỉ chưa map ⇒ fault U-mode (kernel xử lý theo chính sách của ảnh).
+pub fn peek_u64(va: u64) -> u64 {
+    // SAFETY: xem trên — caller bảo đảm `va` đã map trong VSpace của chính tiến trình.
+    unsafe { core::ptr::read_volatile(va as *const u64) }
+}
+
+/// Ghi 8 B tại `va` của **chính** tiến trình (cùng điều kiện an toàn như [`peek_u64`]).
+pub fn poke_u64(va: u64, value: u64) {
+    // SAFETY: xem [`peek_u64`] — caller bảo đảm `va` đã map **ghi được** (R|W) trong VSpace.
+    unsafe { core::ptr::write_volatile(va as *mut u64, value) };
+}
+
+/// `Yield` — nhường CPU theo đúng syscall 8 (dùng khi chương trình cần **giữ nguyên** trạng thái
+/// sống của mình, vd. giữ message đang chờ trong hàng Endpoint; `Exit` sẽ huỷ hàng chờ — D2-25).
+pub fn yield_now() -> [u64; 7] {
+    syscall7(SYS_YIELD, 0, 0, 0, 0, 0, 0)
 }
 
 /// `Exit(code)` rồi chờ kernel thu hồi — không quay lại U-mode.
