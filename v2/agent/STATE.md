@@ -4,11 +4,11 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`3f02d72d`** (`[KT-00]` lật KT-65 DONE + mở KT-66) + **working tree KT-66
-                CHƯA COMMIT** (lead commit `[KT-66]`/`[KT-66b]` pathspec `v2/**` sau
-                reviewer-kt66; D2-91 — Agent 2 **không** `git add`). Nhánh `main`; worktree còn
-                `viscript/`, `review/`, `.agents/`, `out-b.log`, `v2/agent/reports/kt64/` của tab
-                khác — không chạm.
+HEAD          : **`324d1da9`** (`[KT-66b]` bổ sung 2 tệp nguồn thiếu, trên `97903b15`
+                `[KT-66]`) — KT-66 **đã commit + push**; sau đó tab ViScript commit tiếp
+                `26e5f82c`/`627c698a` (`[ST-120b]`/`[ST-121]`) — **không đụng `v2/`**. Nhánh
+                `main`; `HEAD..origin/main` = 0; worktree chỉ còn `v2/agent/reports/kt64/` +
+                `viscript/`, `review/`, `.agents/`, `out-b.log` của tab khác — không chạm.
 BUILD_ID      : ảnh kernel **KT-66** (build cuối, sau refactor `user_stack.rs`): product
                 **188.184 / 200.120** (`build=ce9a8c7cff7c68a3`, sha256 `eb365a13…`), ktest
                 **574.032 / 209.856** (`9cc6c8f295cab617`), guard **54.048 / 2.680**
@@ -17,8 +17,10 @@ BUILD_ID      : ảnh kernel **KT-66** (build cuối, sau refactor `user_stack.r
                 **950.272 B** báo **riêng** (D2-72 Q5); `size_of::<Machine>() = 188.872 B` ≤ pin
                 196.608 (không đổi). Soak product `BUILD_ID=ce9a8c7cff7c68a3
                 sha256=eb365a13…` (`JOURNAL/kt66-soak.log:1016-1020`).
-Task          : **KT-66 (K3.5 gate — cổng cuối phase K3.5)** — **DONE (đề xuất; chờ
-                reviewer-kt66 + Agent 0 lật QUEUE)**: (1) tách ảnh demo thứ tư
+Task          : **KT-66 (K3.5 gate — cổng cuối phase K3.5)** — **DONE**: reviewer-kt66 vòng 1
+                **DRIFT** (không UNSAFE) → đã vá M1..M5 + D3/D4/D9 → confirm + lead commit
+                `97903b15` (`[KT-66]`) + `324d1da9` (`[KT-66b]`) → push; **chờ Agent 0 lật QUEUE
+                KT-66 DONE + K3.5 DONE**. Tóm tắt: (1) tách ảnh demo thứ tư
                 `vifast-kbin-ktest-proc` (10 TAP, ánh xạ 15..24→1..10), `ktest-user` còn 14 TAP,
                 **239.216 → 202.280 B (−36.936 B)**; (2) **stack syscall per-hart** trong NOLOAD
                 per-hart (32 KiB/hart, `HART_STRIDE 0x1D000`, tổng 950.272 B báo riêng) + canary
@@ -28,7 +30,7 @@ Task          : **KT-66 (K3.5 gate — cổng cuối phase K3.5)** — **DONE (�
                 0 vi phạm, 33m30s); (4) soak **0/1000**, matrix **12/12**, conformance **61/61
                 5/5**; budget 2 ngưỡng **mọi** ảnh; clippy kernel 5 tổ hợp sạch; `K35-DOD.md`
                 D1..D12 + `k35-procsrv.md` §9/§10 + 3 log đỏ-trước (split/stack/canary).
-Bước          : 10/10: baseline gate **649/84** → đỏ-trước ảnh tách (24 vs 14) → tách
+Bước          : 11/11 (thêm bước commit): baseline gate **649/84** → đỏ-trước ảnh tách (24 vs 14) → tách
                 `ktest_proc.rs` + runner/expected/manifest → stack NOLOAD per-hart (arena thử
                 rồi loại) → canary/low → đỏ-trước stack (`distinct=0`) + canary (`canary=1`) →
                 (sau review vòng 1 **DRIFT**: vá M1 canary fail-closed, M3 harness fail-closed +
@@ -37,10 +39,15 @@ Bước          : 10/10: baseline gate **649/84** → đỏ-trước ảnh tác
                 matrix **12/12** → soak **0/1000** → L1 **400k** (4 tiến trình) → conformance
                 **61/61** → budget → clippy → `v2 check` FAIL (fmt + R1: `user.rs` 1.582 dòng) →
                 tách `user_stack.rs` (1.406 + 217 dòng) → fmt/build lại 5 ảnh → **chạy lại**
-                matrix/soak/conformance trên ảnh cuối → `gate --fast` **PASS 649/84** → DOD.
+                matrix/soak/conformance trên ảnh cuối → `gate --fast` **PASS 649/84** → DOD →
+                reviewer DRIFT → vá (M1 canary fail-closed, M3 harness fail-closed +
+                `--selftest-stack` 5/5, M2 nợ #9, M4 số/UTC/RAM, M5 bỏ log arena + đóng băng DOD,
+                D3/D4/D9) → chạy lại matrix/conformance/gate → **`97903b15`** `[KT-66]` (52 tệp)
+                + **`324d1da9`** `[KT-66b]` (2 tệp nguồn lead bỏ sót) → push.
 Nhánh         : main
 Cổng gần nhất : `./v2/bin/v2 check` **PASS** + `./v2/bin/v2 gate --fast` **PASS 649 test/84
-                suite**, L1 1.000 seed **911 ms** (`JOURNAL/kt66-gate.log:66,1226-1227`);
+                suite**, L1 1.000 seed **911 ms** (`JOURNAL/kt66-gate.log:66,1226-1227`; lead chạy
+                lại trên HEAD cuối **919 ms** — cùng PASS);
                 `ktest.sh 1 matrix` **12/12** boot, TAP **60/60 + 3/3 + 14/14 + 10/10** × smp
                 1/2/4 (`kt66-ktest-matrix.log:27-38,67`); `selftest.sh` **18/18** (gồm
                 `--selftest-stack` **5/5**, log `kt66-selftest.log`); `soak.sh 1000 3`
@@ -2809,7 +2816,7 @@ ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |
 |---|---|---|---|---|---|---|
-| 2026-11-16 | **KT-66** | 10/10 | `3f02d72d` + working tree KT-66 (chờ lead commit `[KT-66]`/`[KT-66b]`; D2-91) | product 188.184 / 200.120; ktest 574.032 / 209.856; guard 54.048 / 2.680; **user 335.520 / 202.280**; **proc 375.512 / 206.472**; NOLOAD per-hart 950.272 B riêng; `size_of` **188.872** ≤ 196.608 | `v2 check` PASS + `gate --fast` PASS **649/84** (L1 911 ms) + `ktest.sh 1 matrix` **12/12** (TAP **60/60 + 3/3 + 14/14 + 10/10**) + `selftest.sh` **18/18** + `soak.sh 1000 3` **0/1000** (225 s) + **L1 100k × smp 1/2/4/8 = 400.000 lượt, 0 vi phạm** (4 tiến trình song song, 33m30s) + conformance **61/61, 5/5** + clippy kernel 5 tổ hợp sạch | **K3.5 GATE — stack syscall per-hart + tách ảnh demo**: `vifast-kbin-ktest-proc` (10 TAP 15..24→1..10) chạy script riêng, `ktest-user` 14 TAP **−36.936 B**; `SYSCALL_STACK` global **xoá** → block 32 KiB/hart trong NOLOAD per-hart (`HART_STRIDE 0x1D000`, canary + low, `distinct=1 canary=0` smp 1/2/4; demo dùng **22.088 B** chứng minh 16 KiB không đủ); arena **đỏ thật** (`stval=0xffffffc082007ff8` — root user không physmap); 3 log đỏ-trước split/stack/canary; `K35-DOD.md` D1..D12 (mỗi số có `log:dòng`), `k35-procsrv.md` §9/§10; nợ: fault bridge K3.6, kill chưa Revoke, `kill pid sai`, shim không workspace member, shell chưa UART IRQ, core chưa IPI, `TlbFlush targets/acked` chưa quan sát, slot 192 word |
+| 2026-11-16 | **KT-66** | 11/11 | `97903b15` `[KT-66]` + `324d1da9` `[KT-66b]` (sửa 2 tệp nguồn thiếu) — **đã push**; sau đó `[ST-120b]/[ST-121]` của tab ViScript | product 188.184 / 200.120; ktest 574.032 / 209.856; guard 54.048 / 2.680; **user 335.520 / 202.280**; **proc 375.512 / 206.472**; NOLOAD per-hart 950.272 B riêng; `size_of` **188.872** ≤ 196.608 | `v2 check` PASS + `gate --fast` PASS **649/84** (L1 **911 ms** log / **919 ms** lead chạy lại) + `ktest.sh 1 matrix` **12/12** (TAP **60/60 + 3/3 + 14/14 + 10/10**) + `selftest.sh` **18/18** + `soak.sh 1000 3` **0/1000** (225 s) + **L1 100k × smp 1/2/4/8 = 400.000 lượt, 0 vi phạm** (4 tiến trình song song, 33m30s) + conformance **61/61, 5/5** + clippy kernel 5 tổ hợp sạch | **K3.5 GATE — stack syscall per-hart + tách ảnh demo**: `vifast-kbin-ktest-proc` (10 TAP 15..24→1..10) chạy script riêng, `ktest-user` 14 TAP **−36.936 B**; `SYSCALL_STACK` global **xoá** → block 32 KiB/hart trong NOLOAD per-hart (`HART_STRIDE 0x1D000`, canary + low, `distinct=1 canary=0` smp 1/2/4; demo dùng **22.088 B** chứng minh 16 KiB không đủ); arena **đỏ thật** (`stval=0xffffffc082007ff8` — root user không physmap); 3 log đỏ-trước split/stack/canary; `K35-DOD.md` D1..D12 (mỗi số có `log:dòng`), `k35-procsrv.md` §9/§10; nợ: fault bridge K3.6, kill chưa Revoke, `kill pid sai`, shim không workspace member, shell chưa UART IRQ, core chưa IPI, `TlbFlush targets/acked` chưa quan sát, slot 192 word |
 | 2026-11-16 | **KT-65** | 8/8 | `c607d0a9` + `[KT-65]` (b: STATE này) | product 187.936 / 200.120; ktest 573.744 / 209.856; guard 53.808 / 2.680; **user 401.448 / 239.216**; `size_of` **188.872** ≤ 196.608 | `gate --fast` PASS **649/84** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 24/24**, 48 evidence user) + `soak.sh 1000 3` **0/1000** (wall 225 s) + clippy core/plat/kbin `-D warnings` sạch | **K3.5 tầng 4 — procsrv U-mode + shell tối thiểu (first real user-process lifecycle)**: 3 ELF Rust U-mode riêng (`procsrv`/`shell`/`con`) nạp như `init`, shim `vifast-plat-user` (D2-93, chỉ `ecall`, 3 chương trình user **0 unsafe**); core `last_fault`→message IPC cho `Exit`, procsrv `Recv` rồi TCB `Inactive`, `wait` trả 42, `kill`=`Suspend(Abort)` có `suspend_ok`, shell `help/echo/ps/wait/kill/exit`, `ps` đọc `Machine` + TAP18 so từng dòng snapshot, không syscall mới/không procsrv-in-kernel; **phát hiện nền**: dispatch IPC trong trap tràn trap stack 16 KiB ⇒ stack dispatch riêng 32 KiB `.bss` + continuation `fault_phase` giữ TAP22..24; **nợ**: fault bridge là cầu nối ABI K3.6, kill chưa Revoke cap TCB, `kill pid sai` chưa từ chối, shim không phải workspace member, `SYSCALL_STACK` global chưa per-hart (KT-66) |
 | 2026-11-16 | **KT-64a** | 6/6 | `519d2e55` + `[KT-64a]`; `cff3faff` + `[KT-64a-b]` | product/ktest/guard/user **không đổi** (chỉ sim + core IPC; `size_of` **188.872** ≤ 196.608) | `gate --fast` PASS **647/83** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + `cargo test -p vifast-sim` **454/0** + `.scn` **27 tệp/16 nhóm** | **Đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` D2-92c — xoá hai loại trừ parity, một nguồn sự thật**: sim `finalise_ipc_waiters` đánh thức `BlockedOnRecv`/`BlockedOnNotification`/`BlockedOnSend` ⇒ `Cancelled + Ready` + huỷ hàng + `ipc_dropped`; core đóng **nợ D2-90** cho sender; parity `kt60` **18/18** (digest thêm `last_ipc_error`, 3 đường finalise phủ trọn, chốt pha trước `Revoke`) + `kt64` **4/4** (kịch bản C `TlbFlush`: `seq/targets/pending/acked/Busy`, `tlb_pending_ack` + trivial-complete thêm vào sim; **nợ quan sát** `targets/acked ≠ 0` của core ghi §13.9); `.scn` 26→**27 tệp**/16 nhóm đỏ-trước trên sim cũ; TAP 55 QEMU in `sender=Ready sender_err=Cancelled` (D2-90 trên nhân thật); **không còn loại trừ** §12.5/§13.1 |
 | 2026-11-16 | **KT-63** | 9/9 | `5380164b` + `[KT-63]` | product 191.824 / 199.696; ktest 533.536 / 209.856; guard 53.808 / 2.680; user 330.704 / 200.584 | `gate --fast` PASS **625/80** + `ktest.sh 1 matrix` **9/9** (TAP **56/56 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch + `v2 check` PASS | **K3.5 tầng 2 — chuyển cap qua IPC + finalise IPC khi Revoke**: `Message` mang cap nguồn/ảnh chụp + `TcbData.recv_window` + `plan_cap_transfer` nguyên sim (bỏ `RIGHT_GRANT`, unwrap badge, thất bại mềm, lỗi cứng trước giao); `delete`/`revoke` huỷ caller ⇒ `Cancelled + Ready`, Recv/Notification waiter thức (**chuẩn anti-hang D2-89**; sim treo = lỗi mô hình, KT-64a đóng lệch), hàng huỷ + `ipc_dropped`; parity **16/16** (5 kịch bản), core-only **13/13** (F1/F2/F3 review), TAP **53..55** (`# ipc:`), `size_of` **188.448** ≤ **196.608**, ảnh **200.584** ≤ **262.144**; nợ: MR>4 (KT-64), sender treo khi revoke (**D2-90**, KT-64a) |

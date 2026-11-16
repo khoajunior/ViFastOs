@@ -78,7 +78,21 @@ không đụng `.data+.bss`).
   `fbc03a81…`, proc `333c35bb…` ⇒ matrix/soak/conformance/`gate` chạy lại; soak product vẫn khớp
   sha `eb365a13…`.
 
-## 6. Nợ / bàn giao
+## 6. Sự cố commit `97903b15` (lead) — đã vá, ghi để người sau biết
+
+- `[KT-66]` **`97903b15`** (52 tệp) **bỏ sót 2 tệp nguồn untracked**:
+  `v2/kernel/vifast-kbin-riscv64/src/ktest_proc.rs` và
+  `v2/kernel/vifast-plat-riscv64/src/user_stack.rs` — `git add -N` của lead chỉ áp cho
+  `JOURNAL/`/`reports/` ⇒ **HEAD đó không build được**.
+- `[KT-66b]` **`324d1da9`** bổ sung đúng 2 tệp đó (+633 dòng) ⇒ HEAD cuối build được; lead chạy lại
+  `./v2/bin/v2 gate --fast` trên HEAD cuối: **PASS 649 test/84 suite**, L1 1.000 seed **919 ms**
+  (khớp DOD; log của task ghi 911 ms trước commit — cùng PASS).
+- **Bài học:** pathspec **không** kéo tệp untracked ⇒ với tệp **mới** phải
+  `git add -N <đúng đường dẫn>` (hoặc `git add <path>`) **trước** khi commit, và `git status` sau
+  commit phải **rỗng**; đừng giả định "commit KT-66 tự đủ".
+- Lead cũng chuyển 4 log L1 từ `JOURNAL/tmp/` về `JOURNAL/` (đúng chỗ theo D2-80) và xoá `tmp/`.
+
+## 7. Nợ / bàn giao
 
 - Nợ 9 mục ghi ở `STATE.md` + `K35-DOD.md` §12.2 (fault bridge K3.6, kill chưa Revoke,
   `kill pid sai`, shim không workspace member, shell chưa UART IRQ, core chưa IPI, `TlbFlush`
