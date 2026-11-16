@@ -173,7 +173,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-65 | **K3.5** procsrv (U-mode, Rust) + shell tối thiểu | KT-64a | 3 h | DONE | c607d0a9; 3 ELF U-mode that (procsrv/shell/con); wait=42, kill=Suspend(Abort), ps snapshot tu Machine; TAP 24; gate 649 |
 | KT-66 | **K3.5** cổng: TAP + soak + L1 400k + `K35-DOD` | KT-65 | 3 h | DONE | 97903b15+324d1da9; tach anh ktest-proc; stack per-hart canary fail-closed; L1 400k; soak 0/1000; conf 61/61; gate 649 |
 | KT-67 | **K6** memsrv U-mode + `vifast-alloc`: Frame thật cấp qua IPC | KT-66 | 3 h | READY | Frame từ Untyped → client; cầu nối D2-83 (VM ở obj layer); TAP |
-| KT-68 | **K6** capalloc: cấp/thu hồi capability theo cây | KT-67 | 3 h | BLOCKED | revoke cây đúng; không rò; TAP |
+| KT-67a | **K6** invocation hẹp cho U-mode (`Untyped.Retype`) để memsrv thật | KT-67 | 3 h | BLOCKED | mở `spec/[method_signature]` theo D2 mới; memsrv giữ cap Untyped; bỏ kernel-mediated |
+| KT-68 | **K6** capalloc: cấp/thu hồi capability theo cây | KT-67a | 3 h | BLOCKED | revoke cây đúng; không rò; TAP |
 | KT-69 | **K6** IDL + ring buffer chia sẻ (shared Frame) | KT-68 | 3 h | BLOCKED | IDL sinh stub từ spec; ring 1 producer/1 consumer; TAP |
 | KT-70 | **K6** VFS tầng 1: pager + page cache | KT-69 | 3 h | BLOCKED | nhiều client; fault→pager; TAP |
 | KT-71 | **K6** VFS tầng 2: journal + rename/truncate/double-indirect + fsck | KT-70 | 3 h | BLOCKED | crash-consistency 7 pha; fsck sửa được; TAP |
