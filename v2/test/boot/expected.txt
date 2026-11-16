@@ -50,7 +50,11 @@ ktest-guard 3 3
 # Frame giữa **hai tiến trình** U-mode (`memsrv.elf` → `client.elf`, TAP 19) = **19 TAP**. KT-66
 # **tách ảnh demo** sang `ktest-proc` (bên dưới) để ảnh này trả headroom; boot kết thúc bằng
 # `PANIC: KT-67b u-mode pha syscall, invocation va chuyen cap xong (19 TAP, 0 fail)`.
-ktest-user 19 19
+# **KT-68** (K6): ảnh user thêm **5 TAP capalloc** (20..24: U-mode capalloc server+client cấp/
+# dùng/thu hồi cấp lại cùng slot · Mint/Copy/Move · Revoke cây 2 tầng + Delete reparent +
+# Revoke xuyên CNode · ca âm mã lỗi · bất biến slot/cap) ⇒ **24 TAP**. Boot kết thúc bằng
+# `PANIC: KT-68 u-mode pha syscall, invocation, chuyen cap va capalloc xong (24 TAP, 0 fail)`.
+ktest-user 24 24
 
 # **KT-66** — ảnh demo thứ tư `vifast-kbin-ktest-proc` (bin riêng, cùng feature `ktest,user`):
 # đúng mười ca cũ **15..24** của `ktest-user`, đánh số lại **1..10** (TAP một ảnh phải liên tục

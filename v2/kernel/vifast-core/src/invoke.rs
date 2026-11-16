@@ -92,6 +92,23 @@ pub const METHOD_MAP: u32 = 0;
 /// `Frame.Unmap` — method 1 của object 11.
 pub const METHOD_UNMAP: u32 = 1;
 
+// ---------------------------------------------------------------------------------------------
+// KT-68 — `CNode.*` (object id 2). Số method **lấy từ `spec/abi.toml`** `[object].CNode`:
+// `0 Copy`, `1 Mint`, `2 Move`, `3 Mutate` (chưa cài), `4 Delete`, `5 Revoke`, `6 Rotate`
+// (chưa cài). Tên hằng giữ tiền tố `CNODE_` để không lẫn với method 0/1 của `Frame`.
+// ---------------------------------------------------------------------------------------------
+
+/// `CNode.Copy` — method 0.
+pub const CNODE_COPY: u32 = 0;
+/// `CNode.Mint` — method 1.
+pub const CNODE_MINT: u32 = 1;
+/// `CNode.Move` — method 2.
+pub const CNODE_MOVE: u32 = 2;
+/// `CNode.Delete` — method 4.
+pub const CNODE_DELETE: u32 = 4;
+/// `CNode.Revoke` — method 5.
+pub const CNODE_REVOKE: u32 = 5;
+
 /// Id object `[object]` theo **tên** (sinh từ `spec/abi.toml`, không chép tay — D2-11).
 fn object_id(name: &str) -> Option<u64> {
     CORE_OBJECTS
@@ -125,7 +142,8 @@ pub const MAP_USER: u64 = 1 << 3;
 /// Leaf Device (W^X: cấm `Device + X`).
 pub const MAP_DEVICE: u64 = 1 << 4;
 
-/// Số đếm invocation cho TAP `# inv:` (không phải ABI): cho phép/bị từ chối theo method.
+/// Số đếm invocation cho TAP `# capa:`/`# inv:` (không phải ABI): cho phép/bị từ chối theo
+/// method + số lần từng method của `CNode` thành công (KT-68).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InvocationStats {
     /// Tổng invocation trả thành công.
@@ -138,6 +156,16 @@ pub struct InvocationStats {
     pub map: u32,
     /// `Frame.Unmap` thành công.
     pub unmap: u32,
+    /// `CNode.Copy` thành công.
+    pub copy: u32,
+    /// `CNode.Mint` thành công.
+    pub mint: u32,
+    /// `CNode.Move` thành công.
+    pub moved: u32,
+    /// `CNode.Delete` thành công.
+    pub delete: u32,
+    /// `CNode.Revoke` thành công.
+    pub revoke: u32,
 }
 
 static ALLOWED: AtomicU32 = AtomicU32::new(0);
@@ -145,12 +173,17 @@ static DENIED: AtomicU32 = AtomicU32::new(0);
 static RETYPE: AtomicU32 = AtomicU32::new(0);
 static MAP: AtomicU32 = AtomicU32::new(0);
 static UNMAP: AtomicU32 = AtomicU32::new(0);
+static CNODE_COPIED: AtomicU32 = AtomicU32::new(0);
+static CNODE_MINTED: AtomicU32 = AtomicU32::new(0);
+static CNODE_MOVED: AtomicU32 = AtomicU32::new(0);
+static CNODE_DELETED: AtomicU32 = AtomicU32::new(0);
+static CNODE_REVOKED: AtomicU32 = AtomicU32::new(0);
 
 fn bump(counter: &AtomicU32) {
     let _ = counter.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Ảnh chụp số đếm invocation (TAP đọc — `# inv:`).
+/// Ảnh chụp số đếm invocation (TAP đọc — `# inv:`/`# capa:`).
 pub fn stats() -> InvocationStats {
     InvocationStats {
         allowed: ALLOWED.load(Ordering::Relaxed),
@@ -158,6 +191,11 @@ pub fn stats() -> InvocationStats {
         retype: RETYPE.load(Ordering::Relaxed),
         map: MAP.load(Ordering::Relaxed),
         unmap: UNMAP.load(Ordering::Relaxed),
+        copy: CNODE_COPIED.load(Ordering::Relaxed),
+        mint: CNODE_MINTED.load(Ordering::Relaxed),
+        moved: CNODE_MOVED.load(Ordering::Relaxed),
+        delete: CNODE_DELETED.load(Ordering::Relaxed),
+        revoke: CNODE_REVOKED.load(Ordering::Relaxed),
     }
 }
 
@@ -266,8 +304,137 @@ pub fn dispatch(
         (ObjType::Untyped, METHOD_RETYPE) => retype(m, tcb, c, args, env),
         (ObjType::Frame, METHOD_MAP) => map(m, tcb, c, args, env),
         (ObjType::Frame, METHOD_UNMAP) => unmap(m, tcb, c, args, env),
+        // KT-68: `CNode.Copy/Mint/Move/Delete/Revoke` trên **chính cap CNode** đã gọi — cap
+        // này chỉ vào CSpace của caller (khác `Untyped.Retype` không cần cap phụ).
+        (ObjType::CNode, _) => cnode(m, tcb, c, method, args, len),
         // Danh sách trắng hẹp: mọi loại/method khác giữ `NotSupported` (D2-53 Q11) — **không**
         // trả `Ok` giả. Đếm để TAP `# inv:` chứng minh nhánh này chạy thật.
+        _ => {
+            bump(&DENIED);
+            Err(KError::NotSupported.id() as u64)
+        }
+    }
+}
+
+// =============================================================================================
+// KT-68 — `CNode.Copy/Mint/Move/Delete/Revoke` (capalloc)
+// =============================================================================================
+
+/// Đổi một CPTR/`u64` tham số thành chỉ số slot; tràn `usize` ⇒ `InvalidCapability` (như
+/// [`cap_slot`] của syscall).
+fn slot_arg(raw: u64) -> Result<usize, u64> {
+    usize::try_from(raw).map_err(|_| KError::InvalidCapability.id() as u64)
+}
+
+/// `rights?` của `Copy/Mint`: 8 bit thấp; giá trị > 0xFF ⇒ `InvalidArgument` (không cắt ngầm).
+fn rights_arg(raw: u64) -> Result<u8, u64> {
+    u8::try_from(raw).map_err(|_| KError::InvalidArgument.id() as u64)
+}
+
+/// `CNode.*` — thực thi trên **CNode của cap được gọi** (target), nguồn ở **CSpace của caller**.
+///
+/// # Kênh tham số (D2-99: `MR0..MR3`, `length` = số MR dùng; không đổi `MessageInfo` 35 bit)
+///
+/// | Method (id spec) | MR0 | MR1 | MR2 | MR3 |
+/// |---|---|---|---|---|
+/// | `Copy` (0) | `src` CPTR trong CSpace caller | `dst` slot trong CNode target | `rights?` | — |
+/// | `Mint` (1) | `src` | `dst` | `rights?` | `badge?` |
+/// | `Move` (2) | `src` | `dst` | — | — |
+/// | `Delete` (4) | `slot` trong CNode target | — | — | — |
+/// | `Revoke` (5) | `slot?` (bỏ trống ⇒ mọi slot) | — | — | — |
+///
+/// `Copy/Mint` bỏ `MR2` (`length ≤ 2`) ⇒ giữ quyền/badge nguồn; `Mint` bỏ `MR3` ⇒ giữ badge
+/// nguồn. `badge = 0` có mặt ⇒ **xoá** badge (ngữ nghĩa `Machine::mint`). Cap CNode được gọi
+/// phải có `RIGHT_WRITE` (model F3, oracle `vifast-model::invoke_*`); thiếu ⇒
+/// `InsufficientRights` (3). Đích phải nằm trong **CNode target** (không phải "CNode bất kỳ"
+/// mà cap trỏ tới) — cùng ngữ nghĩa `check_dst_in_cnode` của model.
+///
+/// Trả `a1`: `Revoke` = số cap bị xoá; `Copy/Mint/Move/Delete` = 0.
+fn cnode(
+    m: &mut Machine,
+    tcb: ObjId,
+    c: crate::error::CapInfo,
+    method: u32,
+    args: [u64; 4],
+    len: usize,
+) -> Result<(u64, u64), u64> {
+    if c.rights & RIGHT_WRITE == 0 {
+        return Err(KError::InsufficientRights.id() as u64);
+    }
+    let cspace = m
+        .tcb_info_obj(tcb)
+        .map_err(|_| KError::InvalidCapability.id() as u64)?
+        .cspace
+        .ok_or(KError::InvalidCapability.id() as u64)?;
+    let target = c.obj;
+    // Nguồn ở CSpace **caller**, đích ở CNode **target** (model F3: `check_dst_in_cnode`).
+    let src = SlotRef::new(cspace, slot_arg(args[0])?);
+    let dst = SlotRef::new(target, slot_arg(args[1])?);
+    match method {
+        CNODE_COPY => {
+            if len < 2 {
+                return Err(KError::InvalidArgument.id() as u64);
+            }
+            let rights = if len >= 3 {
+                Some(rights_arg(args[2])?)
+            } else {
+                None
+            };
+            m.copy_rights(src, dst, rights).map_err(|e| e.id() as u64)?;
+            bump(&CNODE_COPIED);
+            bump(&ALLOWED);
+            Ok((0, 0))
+        }
+        CNODE_MINT => {
+            if len < 2 {
+                return Err(KError::InvalidArgument.id() as u64);
+            }
+            // `rights?:` thiếu ⇒ giữ quyền nguồn (phải đọc trước khi `mint` kiểm lại).
+            let rights = if len >= 3 {
+                rights_arg(args[2])?
+            } else {
+                let cap = m.cap_at(cspace, src.slot).map_err(|e| e.id() as u64)?;
+                m.cap_info(cap).map_err(|e| e.id() as u64)?.rights
+            };
+            let badge = if len >= 4 { Some(args[3]) } else { None };
+            m.mint(src, dst, rights, badge).map_err(|e| e.id() as u64)?;
+            bump(&CNODE_MINTED);
+            bump(&ALLOWED);
+            Ok((0, 0))
+        }
+        CNODE_MOVE => {
+            if len < 2 {
+                return Err(KError::InvalidArgument.id() as u64);
+            }
+            m.move_cap(src, dst).map_err(|e| e.id() as u64)?;
+            bump(&CNODE_MOVED);
+            bump(&ALLOWED);
+            Ok((0, 0))
+        }
+        CNODE_DELETE => {
+            if len < 1 {
+                return Err(KError::InvalidArgument.id() as u64);
+            }
+            // `Delete` nhận `MR0 = slot` (spec `params = ["cnode","slot"]`), không dùng `MR1`.
+            let target_slot = SlotRef::new(target, slot_arg(args[0])?);
+            m.delete(target_slot).map_err(|e| e.id() as u64)?;
+            bump(&CNODE_DELETED);
+            bump(&ALLOWED);
+            Ok((0, 0))
+        }
+        CNODE_REVOKE => {
+            let slot = if len >= 1 {
+                Some(slot_arg(args[0])?)
+            } else {
+                None
+            };
+            let deleted = m.revoke(target, slot).map_err(|e| e.id() as u64)?;
+            bump(&CNODE_REVOKED);
+            bump(&ALLOWED);
+            Ok((0, deleted as u64))
+        }
+        // `Mutate` (3) / `Rotate` (6) có số trong spec nhưng **chưa cài** (D2-53 Q11):
+        // `NotSupported` 18, có đếm — không tự đặt ngữ nghĩa.
         _ => {
             bump(&DENIED);
             Err(KError::NotSupported.id() as u64)
@@ -457,6 +624,11 @@ pub const fn is_whitelisted(ty: ObjType, method: u32) -> bool {
         (ObjType::Untyped, METHOD_RETYPE)
             | (ObjType::Frame, METHOD_MAP)
             | (ObjType::Frame, METHOD_UNMAP)
+            | (ObjType::CNode, CNODE_COPY)
+            | (ObjType::CNode, CNODE_MINT)
+            | (ObjType::CNode, CNODE_MOVE)
+            | (ObjType::CNode, CNODE_DELETE)
+            | (ObjType::CNode, CNODE_REVOKE)
     )
 }
 
@@ -513,18 +685,56 @@ mod tests {
         assert_eq!(type_id(ObjType::Tcb), None);
     }
 
-    /// Danh sách trắng hẹp: đúng ba cặp (Untyped.Retype, Frame.Map, Frame.Unmap); mọi cặp khác
-    /// — kể cả method có thật của object khác — **không** nằm trong danh sách (⇒ `NotSupported`).
+    /// Danh sách trắng hẹp: đúng ba cặp VM (Untyped.Retype, Frame.Map, Frame.Unmap) + năm cặp
+    /// `CNode` của KT-68 (`Copy/Mint/Move/Delete/Revoke`); method có số trong spec nhưng **chưa
+    /// cài** (`CNode.Mutate` 3 / `CNode.Rotate` 6) và mọi cặp khác **không** nằm trong danh sách
+    /// (⇒ `NotSupported`).
     #[test]
     fn danh_sach_trang_hep() {
         assert!(is_whitelisted(ObjType::Untyped, METHOD_RETYPE));
         assert!(is_whitelisted(ObjType::Frame, METHOD_MAP));
         assert!(is_whitelisted(ObjType::Frame, METHOD_UNMAP));
+        for method in [
+            CNODE_COPY,
+            CNODE_MINT,
+            CNODE_MOVE,
+            CNODE_DELETE,
+            CNODE_REVOKE,
+        ] {
+            assert!(is_whitelisted(ObjType::CNode, method));
+        }
+        assert!(!is_whitelisted(ObjType::CNode, 3), "CNode.Mutate chưa cài");
+        assert!(!is_whitelisted(ObjType::CNode, 6), "CNode.Rotate chưa cài");
+        assert!(!is_whitelisted(ObjType::CNode, 7));
         assert!(!is_whitelisted(ObjType::Frame, 2));
         assert!(!is_whitelisted(ObjType::Untyped, 7));
         assert!(!is_whitelisted(ObjType::VSpace, METHOD_MAP));
         assert!(!is_whitelisted(ObjType::Endpoint, METHOD_RETYPE));
         assert!(!is_whitelisted(ObjType::Tcb, METHOD_RETYPE));
+    }
+
+    /// Số method `CNode` **khớp `spec/abi.toml`** `[object].CNode` — đọc từ spec sinh
+    /// (`vifast-abi`), không chép tay: `Copy=0, Mint=1, Move=2, Mutate=3, Delete=4, Revoke=5,
+    /// Rotate=6`. Đây là chốt chống "tự đặt số" (yêu cầu KT-68).
+    #[test]
+    fn so_method_cnode_khop_spec() {
+        assert_eq!(
+            vifast_abi::CNODE_METHODS,
+            [
+                ("Copy", 0),
+                ("Mint", 1),
+                ("Move", 2),
+                ("Mutate", 3),
+                ("Delete", 4),
+                ("Revoke", 5),
+                ("Rotate", 6),
+            ]
+        );
+        assert_eq!(CNODE_COPY, 0);
+        assert_eq!(CNODE_MINT, 1);
+        assert_eq!(CNODE_MOVE, 2);
+        assert_eq!(CNODE_DELETE, 4);
+        assert_eq!(CNODE_REVOKE, 5);
     }
 
     /// `Retype` chỉ nhận ba loại VM của object layer (D2-83); loại lõi do core tự cấp — không

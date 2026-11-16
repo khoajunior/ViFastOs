@@ -106,6 +106,99 @@ pub const RESERVED_OBJECTS: [(&str, u16); 8] = [
     ("PowerControl", 16),
 ];
 #[rustfmt::skip]
+pub const CNODE_METHODS: [(&str, u16); 7] = [
+    ("Copy", 0),
+    ("Mint", 1),
+    ("Move", 2),
+    ("Mutate", 3),
+    ("Delete", 4),
+    ("Revoke", 5),
+    ("Rotate", 6),
+];
+#[rustfmt::skip]
+pub const FRAME_METHODS: [(&str, u16); 5] = [
+    ("Map", 0),
+    ("Unmap", 1),
+    ("GetAddress", 2),
+    ("MapIo", 3),
+    ("UnmapIo", 4),
+];
+#[rustfmt::skip]
+pub const IOSPACE_METHODS: [(&str, u16); 2] = [
+    ("Flush", 0),
+    ("Attach", 1),
+];
+#[rustfmt::skip]
+pub const IRQCONTROL_METHODS: [(&str, u16); 2] = [
+    ("GetLine", 0),
+    ("GetMsi", 1),
+];
+#[rustfmt::skip]
+pub const IRQHANDLER_METHODS: [(&str, u16); 4] = [
+    ("SetNotification", 0),
+    ("Ack", 1),
+    ("Clear", 2),
+    ("SetAffinity", 3),
+];
+#[rustfmt::skip]
+pub const PAGETABLE_METHODS: [(&str, u16); 2] = [
+    ("Map", 0),
+    ("Unmap", 1),
+];
+#[rustfmt::skip]
+pub const POWERCONTROL_METHODS: [(&str, u16); 3] = [
+    ("HartOffline", 0),
+    ("HartOnline", 1),
+    ("Suspend", 2),
+];
+#[rustfmt::skip]
+pub const SCHEDCONTEXT_METHODS: [(&str, u16); 4] = [
+    ("Bind", 0),
+    ("Unbind", 1),
+    ("Consumed", 2),
+    ("YieldTo", 3),
+];
+#[rustfmt::skip]
+pub const SCHEDCONTROL_METHODS: [(&str, u16); 1] = [
+    ("Configure", 0),
+];
+#[rustfmt::skip]
+pub const TCB_METHODS: [(&str, u16); 16] = [
+    ("Configure", 0),
+    ("SetFaultEp", 1),
+    ("ReadState", 2),
+    ("Suspend", 3),
+    ("SetPriority", 4),
+    ("SetMcp", 5),
+    ("SetAffinity", 6),
+    ("SetSchedParams", 7),
+    ("SetTimeoutEp", 8),
+    ("ReadRegs", 9),
+    ("WriteRegs", 10),
+    ("CopyRegs", 11),
+    ("Resume", 12),
+    ("BindNotification", 13),
+    ("UnbindNotification", 14),
+    ("SetTls", 15),
+];
+#[rustfmt::skip]
+pub const UNTYPED_METHODS: [(&str, u16); 1] = [
+    ("Retype", 0),
+];
+#[rustfmt::skip]
+pub const VCPU_METHODS: [(&str, u16); 6] = [
+    ("Run", 0),
+    ("ReadRegs", 1),
+    ("WriteRegs", 2),
+    ("InjectIrq", 3),
+    ("SetTsc", 4),
+    ("Configure", 5),
+];
+#[rustfmt::skip]
+pub const VSPACE_METHODS: [(&str, u16); 1] = [
+    ("GetAsid", 0),
+];
+#[rustfmt::skip]
 pub const SLOT_BYTES: usize = 48;
 #[rustfmt::skip]
 pub const SLOT_ALIGN_BYTES: usize = 16;

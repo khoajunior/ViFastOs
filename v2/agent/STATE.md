@@ -2938,3 +2938,59 @@ cap VSpace đại diện), nạp `inv.elf` ô 1, đăng ký bridge; `ktest.sh`/`
 IPC buffer) ⇒ memsrv+client là **một** chương trình/cspace, **KT-67b** (D2-98) tách; `CNode.Insert`
 không có method id trong spec ⇒ giữ 18; quy ước tham số = **D2-99**, `spec/` chốt ở KT-67b;
 D2-97 ghi “27 method” nhưng spec có **13** — **D2-98 đã đính chính** (không sửa spec).
+
+## KT-68 — capalloc: cấp/thu hồi capability theo cây MDB (2026-11-16, DONE)
+
+**Sản phẩm** (chỉ `v2/`): invocation `CNode.Copy/Mint/Move/Delete/Revoke` trên core thật
+(`kernel/vifast-core/src/invoke.rs`, `machine.rs::move_cap`), **số method sinh từ spec**
+(`CNODE_METHODS` trong `lib/vifast-abi/src/generated.rs`, generator `tools/vifast-gen/gen.py`);
+chương trình **capalloc U-mode** `capa_server` + `capa_client` (hai ELF/2 TCB/2 cspace/2 VSpace)
+cấp Frame vào slot rảnh của CNode client, `Revoke` theo **cây MDB** (kể cả **xuyên CNode**),
+`Delete` reparent, cấp lại **cùng slot**; shim U-mode thêm `nb_recv` (không lệnh đặc quyền —
+D2-101). TAP `ktest-user` **19 → 24** (20..24, `# capa:` evidence); `expected.txt`/`ktest.sh`/
+`build.rs` cùng commit. Docs: `docs/k6-capalloc.md` (mới), `docs/k3b-core.md` §16.
+
+**Việc 0 (bắt buộc)**: vá **một dòng** `v2/test/conformance/run.sh --boot` (`bash
+v2/test/boot/ktest.sh` sau khi đã `cd v2/` ⇒ `v2/v2/...`) + chú thích 3→4 ảnh. Đỏ-trước:
+`bash: v2/test/boot/ktest.sh: No such file or directory`; xanh-sau: matrix **12/12**,
+`trace-compare 61/61 dòng, 5/5 ca` (`JOURNAL/kt68-runboot-{do,xanh,final}.log`).
+
+**Bằng chứng** (`JOURNAL/kt68-xanh-user-smp1.log`, kernel in — D2-80):
+
+```text
+# capa: u-mode server_exit=0 client_exit=0 steps=13 src_obj=34 src_ty=Frame src_rights=0xf src_alive=1
+# capa: cap slot client4..7=1111 server8=1 copies=5 revokes=2 deletes=3 mints=0 moves=0 denied=4
+# capa: walk va=0x41000000 valid=1 pa=0x82047000 expected_pa=0x82047000 phys=0x8877665544332211
+# capa: revoke slot=6 deleted=2 subtree=1 sibling=1 live_before=46 live_after=48 delete_reparent=1 cross_cnode=1
+# capa: am empty=1 occupied=1 rights=1 range=1 ro_cnode=1 mutate=1 rotate=1 other=1 denied=1 short=1 long=1 stale=1 dead_alive=1
+# capa: rfree s=12->12 c=12->12 live=46->46 cap_high=47->64 installed+=1 failed+=0
+# capa: invariants caps=1 ipc=1 bytes=1 obj=1
+ok 20..24 (5 TAP); # ktest-user: taps=24 ok=1; PANIC: KT-68 ... (24 TAP, 0 fail)
+```
+
+**Đỏ-trước**: host 9/9 test capalloc đỏ (`Err(18)` vs mong đợi; `kt68-do-truoc-host.log`); QEMU
+TAP 20..24 đều `not ok` (`kt68-do-truoc-qemu.log`).
+
+**Không hồi quy**: gate `--fast` **PASS 661/87**, L1 wall **879 ms**, chạy thuần **0.86/0.79/0.85 s**
+(D2-100: hai số, lệch < 2×) — `kt68-gate.log`, `kt68-l1-thuan.log`; matrix **12/12** (ktest 65/65,
+guard 3/3, user **24/24**, proc 10/10 × smp 1/2/4) — `kt68-ktest-matrix.log`; conformance
+**61/61 dòng / 5/5 ca**; soak **0/1000** wall **290 s**, BUILD_ID `02ed5a1810ba59ce`, sha256
+`f6318b5d…` (ảnh sản phẩm **không đổi** sau khi vá clippy test-only: rebuild lại đúng sha256
+`f6318b5d…` — `kt68-product-sha.log`); clippy kernel 4 tổ hợp `-D warnings` **EXIT=0**
+(`kt68-clippy-kernel.log`); `cargo test -p vifast-core --lib` **42 passed** (9 test mới,
+`kt68-core-tests.log`).
+
+**Hai ngưỡng (D2-85a)**: `size_of::<Machine>()` **không đổi 188.872 B** ≤ **196.608 B** (không
+thêm field — `move_cap` là hàm, method id là hằng); ảnh test vẫn dưới trần **262.144 B** (runner
+in budget từng ảnh). Không nới ngưỡng nào.
+
+**Vá literal evidence theo D2-102** (sau verdict sơ bộ): 6 literal `# capa:` → biến đo
+(`frames` từ `check_objmem().counts.frames`; `subtree/sibling/cross_cnode/src_alive` từ biến),
+4 literal `# inv:` (KT-67a) → `invoke::METHOD_*`/`user::sys_err(0)` (render y hệt), 2 regex
+`ktest.sh`; matrix **12/12** lại, clippy `ktest,user` **EXIT=0**, ảnh sản phẩm vẫn sha256
+`f6318b5d…`; audit `# capa/# inv/# capx` = **0** literal claim còn lại
+(`JOURNAL/kt68-delta-va-literal.diff`, `kt68-grep-evidence.txt`). Không đổi logic/test.
+
+**Nợ** (chi tiết `docs/k6-capalloc.md` §8): `CNode.Mutate`/`Rotate` chưa cài; không có
+`GetFreeSlot` (quét tuyến tính); `n_caps` high-water (ID cap không tái dùng) → chu kỳ dài chạm
+`MAX_CAPS`; capalloc một hart; `capa_server` là chương trình test (KT-69 IDL sẽ thay stub).

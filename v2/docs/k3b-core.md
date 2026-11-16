@@ -1383,3 +1383,66 @@ Log tương ứng: `v2/agent/JOURNAL/kt67b-{gate,ktest-matrix,soak,core-tests,cl
 red-before-ktest-user,red-before-matrix1,udisasm-no-priv}.log`; chi tiết phía memsrv/ABI ở
 `v2/docs/k6-memsrv.md` §8. Ba ELF U-mode được disassemble (F2, D2-101): chỉ `ecall` + load/store
 thường, **0** lệnh đặc quyền/CSR/satp.
+
+## 16. KT-68 — `CNode.*` trên đường invocation + capalloc (cấp/thu hồi theo cây MDB)
+
+### 16.1 Vì sao không cần syscall/kernel API mới
+
+D2-97/D2-99 đã chốt: syscall `0 Call` trên cap **không phải Endpoint** là invocation
+(`method = label`, MR0..MR3, trả `a1`). `spec/abi.toml` `[object].CNode` đã cấp đủ số cho
+`Copy/Mint/Move/Delete/Revoke`; `Untyped.Retype`/`Frame.Map`/`Frame.Unmap` (KT-67a) đã là đường
+invocation đầu tiên. KT-68 **chỉ cài thêm** 5 method đó trên core — không thêm syscall, không
+sửa `spec/`, không thêm `unsafe` (shim U-mode chỉ thêm wrapper `nb_recv` quanh `ecall`).
+
+Số method được **sinh** từ spec (`v2/tools/vifast-gen` sinh `CNODE_METHODS`), test
+`so_method_cnode_khop_spec` chốt: `Copy=0, Mint=1, Move=2, Mutate=3, Delete=4, Revoke=5,
+Rotate=6`. `Mutate`/`Rotate` **chưa cài** ⇒ giữ `NotSupported` (18) + có đếm; `CNode.Insert`
+(D2-98) không có số ⇒ không tồn tại.
+
+### 16.2 Ngữ nghĩa (một nguồn: `vifast-core/src/{invoke,machine}.rs`; oracle `vifast-model`)
+
+- Cap được gọi là cap `CNode` trong CSpace **caller**, phải có `RIGHT_WRITE` (model F3):
+  thiếu ⇒ `InsufficientRights` (3).
+- `src` = CPTR trong CSpace **caller**; `dst` = slot trong **CNode của cap được gọi**
+  (`check_dst_in_cnode` của model). Nhờ vậy một server giữ cap CNode của client có thể cấp cap
+  **vào CSpace của client** — đúng mô hình capalloc.
+- `Machine::move_cap` port D2-44 từ sim: `dst` có cap ⇒ `delete(dst)` trước (con reparent lên
+  ông), `src == dst` ⇒ `IllegalOperation` (17), cap giữ `CapId`/cha/quyền/badge.
+- Lỗi: 3/5/7/8/17/18/19 theo bảng chung; `caps > 0` trên invocation ⇒ 18 (D2-99(g), có đếm).
+- Bộ đếm `invoke::stats()` thêm `copy/mint/moved/delete/revoke` (TAP `# capa:` đọc).
+
+### 16.3 capalloc U-mode (`capa_server`/`capa_client`, ảnh `ktest-user`)
+
+Server nhận **cap CNode của client** qua chuyển cap (KT-67b), quét slot rảnh bằng
+`Copy` (lỗi 7 = đã dùng), cấp Frame của mình vào slot đầu tiên trống; thu hồi bằng
+`Revoke(slot)` + `Delete(slot)`; cấp lại **cùng slot**. Client dùng cap thật (`Frame.Map` →
+ghi/đọc → `Frame.Unmap`), tự dựng cây 2 tầng trong CSpace của mình, và kiểm CPTR cũ sau
+`Revoke` cap nguồn (xoá **xuyên CNode**). Vì hai chương trình chạy **tuần tự** trên một hart,
+kernel làm scheduler round-robin qua `NBRecv` + `Yield` (không chặn cứng — `Exit` không
+`fault_ep` làm rơi message đang xếp hàng, D2-25, nên server `Yield` trước khi `Exit`).
+
+Chi tiết thuật toán/bất biến/TAP/nợ: **`v2/docs/k6-capalloc.md`**.
+
+### 16.4 TAP + test host
+
+| Nơi | Nội dung |
+|---|---|
+| `ktest-user` TAP 20..24 | cap vòng (2 tiến trình thật) · Mint/Copy/Move · Revoke 2 tầng + Delete reparent + xuyên CNode · ca âm mã lỗi · bất biến `slot_rfree`/`live_cap` |
+| `# capa:` evidence | 9 dòng do **kernel** in (cap/PA/PTE/physmap/slot rảnh/`cap_transfer`), runner đòi đủ (fail-closed) |
+| host | `cargo test --manifest-path v2/kernel/Cargo.toml -p vifast-core --lib`: **9 test** capalloc (Copy/Mint/Move/Delete/Revoke/ca âm/cap chết/capalloc chu kỳ) — đã đỏ-trước |
+
+### 16.5 Hai ngưỡng + hồi quy
+
+`size_of::<Machine>()` **không đổi** (không thêm field: `move_cap` là hàm, method id là hằng)
+⇒ vẫn 188.872 B ≤ 196.608 B (D2-84/85); ảnh test vẫn dưới trần 262.144 B (runner kiểm từng ảnh).
+Matrix **12/12** (4 ảnh × smp 1/2/4), conformance 61/61 dòng / 5/5 ca, gate `--fast` PASS,
+soak 0/1000, L1 1.000 seed chạy thuần — số đo + log ở `v2/agent/JOURNAL/kt68-journal.md`.
+
+### 16.6 Chạy lại
+
+```bash
+cargo test --manifest-path v2/kernel/Cargo.toml -p vifast-core --lib   # 42 test (9 mới)
+bash v2/test/boot/ktest.sh 1 matrix                                    # 12 boot
+bash v2/test/conformance/run.sh --boot --smp 2                         # simulation + boot + trace
+./v2/bin/v2 gate --fast                                                # cổng
+```

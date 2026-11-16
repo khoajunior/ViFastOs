@@ -966,6 +966,29 @@ impl Machine {
         Ok(new_cap)
     }
 
+    /// `CNode.Move` (KT-68): chuyển cap nguồn sang `dst`, **xoá nguồn**.
+    ///
+    /// Ngữ nghĩa **D2-44**: `dst` đã có cap thì cap đích bị `delete` trước (con của cap đích
+    /// được reparent lên ông — MDB kiểu seL4), rồi cap nguồn rời slot cũ sang `dst`; **không**
+    /// tạo cap mới (cùng `CapId`, giữ nguyên cha MDB, quyền, badge). `src == dst` ⇒
+    /// `IllegalOperation` (không có việc gì để làm, không được tự xoá).
+    pub fn move_cap(&mut self, src: SlotRef, dst: SlotRef) -> Result<(), KError> {
+        let cap = self.cap_at(src.cnode, src.slot)?;
+        self.check_cnode_slot(dst.cnode, dst.slot)?;
+        if src == dst {
+            return Err(KError::IllegalOperation);
+        }
+        if self.cnode_slot(dst.cnode, dst.slot)?.is_some() {
+            self.delete(dst)?;
+        }
+        self.clear_slot_of(cap);
+        self.cnode_set_slot(dst.cnode, dst.slot, Some(cap))?;
+        if let Some(c) = self.caps.get_mut(cap as usize - 1) {
+            c.slot = Some(dst);
+        }
+        Ok(())
+    }
+
     /// `CNode.Delete`: xoá cap trong slot (object không bị finalise — chỉ Revoke mới).
     ///
     /// Con của cap bị xoá thuộc về **ông** (tổ tiên sống gần nhất) — MDB kiểu seL4.

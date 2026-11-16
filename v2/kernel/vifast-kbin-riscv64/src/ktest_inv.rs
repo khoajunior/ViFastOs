@@ -216,6 +216,11 @@ pub fn invocation_phase(
         retype: stats.retype.saturating_sub(before.retype),
         map: stats.map.saturating_sub(before.map),
         unmap: stats.unmap.saturating_sub(before.unmap),
+        copy: stats.copy.saturating_sub(before.copy),
+        mint: stats.mint.saturating_sub(before.mint),
+        moved: stats.moved.saturating_sub(before.moved),
+        delete: stats.delete.saturating_sub(before.delete),
+        revoke: stats.revoke.saturating_sub(before.revoke),
     };
     let fault = FAULT_STATS.last();
     let mut frame_obj = 0u32;
@@ -265,7 +270,8 @@ pub fn invocation_phase(
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(
             w,
-            "# inv: retype method=0 ty={:?} size={} err={} slot={} stats={}/{}",
+            "# inv: retype method={} ty={:?} size={} err={} slot={} stats={}/{}",
+            vifast_core::invoke::METHOD_RETYPE,
             frame_ty.unwrap_or(ObjType::Untyped),
             frame_bits,
             if frame_ty == Some(ObjType::Frame) {
@@ -279,7 +285,8 @@ pub fn invocation_phase(
         );
         let _ = writeln!(
             w,
-            "# inv: map method=0 va=0x{:x} pa=0x{:x} err={} stats={} phys=0x{:x}",
+            "# inv: map method={} va=0x{:x} pa=0x{:x} err={} stats={} phys=0x{:x}",
+            vifast_core::invoke::METHOD_MAP,
             INV_VA,
             frame_pa,
             if delta.map == 1 { 0 } else { 1 },
@@ -288,7 +295,8 @@ pub fn invocation_phase(
         );
         let _ = writeln!(
             w,
-            "# inv: unmap method=1 va=0x{:x} err={} stats={} walk_after={} objmem={} caps={}",
+            "# inv: unmap method={} va=0x{:x} err={} stats={} walk_after={} objmem={} caps={}",
+            vifast_core::invoke::METHOD_UNMAP,
             INV_VA,
             if delta.unmap == 1 { 0 } else { 1 },
             delta.unmap,
@@ -298,7 +306,8 @@ pub fn invocation_phase(
         );
         let _ = writeln!(
             w,
-            "# inv: deny err=18 stats={} allowed={} last_err={} syscalls={} entries={}",
+            "# inv: deny err={} stats={} allowed={} last_err={} syscalls={} entries={}",
+            user::sys_err(0),
             delta.denied,
             delta.allowed,
             user::sys_err(0),
@@ -375,5 +384,9 @@ pub fn invocation_phase(
         PLATFORM.put_str("not ok 18 - invocation ngoai danh sach: so lan/ma sai\n");
         *fails += 1;
     }
+    // **KT-68** — trả `VSpace`/PageTable của pha này về object layer sau khi đã đo xong TAP
+    // 15..18: arena object layer chỉ 64 KiB và pha capalloc cần ~16 KiB PageTable cho hai
+    // chương trình mới. Chỉ giải phóng **sau** mọi phép đo; không đổi kết quả TAP nào ở trên.
+    let _ = aobj::machine().revoke(loaded.vspace);
     ok15 && ok16 && ok17 && ok18
 }

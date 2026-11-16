@@ -287,3 +287,12 @@ bên nhận** và map/ghi/đọc thật (TAP 19, `# capx:` evidence). Chi tiết
 move chưa có (`CNode.Delete`/`Revoke` ngoài danh sách trắng) — ghi ở journal §11. Ngoài ra `CNode.Insert` mà D2-96/97 nhắc **không có method id** trong
 bảng `CNode` của spec (`Copy=0..Rotate=6`, spec đóng băng) nên giữ `NotSupported`; core đã có API
 `copy/mint/delete/revoke` để gắn id có sẵn ở task sau.
+
+**ĐÓNG NỢ "CNode.Delete/Revoke ngoài danh sách trắng" — KT-68 (2026-11-16, Agent 2)**: KT-67b
+kết thúc với nợ *"policy copy, move chưa có (`CNode.Delete`/`Revoke` ngoài danh sách trắng)"*.
+KT-68 đã cài **đủ 5 method** `CNode.Copy=0/Mint=1/Move=2/Delete=4/Revoke=5` (số **sinh từ
+`spec/abi.toml`**, không sửa spec) + `Machine::move_cap` (D2-44), và chứng minh trên QEMU:
+capalloc U-mode cấp/thu hồi **theo cây MDB** (kể cả **xuyên CNode**), `Delete` reparent, cấp lại
+**cùng slot**, không rò slot/cap — TAP 20..24, `# capa:` evidence, `docs/k6-capalloc.md`.
+`CNode.Mutate=3`/`Rotate=6` vẫn **chưa cài** (giữ `NotSupported` 18, có TAP) — nợ có chủ, cần D2
+mới nếu muốn mở; `CNode.Insert` vẫn **không có số** trong spec.

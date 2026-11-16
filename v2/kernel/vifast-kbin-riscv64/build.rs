@@ -32,6 +32,8 @@ fn main() {
     println!("cargo:rerun-if-changed=init/inv_user.S");
     println!("cargo:rerun-if-changed=init/memsrv_user.rs");
     println!("cargo:rerun-if-changed=init/client_user.rs");
+    println!("cargo:rerun-if-changed=init/capa_server_user.rs");
+    println!("cargo:rerun-if-changed=init/capa_client_user.rs");
     println!("cargo:rerun-if-changed=init/init.ld");
     if std::env::var_os("CARGO_FEATURE_USER").is_none() {
         return;
@@ -73,6 +75,19 @@ fn main() {
         Path::new(&dir),
         "client_user.rs",
         "client.elf",
+        Some(&user_lib),
+    );
+    // KT-68: **capalloc** — server cấp/thu hồi cap + client dùng cap (hai tiến trình riêng).
+    build_user_elf(
+        Path::new(&dir),
+        "capa_server_user.rs",
+        "capa_server.elf",
+        Some(&user_lib),
+    );
+    build_user_elf(
+        Path::new(&dir),
+        "capa_client_user.rs",
+        "capa_client.elf",
         Some(&user_lib),
     );
 }

@@ -76,6 +76,10 @@ pub mod tcb;
 mod tcbdata;
 mod tlb;
 
+// KT-68 — test host cho `CNode.*` invocation + thuật toán capalloc (chỉ khi `cargo test`).
+#[cfg(test)]
+mod capalloc_tests;
+
 pub use arena::Region;
 pub use captable::{CapChildren, CapTable};
 pub use check_ipc::TcbIds;

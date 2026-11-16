@@ -99,6 +99,22 @@ def gen_rs(doc: dict) -> str:
     for oid, name in reserved:
         out.append(f'    ("{name}", {oid}),')
     out.append("];")
+    # KT-68: **số method** theo object (`[object].<Tên>.method`) — invocation `CNode.*` phải
+    # dùng đúng số spec, không chép tay (D2-11). Chỉ sinh cho object có method; số phải liền
+    # mạch 0..N (lệch ⇒ dừng, fail-closed, không tự đánh số).
+    for obj_name in sorted(objects):
+        methods_of = objects[obj_name].get("method") or {}
+        if not methods_of:
+            continue
+        ids = sorted(int(k) for k in methods_of)
+        if ids != list(range(len(ids))):
+            die(f"[object].{obj_name}.method phải liền mạch 0..N, đang {ids}")
+        const = f"{obj_name.upper()}_METHODS"
+        out.append("#[rustfmt::skip]")
+        out.append(f"pub const {const}: [(&str, u16); {len(ids)}] = [")
+        for num in ids:
+            out.append(f'    ("{methods_of[str(num)]["name"]}", {num}),')
+        out.append("];")
     # KT-58: kích thước/căn lề object từ `[object_size]` (QD §3.9) — core `no_std` dùng
     # hằng sinh, không hardcode 48/64/4096 trong `vifast-core`.
     osz = doc.get("object_size") or {}

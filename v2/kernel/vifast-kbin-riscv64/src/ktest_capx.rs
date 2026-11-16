@@ -375,6 +375,10 @@ pub fn capx_phase(
         && caps_ok
         && ipc_ok
         && objmem_ok;
+    // **KT-68** — trả `VSpace`/PageTable của **hai** chương trình về object layer sau khi đã đo
+    // xong TAP 19 (arena 64 KiB; pha capalloc cần PageTable cho hai chương trình khác).
+    let _ = aobj::machine().revoke(memsrv.vspace);
+    let _ = aobj::machine().revoke(client.vspace);
     if ok {
         PLATFORM.put_str("ok 19 - ipc capx hai tien trinh\n");
     } else {

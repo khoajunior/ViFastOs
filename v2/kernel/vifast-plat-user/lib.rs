@@ -45,7 +45,7 @@ pub const SYS_CALL: u64 = 0;
 pub const SYS_NB_SEND: u64 = 2;
 /// Syscall `Recv`.
 pub const SYS_RECV: u64 = 3;
-/// Syscall `NBRecv`.
+/// Syscall `NBRecv` — không chặn (`Busy` = 14 khi không có message; vòng poll KT-68).
 pub const SYS_NB_RECV: u64 = 4;
 /// Syscall `Yield`.
 pub const SYS_YIELD: u64 = 8;
@@ -286,6 +286,12 @@ pub fn nb_send(cap: u64, raw_info: u64, mrs: [u64; 4]) -> [u64; 7] {
 /// `Recv(cap, reply_cptr?)` — `reply = `[`REPLY_NONE`] khi không có cap Reply.
 pub fn recv(cap: u64, reply: u64) -> [u64; 7] {
     syscall7(SYS_RECV, cap, reply, 0, 0, 0, 0)
+}
+
+/// `NBRecv(cap)` — không chặn; `[0] = Busy` (14) khi Endpoint rỗng (KT-68). Dùng vòng
+/// `NBRecv` + `Yield` thay cho `Recv` để chương trình test không bị chặn cứng.
+pub fn nb_recv(cap: u64) -> [u64; 7] {
+    syscall7(SYS_NB_RECV, cap, 0, 0, 0, 0, 0)
 }
 
 /// In một lát `&[u8]` của chính tiến trình (vùng đã map `U|R`) qua syscall `DebugPutStr`.

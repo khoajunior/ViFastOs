@@ -82,8 +82,8 @@ fi
 
 # 2) QEMU — log của runner KT-54 (không tự build lại nếu không xin `--boot`).
 if [ "$BOOT" = 1 ]; then
-    echo "# qemu: ktest.sh 1 matrix (3 ảnh × smp 1/2/4)"
-    if ! (cd "$V2_ROOT" && bash v2/test/boot/ktest.sh 1 matrix) >"$LOGDIR/ktest-matrix.log" 2>&1; then
+    echo "# qemu: ktest.sh 1 matrix (4 ảnh × smp 1/2/4)"
+    if ! (cd "$V2_ROOT" && bash test/boot/ktest.sh 1 matrix) >"$LOGDIR/ktest-matrix.log" 2>&1; then
         echo "not ok - ktest.sh matrix FAIL (xem $LOGDIR/ktest-matrix.log)"
         tail -20 "$LOGDIR/ktest-matrix.log"
         exit 1
