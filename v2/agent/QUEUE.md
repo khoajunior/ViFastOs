@@ -183,7 +183,9 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-73 | **K6** virtio-console + UART IRQ → user | KT-72 | 3 h | DONE | 19f16f1a; UART IRQ->ring->U-mode; shell doc ring that; console 0x1003; matrix 18/18; gate 726/99 |
 | KT-74 | **K6** SetTls + exec chain | KT-73 | 3 h | DONE | 0155bafa; SetTls 15 (sinh tu spec) + exec atomic; va bug tp=hart-id; matrix 21/21; gate 726/99 |
 | KT-75 | **K6** `test-persist` 7 pha trên virtio-blk | KT-74 | 3 h | DONE | 1ea24908; 7/7 pha reboot QEMU that (10 PID); ca am flush dung tang; host doc lap; gate 729/100 |
-| KT-76 | **K6** cổng: `K6-DOD` "tương đương v1" + soak + L1 400k | KT-75 | 3 h | READY | checklist v1 đo được; soak 0/1000; L1 400k |
+| KT-76 | **K6** cổng: `K6-DOD` "tương đương v1" + soak + L1 400k | KT-75 | 3 h | DONE | 2f34b09c; K6-DOD trung thuc: 8/8 tieu chi do duoc DAT, S1 shell anh san pham KHONG DAT => K6 KHONG DAT; L1 400k 4 cau hinh song song |
+
+| KT-77 | **K6** đưa U-mode + shell vào **ảnh sản phẩm** (đóng S1) | KT-76 | 3 h | READY | shell thật trên ảnh boot; giữ trần 262.144; TAP |
 
 
 APPROVED 2026-11-12 Agent 0
@@ -202,7 +204,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a DONE** (invocation, gate 661/87); **KT-67b DONE** (cap giữa 2 tiến trình thật, gate 661/87); **KT-68 DONE** (capalloc, gate 661/87); **KT-69 DONE** (IDL + ring, gate 675/92); **KT-70 DONE** (pager + page cache, gate 689/95); **KT-71 DONE** (journal + fsck, gate 703/96); **KT-72 DONE** (virtio-blk, gate 718/99); **KT-73 DONE** (console + UART IRQ, gate 726/99); **KT-74 DONE** (SetTls + exec, gate 726/99); **KT-75 DONE** (persist qua reboot thật, gate 729/100); **KT-76 READY** (cổng K6).
+2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a DONE** (invocation, gate 661/87); **KT-67b DONE** (cap giữa 2 tiến trình thật, gate 661/87); **KT-68 DONE** (capalloc, gate 661/87); **KT-69 DONE** (IDL + ring, gate 675/92); **KT-70 DONE** (pager + page cache, gate 689/95); **KT-71 DONE** (journal + fsck, gate 703/96); **KT-72 DONE** (virtio-blk, gate 718/99); **KT-73 DONE** (console + UART IRQ, gate 726/99); **KT-74 DONE** (SetTls + exec, gate 726/99); **KT-75 DONE** (persist qua reboot thật, gate 729/100); **KT-76 DONE** (cổng K6; gate 729/100; **K6 KHÔNG ĐẠT** vì S1 — D2-118); **KT-77 READY** (U-mode + shell vào ảnh sản phẩm).
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
