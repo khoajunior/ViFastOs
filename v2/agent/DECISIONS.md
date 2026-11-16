@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-101`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-102`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-101: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-102: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -171,3 +171,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-100** **Cách đo L1 của cổng — sửa lỗi phương pháp**: `v2 gate --fast` in `# L1: OK (<wall>)` bằng **wall time cả lệnh `cargo test`**, nên **bao gồm biên dịch** nếu nguồn đổi giữa bước L0 và L1 (đo được: `spec/` sửa 13:27:59 → `generated.rs` 13:30:50 → L1 13:31:34–13:34:28 ⇒ 173,935 ms, so với 891–1.282 ms khi cây ấm). Hệ quả: (a) **cấm** đọc số L1 của cổng làm số đo hiệu năng khi cây vừa đổi nguồn; (b) số L1 dùng để kết luận phải đo trên **cây ấm** (compile trước, hoặc hai lần: lần 1 gồm build, lần 2 thuần chạy) và ghi rõ lần nào; (c) quy tắc AGENTS §6 “L1 > 60 s ⇒ giảm seed” **chỉ** áp cho **thời gian chạy thuần**, không áp cho wall có biên dịch — nhưng **không** vì thế mà bỏ qua: nếu lần đo thuần vẫn > 60 s thì **đúng là** phải xử lý theo luật cũ; (d) khi báo cáo, ghi **cả hai** số (wall cổng + chạy thuần) nếu khác nhau quá 2×; (e) các gate T-INFRA trước đây (wall 280 s) giải thích được một phần bởi cùng artifact này — ghi nhận lại, không đổi ngưỡng nào.
 
 - **D2-101** **Sửa điều kiện D2-93(a)** sau khi `vifast-plat-user` có thêm `unsafe`: điều kiện đúng **không phải** “mọi `unsafe` phải nằm trong hàm gọi syscall” (quá hẹp, đã bị vi phạm bởi accessor IPC buffer + helper đọc/ghi user memory) mà là **“không có LỆNH ĐẶC QUYỀN”**: shim được phép `unsafe` cho (i) `ecall`, (ii) `read_volatile`/`write_volatile` trên **địa chỉ user** (IPC buffer của chính nó, VA do chương trình U-mode truyền). Lý do: shim chạy ở **U-mode** với page table của user ⇒ truy cập bộ nhớ không đặc quyền, không với tới kernel; ranh giới an ninh là **mức đặc quyền**, không phải cú pháp `unsafe`. **Cấm tuyệt đối** trong shim: `csrr/csrw/sfence/sret/mret/satp/wfi/Đọc-ghi CSR, truy cập vật lý/physmap`. Kiểm bằng disassembly (`llvm-objdump`) trong review, không chỉ grep. Điều kiện (b)/(c) của D2-93 giữ nguyên; ba chương trình U-mode nghiệp vụ vẫn **0 `unsafe`**.
+
+- **D2-102** **Luật dòng evidence** (vá lần thứ **ba** của cùng một lỗi: KT-67b `pre` literal, KT-68 `parent/subtree/sibling/cross_cnode/src_alive` literal, KT-67a `method=0/0/1` literal): mọi dòng `# <tag>:` in ra log phải lấy **giá trị từ biến đo** (`writeln!`/`format!` với biến), **không** được là chuỗi hằng viết sẵn. (a) Hằng **thiết kế** được phép xuất hiện nhưng phải mang nhãn `const:…` để người đọc phân biệt (ví dụ `policy=copy`); (b) mã lỗi phải in qua **cùng** hàm render với code (`user::sys_err`), không viết số; (c) method id in qua **hằng sinh từ spec** (`invoke::METHOD_*`), không viết số; (d) reviewer **phải** grep **mọi** tiền tố evidence (`# capa:`, `# inv:`, `# capx:`, `# mem:`, `# stack:`, …) tìm literal và **từ chối** nếu có; (e) nếu test vẫn kiểm bằng biến (TAP đúng) thì lỗi này **không** làm sai kết quả, nhưng làm **log không phải bằng chứng** ⇒ vẫn là DRIFT, phải sửa; (f) cho phép vá **giữa lúc review** nếu delta **cơ học** (chỉ đổi cách in), có chạy lại matrix + clippy liên quan, và lead tự kiểm bằng grep sau khi vá — nhưng phải báo **delta file:dòng** để confirm chỉ kiểm phần thay đổi.
