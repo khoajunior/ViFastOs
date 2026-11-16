@@ -297,3 +297,13 @@ capalloc U-mode cấp/thu hồi **theo cây MDB** (kể cả **xuyên CNode**), 
 **cùng slot**, không rò slot/cap — TAP 20..24, `# capa:` evidence, `docs/k6-capalloc.md`.
 `CNode.Mutate=3`/`Rotate=6` vẫn **chưa cài** (giữ `NotSupported` 18, có TAP) — nợ có chủ, cần D2
 mới nếu muốn mở; `CNode.Insert` vẫn **không có số** trong spec.
+
+**NỢ KT-71 (không chặn) — pager U-mode GHI trang**: KT-71 cài **write-back** trong
+`vifast-vfs` (`PageCache.dirty`, `mark_dirty`, `flush_page` 8 sector + `dev.flush()`,
+`flush_all`, `load()` từ chối slot bẩn `Busy=14`, giữ bản ghi mục vừa trục xuất để flush được)
+và **đo trên QEMU** bằng `RamDisk` trong kernel (cùng mã crate, TAP 66 `dirty_marks=0->1
+dirty_now=0 writes=8 flushes=1 backend_ok=true reopen_ok=true`). Nhưng **pager U-mode**
+(`init/pager_server_user.rs`) vẫn **chỉ đọc** — đường ghi từ chương trình U-mode qua
+`Frame.Map` + shim (`read_volatile/write_volatile` trên Frame của chính nó, D2-101) cần
+**KT-72** vì phải có virtio-blk thật để flush ra thiết bị; KT-72 chỉ **thêm `impl BlockDev`**
+(không sửa `PagerCore`). Ghi ở `docs/k6-vfs-journal.md` §7 + `k3b-core.md` §19.

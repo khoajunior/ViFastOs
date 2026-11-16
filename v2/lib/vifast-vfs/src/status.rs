@@ -61,6 +61,8 @@ pub mod err {
     };
     /// Frame.Map/Unmap hỏng.
     pub const NOT_MAPPED: Status = Status { name: "NotMapped" };
+    /// Trang đang **bẩn**: phải flush trước khi nạp đè/trục xuất (KT-71).
+    pub const BUSY: Status = Status { name: "Busy" };
     /// Backend lỗi I/O.
     pub const IO: Status = Status { name: "RangeError" };
 }

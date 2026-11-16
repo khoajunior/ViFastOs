@@ -21,8 +21,10 @@
 
 mod alloc;
 mod consts;
+mod crash;
 mod dir;
 mod fs;
+mod fsck;
 mod path;
 mod tx;
 
@@ -30,5 +32,7 @@ mod tx;
 mod tests;
 
 pub use consts::*;
+pub use crash::{run_op, PrefixDisk};
 pub use fs::*;
+pub use fsck::FsckReport;
 pub use tx::DirEntryFull;

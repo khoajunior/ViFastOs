@@ -22,6 +22,8 @@ pub struct Entry {
     pub slot: u8,
     /// Dấu LRU — lớn hơn = mới dùng hơn.
     pub stamp: u64,
+    /// Trang **bẩn**: có ghi vào Frame chưa xuống backend (KT-71). Phải flush trước khi trục xuất.
+    pub dirty: bool,
 }
 
 impl Entry {
@@ -31,6 +33,7 @@ impl Entry {
         key: (0, 0),
         slot: NO_SLOT,
         stamp: 0,
+        dirty: false,
     };
 }
 
@@ -48,12 +51,17 @@ pub enum SlotChoice {
         slot: u8,
         /// Khoá bị trục xuất (caller phải gỡ mapping trước khi ghi đè dữ liệu).
         key: Key,
+        /// Mục bị trục xuất đang **bẩn** ⇒ caller **phải** flush trước khi ghi đè.
+        dirty: bool,
     },
 }
 
 /// Page cache `N` mục (N = ngưỡng thiết kế, không nới).
 pub struct PageCache<const N: usize> {
     entries: [Entry; N],
+    /// Mục vừa bị chọn trục xuất (KT-71): giữ lại **bản ghi** để trang bẩn vẫn được `flush`
+    /// trước khi `install` nạp đè slot. `None` = không có mục chờ.
+    evicted: Option<Entry>,
     clock: u64,
     hits: u64,
     misses: u64,
@@ -71,6 +79,7 @@ impl<const N: usize> PageCache<N> {
         }
         Self {
             entries,
+            evicted: None,
             clock: 0,
             hits: 0,
             misses: 0,
@@ -116,17 +125,24 @@ impl<const N: usize> PageCache<N> {
             }
         }
         let entry = self.entries[victim];
+        // KT-71: giữ bản ghi mục bị trục xuất — nếu bẩn, caller còn `flush_page(key)` được
+        // (sau `begin_miss` mục không còn trong bảng, nhưng dữ liệu vẫn nằm trong Frame).
+        self.evicted = Some(entry);
         self.entries[victim].used = false;
         self.evictions += 1;
         SlotChoice::Evict {
             slot: entry.slot,
             key: entry.key,
+            dirty: entry.dirty,
         }
     }
 
     /// Cài khoá vào slot **sau khi** dữ liệu đã nạp (hoặc sau khi mapping cũ đã gỡ).
     pub fn install(&mut self, key: Key, slot: u8) {
         let stamp = self.next_stamp();
+        if self.evicted.map(|entry| entry.slot == slot) == Some(true) {
+            self.evicted = None;
+        }
         for entry in self.entries.iter_mut() {
             if entry.slot == slot {
                 *entry = Entry {
@@ -134,10 +150,90 @@ impl<const N: usize> PageCache<N> {
                     key,
                     slot,
                     stamp,
+                    dirty: false,
                 };
                 return;
             }
         }
+    }
+
+    /// Đánh dấu trang **bẩn** (có ghi vào Frame). `false` nếu khoá không có trong cache.
+    pub fn mark_dirty(&mut self, key: Key) -> bool {
+        for entry in self.entries.iter_mut() {
+            if entry.used && entry.key == key {
+                entry.dirty = true;
+                return true;
+            }
+        }
+        if let Some(entry) = self.evicted.as_mut() {
+            if entry.key == key {
+                entry.dirty = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Trang có bẩn không (khoá không có trong cache ⇒ `false`).
+    pub fn is_dirty(&self, key: Key) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.used && entry.key == key && entry.dirty)
+            || self.evicted.map(|entry| entry.key == key && entry.dirty) == Some(true)
+    }
+
+    /// Slot `slot` có đang giữ trang bẩn không.
+    pub fn slot_dirty(&self, slot: u8) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.used && entry.slot == slot && entry.dirty)
+            || self.evicted.map(|entry| entry.slot == slot && entry.dirty) == Some(true)
+    }
+
+    /// Đánh dấu **sạch** (sau khi đã ghi xuống backend). `false` nếu khoá không có.
+    pub fn clear_dirty(&mut self, key: Key) -> bool {
+        for entry in self.entries.iter_mut() {
+            if entry.used && entry.key == key {
+                entry.dirty = false;
+                return true;
+            }
+        }
+        if let Some(entry) = self.evicted.as_mut() {
+            if entry.key == key {
+                entry.dirty = false;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Số trang đang bẩn.
+    pub fn dirty_count(&self) -> usize {
+        let live = self
+            .entries
+            .iter()
+            .filter(|entry| entry.used && entry.dirty)
+            .count();
+        let pending = self.evicted.map(|entry| entry.dirty as usize).unwrap_or(0);
+        live + pending
+    }
+
+    /// Chép **mọi khoá bẩn** vào `out` (không cấp phát); trả số khoá đã chép.
+    pub fn dirty_keys(&self, out: &mut [Key]) -> usize {
+        let mut len = 0usize;
+        for entry in self.entries.iter() {
+            if entry.used && entry.dirty && len < out.len() {
+                out[len] = entry.key;
+                len += 1;
+            }
+        }
+        if let Some(entry) = self.evicted {
+            if entry.dirty && len < out.len() {
+                out[len] = entry.key;
+                len += 1;
+            }
+        }
+        len
     }
 
     /// Số mục đang dùng.
@@ -152,9 +248,16 @@ impl<const N: usize> PageCache<N> {
 
     /// Slot của một khoá (không đổi LRU/đếm).
     pub fn slot_of(&self, key: Key) -> Option<u8> {
-        self.entries
+        let live = self
+            .entries
             .iter()
             .find(|entry| entry.used && entry.key == key)
+            .map(|entry| entry.slot);
+        if live.is_some() {
+            return live;
+        }
+        self.evicted
+            .filter(|entry| entry.key == key)
             .map(|entry| entry.slot)
     }
 

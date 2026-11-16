@@ -65,6 +65,11 @@ impl<D: BlockDev> Fs<D> {
         }
         put_u32(&mut header, 80, crc);
         self.dev.write(JOURNAL_START, &header)?;
+        // KT-71: **write-ahead** — journal (dữ liệu + header) phải BỀN trước khi commit record
+        // xuống đĩa. Thiếu flush này, một đĩa có cache ghi có thể để commit record tới đĩa trước
+        // dữ liệu journal ⇒ replay thấy intent "đã commit" nhưng thân log hỏng (chỉ CRC cứu được,
+        // và khi đó thao tác đã commit bị mất). Có flush: "commit record sống ⇒ thân log sống".
+        self.dev.flush()?;
         let mut commit = zero_block();
         commit[..4].copy_from_slice(b"VC01");
         put_u32(&mut commit, 4, self.seq);
@@ -215,6 +220,11 @@ impl<D: BlockDev> Fs<D> {
         }
         put_u32(&mut header, 80, crc);
         self.dev.write(JOURNAL_START, &header)?;
+        // KT-71: **write-ahead** — journal (dữ liệu + header) phải BỀN trước khi commit record
+        // xuống đĩa. Thiếu flush này, một đĩa có cache ghi có thể để commit record tới đĩa trước
+        // dữ liệu journal ⇒ replay thấy intent "đã commit" nhưng thân log hỏng (chỉ CRC cứu được,
+        // và khi đó thao tác đã commit bị mất). Có flush: "commit record sống ⇒ thân log sống".
+        self.dev.flush()?;
         let mut commit = zero_block();
         commit[..4].copy_from_slice(b"VC01");
         put_u32(&mut commit, 4, self.seq);

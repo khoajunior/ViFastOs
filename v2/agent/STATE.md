@@ -4,44 +4,52 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`43b19dfe`** (nhánh `main`; có commit ViScript của tab khác xen giữa — cây OS
-                **không** chạm `viscript/`, `crates/`, `review/`, `.agents/`, `out-b.log`).
-                **KT-70 DONE phần cài + đo**, chờ reviewer verdict trước commit `[KT-70]`.
-                Danh sách tệp + log: `JOURNAL/kt70-journal.md`; tài liệu `docs/k6-vfs-pager.md`,
-                `docs/k3b-core.md` §18.
-BUILD_ID      : ảnh **sản phẩm không đổi** (KT-70 chỉ thêm crate host `vifast-vfs` + module test/
-                user). Ảnh test `.data+.bss`: ktest **209.920**, guard **2.680**, user **202.832**,
-                proc **206.640** — trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin
+HEAD          : **`f4005aed`** (nhánh `main`; cây OS không chạm `viscript/`, `crates/`,
+                `review/`, `.agents/`, `out-b.log`). **KT-71 DONE phần cài + đo**, chờ reviewer
+                verdict trước commit `[KT-71]`. Danh sách tệp + log: `JOURNAL/kt71-journal.md`;
+                tài liệu `docs/k6-vfs-journal.md`, `docs/k3b-core.md` §19.
+BUILD_ID      : ảnh **sản phẩm `.text` không đổi** — FNV-1a 64 **`02ed5a1810ba59ce`, text=49854**
+                (trùng KT-70; ELF sha256 đổi chỉ vì `.symtab` do thêm dep `vifast-fs`, section
+                sizes y hệt: `.text=49854 .rodata=14424 .data=7824 .bss=192360`). Ảnh test
+                `.data+.bss`: ktest **242.840**, guard **2.680**, user **202.832**, proc
+                **206.640** — trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin
                 **196.608 B** (không thêm field core).
-Task          : **KT-70 (K6 — pager + page cache `(file,page)`)** — DONE phần cài + đo (chờ
-                reviewer). (1) `vifast-vfs` host-testable `no_std` **không `unsafe`**: cache LRU
-                theo khoá, một bản/khoá, hit không đọc backend, `Reject` mã `InvalidArgument`,
-                12 test host; (2) IDL `pager.vidl` (5 method, stub sinh tự động, không `unsafe`,
-                đúng arity D2-104); (3) **pager server U-mode** nhận fault qua `FaultKind::Vm` +
-                message IDL, `Frame.Map` trang vào VSpace client rồi `served`; (4) **hai client
-                U-mode** chia sẻ cache: cùng `(file,page)` ⇒ cùng PA (một Frame, nhiều mapping),
-                trục xuất LRU rồi nạp lại đúng dữ liệu; (5) backend **thay thế được** dùng lại
-                `vifast_fs::BlockDev` (RAM hôm nay, virtio-blk KT-72 chỉ thêm impl); (6) TAP
-                30..34 + evidence `# pager:` fail-closed.
-Bước          : 9/9 — baseline gate **PASS 675/92** (`kt70-baseline-gate.log`) → red host
-                (`kt70-red-host.log`) → IDL + pager + 2 client + rig → red QEMU cả 5 TAP
-                (`kt70-red-qemu-ktest-user.log`) → xanh TAP 30..34 (`kt70-green-qemu-ktest-user.log`)
-                → matrix **12/12** + clippy 4/4 + gate (log cuối) → soak **0/1000** → docs +
-                journal → báo lead spawn reviewer, **đóng băng cây**.
-Cổng gần nhất : host **12 test** `vifast-vfs` + **7 test** `vifast-idl` PASS; QEMU 1 boot × 4 ảnh
-                **4/4 sạch**, `ktest-user` **35/35** TAP (`kt70-ktest-boot.log`); matrix
-                **12/12** (`kt70-ktest-matrix.log`); clippy kernel **4/4 `EXIT=0`**
-                (`kt70-clippy-kernel.log`); `gate --fast` **PASS 689 test/95 suite**, L1 1.000
-                seed **915 ms** trên cây cuối `43b19dfe` (`kt70-gate.log`); L1 thuần
-                **914/710/995 ms** (`kt70-l1-thuan.log`); soak **0/1000 wall 227 s**, BUILD_ID
-                `02ed5a1810ba59ce` (`kt70-soak.log`); budget user **202.832** ≤ 262.144.
-Nợ đang mở    : (1) **journal/writeback** trang bẩn + `Frame.Unmap` khi tiến trình chết + xử lý
-                nhiều fault đồng thời → **KT-71**; (2) **virtio-blk** → KT-72 (chỉ thêm
-                `impl BlockDev`); (3) method id interface dịch vụ vẫn sinh từ IDL, **không** thuộc
-                `spec/abi.toml` (nợ KT-69, muốn vào ABI lõi phải mở spec D2-22); (4) cache
-                hiện **chỉ đọc** (chưa có trang bẩn). Nợ cũ K3.5/K3b/KT-67a giữ nguyên.
-                TAP 35 (ca âm bắt buộc): aux = **CNode cap** `P_SELF` ⇒ `WrongObjectType` (2, **sửa theo số đo**);
-                map vào VA đã map ⇒ `AlreadyMapped` (10) + PTE không bị ghi đè (`pa_same=1`).
+Task          : **KT-71 (K6 tầng 2 — journal + rename/truncate/double-indirect + fsck)** — DONE
+                phần cài + đo (chờ reviewer). (1) **journal write-ahead**: `commit()` flush thân
+                log **trước** commit record `VC01`, rồi áp target, flush, đọc lại từng target so
+                CRC, xoá `VC01`; `replay` khi mount (CRC/seq sai ⇒ `replay_status=2`, **không áp
+                dụng**); (2) **rename đè** POSIX (file↔file, dir↔dir rỗng; `IsDir`/`NotDir`/
+                `NotEmpty`), giải phóng inode/block đích; (3) **truncate** trả mọi block + bảng
+                single/double-indirect; **double-indirect** dùng thật (root + L2 + data = 3
+                block cho file thưa block `10+128+5` (block 143)); (4) **write-back**: `PageCache` có
+                `dirty`, `PageSource`, `mark_dirty`/`flush_page` (8 sector + `dev.flush()`),
+                `flush_all`; `load()` nạp đè slot bẩn ⇒ **`Busy` 14**; (5) **7 pha crash**
+                (`PrefixDisk` "đĩa bền theo tiền tố") + **`fsck_repair`** sửa 4 loại hỏng
+                (block mồ côi/đếm sai, inode không tham chiếu, link count sai) + đếm
+                found/fixed/unfixed; (6) TAP `ktest` **65..69** + evidence `# fs:` fail-closed.
+Bước          : 9/9 — baseline gate **PASS 689/95** (`kt71-baseline-gate.log`) → red host
+                (`kt71-red-host.log`) → crash harness + fsck_repair + rename đè + write-back →
+                red QEMU thật (tràn stack 13 KiB `Fs::mount`; TAP 66 `dirty_marks=1->1`) →
+                xanh TAP 65..69 (`kt71-green-qemu-ktest.log`) → matrix **12/12** → gate + clippy
+                → soak **0/1000** → docs + journal → báo lead spawn reviewer, **đóng băng cây**.
+Cổng gần nhất : host **9 test** mới `vifast-fs` + **5 test** mới `vifast-vfs` PASS; QEMU 1 boot
+                × 4 ảnh **4/4 sạch**, `ktest` **70/70** TAP (`kt71-ktest-boot.log`); matrix
+                **12/12** (`kt71-ktest-matrix.log`); conformance **61/61 + 5/5**
+                (`kt71-conformance.log`); clippy host + kernel 5 ảnh **`EXIT=0`**
+                (`kt71-clippy-kernel.log`); `gate --fast` **PASS 703 test/96 suite**, L1 1.000
+                seed **884 ms** (`kt71-gate.log`); L1 thuần **898/764/891 ms**
+                (`kt71-l1-thuan.log`); soak **0/1000** (`kt71-soak.log`); ảnh `ktest` 242.840 ≤
+                262.144.
+Nợ đang mở    : (1) **pager U-mode ghi trang** (writeback qua shim) + **virtio-blk** → KT-72
+                (chỉ thêm `impl BlockDev`); (2) flush-trước-commit-record **đã có ca âm**
+                (mutation ⇒ host đỏ, QEMU `not ok 67`), nhưng mô hình crash vẫn là tiền tố/tái
+                sắp xếp có kiểm soát — không mô phỏng ghi rách sector; (3) journal chỉ redo,
+                `write` nhiều chunk = nhiều transaction 512 B; (4) `fsck_repair` không sửa block
+                bị hai inode cùng trỏ — **có ca dương** `unfixed_pos=true`; (5) **stack**: chỉ có
+                luật "một `Fs`/pha" + `# fs: stack`, **chưa** assert/canary; (6) ảnh `ktest`
+                242.840/262.144 = 92,6 % — thêm gì vào ảnh test phải đo lại, chạm trần thì **tách
+                ảnh**. Nợ cũ K3.5/K3b/KT-67a/KT-69/KT-70 giữ nguyên.
+```
 ```
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
 
@@ -2991,3 +2999,68 @@ in budget từng ảnh). Không nới ngưỡng nào.
 - **Đo lại**: matrix **12/12**, gate **PASS 661/87** (L1 925 ms), core **42**, clippy **4/4**;
   ảnh sản phẩm **sha256 `f6318b5d…` không đổi** ⇒ soak 0/1000 của KT-68 vẫn đúng artifact.
   Delta + log: `JOURNAL/kt68b-journal.md`.
+
+## KT-71 — tầng 2 VFS: journal + rename/truncate/double-indirect + fsck (2026-11-16, Agent 2)
+
+**Vào**: HEAD `f4005aed`; baseline `gate --fast` **PASS 689 test/95 suite**, L1 **895 ms**
+(`JOURNAL/kt71-baseline-gate.log`). Cây `v2/` sạch (D2-105: một agent ghi `v2/`).
+
+**Red-before (D2-05)**: host **không biên dịch** trên mã cũ (`E0432 crate::crash`,
+`E0599 fsck_repair/into_dev`, `E0432 vifast_vfs::PageSource`) — `JOURNAL/kt71-red-host.log`;
+QEMU đỏ **thật**: (a) tràn stack boot `PANIC: guard page fault … stpc=fs_phase+0x26` vì `Fs::mount`
+trả 13 KiB qua nhiều khung; (b) TAP 66 `dirty_marks=1->1` + evidence sai kiểu bool;
+(c) **mutation flush** (bỏ `dev.flush()` trước commit record) ⇒ QEMU **`not ok 67`**
+(`replay_r=2 new_r=0 post=old`) — `JOURNAL/kt71-red-reorder-qemu-boot.log` (log boot) +
+`kt71-red-reorder-qemu.log` (stdout runner), host cùng ca âm `kt71-red-reorder.log`
+(`replayed` 2 ≠ 1).
+
+**Cài**: (1) `vifast-fs/src/tx.rs` — **flush thân log TRƯỚC commit record** `VC01` (write-ahead);
+(2) `dir.rs::rename` **đè** POSIX; (3) `fsck.rs` mới — `fsck_repair -> FsckReport` sửa 4 loại hỏng
++ đếm found/fixed/unfixed, sửa qua journal, block **hai chủ** ⇒ `unfixed` (không sửa mù);
+(4) `crash.rs` mới — `PrefixDisk` "đĩa bền theo tiền tố" + `run_op`; (5) `fs.rs::into_dev`,
+`dir.rs::inode_blocks_raw`; (6) `vifast-vfs` — `PageCache.dirty` + `PageSource` +
+`mark_dirty/flush_page/flush_all`, `Begin::Evict{dirty}`, `load` từ chối slot bẩn (`Busy` 14),
+giữ bản ghi mục vừa trục xuất để flush được, 6 bộ đếm mới; (7) kernel `src/ktest_fs.rs`
+(TAP 65..69) trên `RamDisk` 48 block `AtomicU8` trong `.bss` (**không `unsafe`**), **một** object
+`Fs`/pha ("mount lại" bằng `initialize()` tại chỗ), cache ghi **tái sắp xếp** cho ca âm flush;
+(8) harness +`expected.txt ktest 70 70`, +5 manifest TAP, +9 regex `# fs:`, trap lồng dời 65→70.
+
+**Bằng chứng đo** (repo: `kt71-ktest-boot.log`, `kt71-green-qemu-ktest.log`,
+`kt71-ktest-matrix.log`): TAP 65 `rename src=2 exp=2 replaced_gone=1 dir_over=1 used=6->2`;
+`truncate used=6->2 freed=4 reuse=4 (=used_again-used_t0) used_again=6 used_t0=2 reuse_ok=true`;
+`double index=143 used=6->9->6 delta=3 (=3: root+bang L2+data) root=37 l2=38 data_ptr=36 single=0`
+(đọc **đĩa thô**); TAP 66 `dirty_marks=0->1 dirty_now=0 writes=8 flushes=1 backend_ok=true
+reopen_ok=true`; TAP 67 `writes=7 issued=7 commit_prefix=4 replay=1 new=1 keep=true crc_reject=2
+crc_applied=0 crc_disk=old reorder_writes=5 kept=true pre=old replay_r=1 new_r=1 post=new`;
+TAP 68 `pha 0..2 old, 3..6 new, found=0, clean=true, threshold=4 last_old=3 atomic=1`;
+TAP 69 `detect=1 found=4 fixed=4 unfixed=0 (1 mỗi loại) used=2->4->2 second=0 unfixed_pos=true
+unfixed2=1 double_blocks2=1 second_bad=true`; stack `entry=39761 end=40577` của 65.536 B.
+
+**Cổng (run cuối)**: `gate --fast` **PASS 703 test/96 suite** L1 **884 ms** (`kt71-gate.log`);
+L1 thuần **898/764/891 ms** (`kt71-l1-thuan.log`); clippy host + kernel 5 ảnh **`EXIT=0`**
+(`kt71-clippy-kernel.log`); QEMU matrix **12/12**; conformance **61/61 dòng + 5/5 ca**
+(`kt71-conformance.log`); ảnh `ktest` **242.840/262.144 = 92,6 %** (headroom **19.304 B**,
+`kt71-budget-ktest.log`); `size_of<Machine>` **188.872** ≤ pin 196.608; **soak 0/1000**
+(`kt71-soak.log`, `BUILD_ID=02ed5a1810ba59ce`, sha `a0e187e8…`, git `f4005aed`); ảnh sản phẩm
+sha256 `a0e187e8…` **khác** KT-70 `ff99297c…` chỉ vì `.symtab` (thêm dep `vifast-fs`), còn
+**`.text` digest `02ed5a1810ba59ce text=49854` = KT-70** và section thực thi y hệt
+(`kt71-product-sha.log`).
+
+**Kiểm HEAD bằng worktree sạch (D2-105)**: `git worktree add --detach /tmp/kt71-wt HEAD` ⇒
+**0 tệp bẩn**, `v2 check` **PASS** (`CHECK_EXIT=0`) — `kt71-worktree-head.log`,
+`kt71-worktree-check.log`. **Kiểm chéo số**: `kt71-verify-numbers.sh` (chép vào JOURNAL) đòi 24
+token số trong docs/STATE/journal xuất hiện **nguyên văn** trong log đã chép ⇒ `ok=24 fail=0`
+(`kt71-verify-numbers.log`).
+
+**Reviewer vòng 1 (DRIFT) — đã sửa trong cùng task**: CAO-1 (dẫn log đỏ sai file) ⇒ chạy lại
+**mutation flush đúng**, chép **log boot** có `not ok 67` + `replay_r=2` vào repo; CAO-2 (số từ
+`/tmp` chưa vào repo) ⇒ chạy **matrix cuối** và chép log (mọi số trong docs trích từ log trong
+repo); fmt FAIL ⇒ `cargo fmt` host+kernel, `v2 check` PASS; D2-102/106 ⇒ `dirty_now` in từ
+`after.dirty_now`, `data=2CAP` in từ buffer đọc, `reuse` in kèm input `used_again`/`used_t0`;
+`unfixed=0` ⇒ thêm **ca dương** `unfixed_pos=true`; journal §5/§6/§7 + STATE thống nhất, xoá câu
+sai "sha không đổi ⇒ không soak lại" (sha **đã** đổi và **đã** soak lại).
+
+**Nợ**: pager U-mode **ghi** trang + virtio-blk → KT-72; crash model tiền tố/tái sắp xếp có kiểm
+soát (không mô phỏng ghi rách sector); journal chỉ redo; **stack**: chỉ có luật "một `Fs`/pha" +
+dòng `# fs: stack`, **chưa** có assert/canary tự động (nợ có ngưỡng); ảnh `ktest` 92,6 % — thêm
+gì vào ảnh test phải đo lại, chạm trần thì **tách ảnh**, không nới.

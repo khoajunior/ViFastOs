@@ -148,7 +148,7 @@ fn miss_evict_lru_khi_vuot_nguong() {
     assert!(matches!(core.begin(0, 1), vifast_vfs::Begin::Hit { .. }));
     // Trang thứ 4 vượt ngưỡng: phải trục xuất trang 0 (cũ nhất), không phải trang 1.
     match core.begin(1, 0) {
-        vifast_vfs::Begin::Evict { slot, key } => {
+        vifast_vfs::Begin::Evict { slot, key, .. } => {
             assert_eq!(key, (0, 0), "LRU: trang 0 cũ nhất");
             assert_eq!(slot, 0);
             core.load(slot, 1, 0, &mut sink).expect("nạp sau trục xuất");

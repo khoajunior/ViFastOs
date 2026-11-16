@@ -18,6 +18,12 @@ pub trait PageSink {
     fn write_sector(&mut self, slot: u8, sector_in_page: u32, data: &[u8; BLOCK_SIZE]);
 }
 
+/// Nơi **đọc** dữ liệu trang để ghi xuống backend — đối xứng với [`PageSink`] (KT-71).
+pub trait PageSource {
+    /// Đọc một sector (512 B) của trang `slot`.
+    fn read_sector(&mut self, slot: u8, sector_in_page: u32, out: &mut [u8; BLOCK_SIZE]);
+}
+
 /// Quyết định của [`PagerCore::begin`] cho một fault.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Begin {
@@ -37,6 +43,8 @@ pub enum Begin {
         slot: u8,
         /// Khoá bị trục xuất.
         key: Key,
+        /// Mục bị trục xuất đang **bẩn** ⇒ phải [`PagerCore::flush_page`] trước khi nạp đè.
+        dirty: bool,
     },
     /// Từ chối (ngoài file / tham số sai) — **không** đọc backend, không đụng cache.
     Reject {
@@ -62,6 +70,16 @@ pub struct PagerStats {
     pub rejects: u64,
     /// Số mục đang trong cache.
     pub entries: usize,
+    /// Số lần đánh dấu bẩn (tổng, không giảm).
+    pub dirty_marks: u64,
+    /// Số trang đang bẩn (thời điểm hiện tại).
+    pub dirty_now: u64,
+    /// Số sector đã ghi xuống backend qua đường cache.
+    pub writes: u64,
+    /// Số lần gọi `flush` thiết bị do flush trang bẩn.
+    pub flushes: u64,
+    /// Số lần flush trang bẩn thành công.
+    pub flushed_pages: u64,
 }
 
 /// Lõi pager: cache `N` trang + backend `D`.
@@ -71,6 +89,10 @@ pub struct PagerCore<const N: usize, D: BlockDev> {
     reads: u64,
     sectors: u64,
     rejects: u64,
+    dirty_marks: u64,
+    writes: u64,
+    flushes: u64,
+    flushed_pages: u64,
 }
 
 impl<const N: usize, D: BlockDev> PagerCore<N, D> {
@@ -82,6 +104,10 @@ impl<const N: usize, D: BlockDev> PagerCore<N, D> {
             reads: 0,
             sectors: 0,
             rejects: 0,
+            dirty_marks: 0,
+            writes: 0,
+            flushes: 0,
+            flushed_pages: 0,
         }
     }
 
@@ -98,7 +124,7 @@ impl<const N: usize, D: BlockDev> PagerCore<N, D> {
         }
         match self.cache.begin_miss() {
             SlotChoice::Free { slot } => Begin::Ready { slot },
-            SlotChoice::Evict { slot, key } => Begin::Evict { slot, key },
+            SlotChoice::Evict { slot, key, dirty } => Begin::Evict { slot, key, dirty },
         }
     }
 
@@ -117,6 +143,10 @@ impl<const N: usize, D: BlockDev> PagerCore<N, D> {
             self.rejects += 1;
             return Err(err::INVALID_ARGUMENT);
         };
+        // KT-71: KHÔNG được nạp đè một trang bẩn (dữ liệu trong Frame chưa xuống đĩa).
+        if self.cache.slot_dirty(slot) {
+            return Err(err::BUSY);
+        }
         let mut sector = [0u8; BLOCK_SIZE];
         for index in 0..SECTORS_PER_PAGE {
             self.dev
@@ -128,6 +158,72 @@ impl<const N: usize, D: BlockDev> PagerCore<N, D> {
         self.reads += 1;
         self.sectors += u64::from(SECTORS_PER_PAGE);
         Ok(())
+    }
+
+    /// Đánh dấu trang `(file,page)` **bẩn** — gọi sau khi chương trình đã ghi vào Frame.
+    ///
+    /// `Busy` khi trang không có trong cache: không có Frame thì không thể "bẩn".
+    pub fn mark_dirty(&mut self, file: u32, page: u32) -> Result<(), Status> {
+        if crate::layout::file_pages(file).map(|pages| page >= pages) != Some(false)
+            || !self.cache.mark_dirty((file, page))
+        {
+            return Err(err::INVALID_ARGUMENT);
+        }
+        self.dirty_marks += 1;
+        Ok(())
+    }
+
+    /// Trang `(file,page)` có bẩn không.
+    pub fn is_dirty(&self, file: u32, page: u32) -> bool {
+        self.cache.is_dirty((file, page))
+    }
+
+    /// Ghi **một trang bẩn** xuống backend rồi đánh dấu sạch.
+    ///
+    /// Trả `Ok(true)` nếu đã ghi; `Ok(false)` nếu trang đang sạch; `InvalidArgument` nếu khoá
+    /// không có trong cache. Ghi đủ `SECTORS_PER_PAGE` sector rồi **flush thiết bị** — bằng
+    /// chứng "dirty → flush → clean" đo được bằng `writes`/`flushes`.
+    pub fn flush_page(
+        &mut self,
+        file: u32,
+        page: u32,
+        source: &mut impl PageSource,
+    ) -> Result<bool, Status> {
+        let Some(slot) = self.cache.slot_of((file, page)) else {
+            return Err(err::INVALID_ARGUMENT);
+        };
+        if !self.cache.is_dirty((file, page)) {
+            return Ok(false);
+        }
+        let Some(first) = page_sector(file, page) else {
+            return Err(err::INVALID_ARGUMENT);
+        };
+        let mut sector = [0u8; BLOCK_SIZE];
+        for index in 0..SECTORS_PER_PAGE {
+            source.read_sector(slot, index, &mut sector);
+            self.dev
+                .write(first + index, &sector)
+                .map_err(|_| err::IO)?;
+        }
+        self.dev.flush().map_err(|_| err::IO)?;
+        self.cache.clear_dirty((file, page));
+        self.writes += u64::from(SECTORS_PER_PAGE);
+        self.flushes += 1;
+        self.flushed_pages += 1;
+        Ok(true)
+    }
+
+    /// Ghi **mọi** trang bẩn xuống backend; trả số trang đã ghi.
+    pub fn flush_all(&mut self, source: &mut impl PageSource) -> Result<u64, Status> {
+        let mut keys = [(0u32, 0u32); N];
+        let count = self.cache.dirty_keys(&mut keys);
+        let mut flushed = 0u64;
+        for key in keys.iter().take(count) {
+            if self.flush_page(key.0, key.1, source)? {
+                flushed += 1;
+            }
+        }
+        Ok(flushed)
     }
 
     /// Slot của một khoá nếu đang cache (không đổi LRU/đếm).
@@ -155,6 +251,11 @@ impl<const N: usize, D: BlockDev> PagerCore<N, D> {
             sectors: self.sectors,
             rejects: self.rejects,
             entries: self.cache.len(),
+            dirty_marks: self.dirty_marks,
+            dirty_now: self.cache.dirty_count() as u64,
+            writes: self.writes,
+            flushes: self.flushes,
+            flushed_pages: self.flushed_pages,
         }
     }
 }

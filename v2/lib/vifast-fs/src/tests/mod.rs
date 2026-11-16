@@ -152,3 +152,4 @@ pub(crate) fn fill_dir_with_links(fs: &mut Fs<MemDev>, dir: &[u8], prefix: u8) -
 
 mod part1;
 mod part2;
+mod part3;

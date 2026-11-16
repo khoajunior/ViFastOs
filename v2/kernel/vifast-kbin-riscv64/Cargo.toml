@@ -55,6 +55,9 @@ vifast-core = { path = "../vifast-core" }
 # KT-55: IR conformance (đọc 5 `.scn` bằng `include_str!`) + dòng trace chuẩn hoá dùng chung
 # với sim. Cả hai `no_std`, không cấp phát, không dependency ngoài (D2-21).
 vifast-scenario = { path = "../../lib/vifast-scenario" }
+# KT-71: FS (journal/tx/fsck) + VFS tầng 2 (page cache write-back) — cả hai `no_std`,
+# `#![forbid(unsafe_code)]`; cùng mã chạy trong test host.
+vifast-fs = { path = "../../lib/vifast-fs" }
 vifast-traceformat = { path = "../../lib/vifast-traceformat", default-features = false }
 # KT-69: IDL stub sinh từ `.vidl` (method id/label/encode-decode) + ring 1P/1C trên Frame chia sẻ.
 # Cả hai `no_std`, không phụ thuộc crate ngoài (D2-21).

@@ -42,9 +42,14 @@
 # trả mã 9, không panic · cầu nối D2-83: cap Frame của object layer được đại diện trong core và
 # chuyển qua KT-63 vào receive window · từ chối đúng mã 1/2/3, nguyên tử) ⇒ trap lồng dời sang
 # **65** (tổng 65 TAP). Số TAP khớp manifest `ktest.sh` + kernel.
-ktest 65 65
+ktest 70 70
 ktest-guard 3 3
 
+# **KT-71** (K6, tầng 2 VFS): ảnh chính thêm **5 TAP FS** (65..69: rename đè · truncate +
+# double-indirect · dirty flush write-back · journal replay sau crash (+ ca âm CRC) · 7 pha crash
+# · fsck phát hiện + sửa bốn loại hỏng) ⇒ trap lồng dời sang **70** (tổng 70 TAP).
+# Số TAP khớp manifest `ktest.sh` + kernel.
+#
 # KT-53 → **KT-62/H** — ảnh test **user** (bin riêng): U-mode + `init` ELF + **16 syscall đi vào
 # `Machine` thật** = 14 TAP (1..14) + **KT-67a** invocation hẹp (15..18) + **KT-67b** chuyển cap
 # Frame giữa **hai tiến trình** U-mode (`memsrv.elf` → `client.elf`, TAP 19) = **19 TAP**. KT-66

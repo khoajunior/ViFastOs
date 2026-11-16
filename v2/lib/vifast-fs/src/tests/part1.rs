@@ -347,10 +347,13 @@ fn rename_moves_entry_and_rejects_missing_or_duplicate() {
     fs.rename(b"/a.txt", b"/b.txt", 0).unwrap();
     assert!(fs.lookup(b"/a.txt", 0).is_err(), "tên cũ phải biến mất");
     assert!(fs.lookup(b"/b.txt", 0).is_ok(), "tên mới phải tra được");
-    // Đích không tồn tại nguồn ⇒ NotFound; đích đã tồn tại ⇒ Exists.
+    // Đích không tồn tại nguồn ⇒ NotFound.
     assert_eq!(fs.rename(b"/missing", b"/x", 0), Err(FsError::NotFound));
+    // KT-71: đích **đã tồn tại** ⇒ THAY THẾ (POSIX), không còn `Exists`; ca đầy đủ ở
+    // `tests/part3.rs` (`rename_de_ghi_de_file_va_giai_phong_inode_dich`).
     fs.create(b"/c.txt", 0, INODE_FILE).unwrap();
-    assert_eq!(fs.rename(b"/b.txt", b"/c.txt", 0), Err(FsError::Exists));
+    fs.rename(b"/b.txt", b"/c.txt", 0)
+        .expect("rename đè file phải thành công");
     // Dữ liệu phải còn nguyên sau khi đổi tên (ghi trước, đọc sau).
     let ino = fs.lookup(b"/c.txt", 0).unwrap();
     fs.write(ino, 0, b"hello", 0).unwrap();

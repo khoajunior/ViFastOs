@@ -1513,3 +1513,57 @@ Nguồn chi tiết: [`k6-vfs-pager.md`](k6-vfs-pager.md). Tóm tắt phần **ke
   ≤ 262.144 B.
 - **Nợ KT-71**: journal/writeback trang bẩn, `Frame.Unmap` khi tiến trình chết, xử lý nhiều
   fault đồng thời (một hart hiện tại), virtio-blk (KT-72).
+
+## 19. KT-71 — tầng 2 VFS: journal, rename/truncate/double-indirect, fsck (K6)
+
+Nguồn chi tiết: [`k6-vfs-journal.md`](k6-vfs-journal.md). Tóm tắt phần **kernel/FS**:
+
+- **Không mở `spec/`, không thêm syscall**: KT-71 nằm trọn trong `vifast-fs`/`vifast-vfs`
+  (`no_std`, `#![forbid(unsafe_code)]`) — cùng mã chạy host test và ảnh `ktest`.
+- **Journal redo có write-ahead đúng nghĩa**: `commit()` ghi dữ liệu journal + header (CRC32,
+  targets), **flush thiết bị**, rồi mới ghi commit record `VC01`, rồi áp target, flush, đọc lại
+  từng target (bỏ cache) so CRC, xoá `VC01`. Thiếu flush trước `VC01` là lỗi thật (đã sửa ở
+  KT-71): crash có thể để commit record xuống trước thân log ⇒ replay thấy "đã commit" với thân
+  log hỏng.
+- **Replay** chạy trong `initialize()` (đường mount): `VC01` sống + header đúng seq + CRC khớp
+  ⇒ áp dụng **idempotent** rồi xoá `VC01`; CRC sai/không khớp ⇒ `replay_status=2`, **không áp
+  dụng gì**. Bằng chứng `# fs: journal … replay=1 … crc_reject=2 crc_applied=0`.
+- **`rename` đè** (POSIX): file↔file, dir↔dir rỗng; dir không rỗng ⇒ `NotEmpty`, file đè dir ⇒
+  `IsDir`, dir đè file ⇒ `NotDir`; inode/block của đích được giải phóng. **`truncate(0)`** trả
+  mọi block dữ liệu **và** bảng single/double-indirect; **double-indirect** dùng thật (root +
+  bảng L2 + data = đúng 3 block cho một file thưa ở block `10+128+5` (block 143)).
+- **7 pha crash**: mô hình "đĩa bền theo **tiền tố** lệnh ghi" (`PrefixDisk`: chỉ `n` lệnh ghi
+  đầu sống sót, phần đuôi mất **im lặng** — FS không thấy lỗi I/O). Với `write` 1 chunk = 7 lệnh
+  ghi, 7 tiền tố `{0,1,3,4,5,6,7}`; sau mỗi pha `replay` + `fsck_repair` cho FS **nhất quán**
+  (`found=0`), `/keep` đã commit **trước** không mất, thao tác dở **nguyên tử** (3 pha cũ, 4 pha
+  mới, ngưỡng 4 = `writes-3` = 2 target + 1 clear).
+- **Cơ chế thay thế backend**: `BlockDev` của `vifast-fs` (sector 512 B) là **cùng** trait mà
+  pager dùng; thiết bị RAM trong pha QEMU là `RamDisk` trên `AtomicU8` (**không `unsafe`**) đặt
+  trong `.bss`, 48 block = 24.576 B; KT-72 chỉ thêm `impl BlockDev` cho virtio-blk.
+- **`fsck_repair`** (mới): sửa block mồ côi, block đếm sai (con trỏ/bảng ngoài `size`), inode
+  không tham chiếu, link count sai, entry trỏ inode chết, size thư mục sai; sửa qua journal
+  (`stage` + `commit`, commit khi `tx+4 ≥ MAX_TX_WRITES=16`). Block bị **hai** nơi tham chiếu
+  đếm `unfixed` (không sửa mù). Báo `FsckReport{found,fixed,unfixed,…}` — lần hai phải `0`.
+- **Ca âm bắt buộc** (D2-108B): (a) journal hỏng CRC ⇒ `replay_status=2`, dữ liệu **cũ** còn
+  nguyên (đo cả **đĩa thô**: `crc_disk=old`); (b) **đảo thứ tự** — cache ghi giữ lệnh chưa
+  flush, "chết" ngay sau commit record ⇒ `pre=old` (target chưa ghi) nhưng `replay_r=1` áp dụng
+  ⇒ `post=new`: chứng minh flush-trước-commit-record; **mutation bỏ dòng flush** làm host test
+  **đỏ** (`replayed` 2 ≠ 1) và QEMU **`not ok 67`** (`replay_r=2 new_r=0 post=old`) —
+  `JOURNAL/kt71-red-reorder.log`, `kt71-red-reorder-qemu.log`; (c) `load()` nạp đè trang **bẩn**
+  ⇒ `Busy=14` cho tới khi `flush_page`; (d) backend lỗi I/O ⇒ `RangeError`, `reads` không tăng.
+- **Không tautology**: 7 pha phủ **cả** trạng thái (`old=3 new=4`, `threshold=4`), fsck `found=0`
+  sau replay còn `fsck_repair` **có ca dương** (TAP 69 `found=4 fixed=4`); `reuse=4` chứng minh
+  block truncate **dùng lại được**; double-indirect đo từ **đĩa thô** (`root=37 l2=38
+  data_ptr=36`) chứ không tin hàm của FS.
+- **Ngân sách stack (bug thật, đã sửa)**: `Fs<RamDisk>` = 13 KiB; `Fs::mount` trả theo giá trị
+  nên nhiều khung lồng nhau từng làm **tràn stack boot 64 KiB** — triệu chứng
+  `PANIC: guard page fault … stval=0x80400808 sepc=fs_phase+0x26` (không phải panic của test).
+  Sửa: pha FS **chỉ giữ MỘT** object `Fs`, "mount lại" bằng `initialize()` **tại chỗ**,
+  `#[inline(never)]` cho các pha, mô hình crash bằng static `AtomicU8`; in `# fs: stack
+  entry/end` (39.761/40.545 của 65.536 B) làm bằng chứng thường trực. Phòng ngừa: một object
+  lớn/pha + luôn in độ sâu stack; thêm object lớn thứ hai thì **tách ảnh**, không nới stack.
+- **Ngưỡng giữ nguyên**: `size_of::<Machine>() = 188.872 B` (pin 196.608, trần 262.144);
+  `.data+.bss` của `ktest` = **242.840 B** ≤ 262.144 B (92,6 %, headroom 19.304 B) — **nợ có
+  ngưỡng**: task sau thêm vào ảnh test phải đo lại budget; chạm trần thì tách ảnh, **không nới**.
+- **Nợ KT-72**: pager U-mode **ghi** trang (writeback qua shim) + virtio-blk thật; hiện đường
+  `mark_dirty/flush_page` đo trong kernel/host trên cùng crate.

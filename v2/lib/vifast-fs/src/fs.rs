@@ -830,6 +830,7 @@ impl<D: BlockDev> Fs<D> {
         Ok(())
     }
 
+    #[inline(never)]
     pub fn mount(dev: D) -> Result<Self, FsError> {
         let mut fs = Self::empty(dev);
         fs.initialize()?;
@@ -852,6 +853,11 @@ impl<D: BlockDev> Fs<D> {
 
     pub fn dev_mut(&mut self) -> &mut D {
         &mut self.dev
+    }
+
+    /// Lấy lại thiết bị (đóng FS, giữ ảnh đĩa) — dùng cho test "crash rồi mount lại" (KT-71).
+    pub fn into_dev(self) -> D {
+        self.dev
     }
 
     pub(crate) fn fsck_mark_block(

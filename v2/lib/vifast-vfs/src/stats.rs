@@ -66,11 +66,23 @@ pub enum Stat {
     NegAux,
     /// KT-70 TAP 35: mã lỗi của `Frame.Map` vào VA **đã map** (ca âm không ghi đè).
     NegOver,
+    /// KT-71: số lần đánh dấu trang bẩn (tổng).
+    DirtyMarks,
+    /// KT-71: số trang đang bẩn (hiện tại).
+    DirtyNow,
+    /// KT-71: số sector đã ghi xuống backend qua cache.
+    Writes,
+    /// KT-71: số lần flush thiết bị do flush trang bẩn.
+    Flushes,
+    /// KT-71: số trang bẩn đã flush thành công.
+    FlushedPages,
+    /// KT-71: số lần nạp đè bị từ chối vì slot đang bẩn (`Busy`).
+    NegDirty,
 }
 
 impl Stat {
     /// Số bộ đếm.
-    pub const COUNT: usize = 24;
+    pub const COUNT: usize = 30;
     /// Toàn bộ bộ đếm (để test bố cục + in).
     pub const ALL: [Stat; Self::COUNT] = [
         Stat::Magic,
@@ -97,6 +109,12 @@ impl Stat {
         Stat::Reloads,
         Stat::NegAux,
         Stat::NegOver,
+        Stat::DirtyMarks,
+        Stat::DirtyNow,
+        Stat::Writes,
+        Stat::Flushes,
+        Stat::FlushedPages,
+        Stat::NegDirty,
     ];
 
     /// Offset byte trong Frame.

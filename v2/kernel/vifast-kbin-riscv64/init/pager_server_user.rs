@@ -314,7 +314,11 @@ impl Server {
                 }
             }
             Begin::Ready { slot } => self.load_and_map(slot, client, file, page, va),
-            Begin::Evict { slot, key } => {
+            Begin::Evict {
+                slot,
+                key,
+                dirty: _,
+            } => {
                 add(Stat::Evictions, 1);
                 // Gỡ mapping cũ **trước** khi ghi đè Frame (client khác không thấy dữ liệu mới
                 // qua mapping cũ).

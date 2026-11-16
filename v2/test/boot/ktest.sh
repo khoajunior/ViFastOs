@@ -274,6 +274,11 @@ mem revoke frame
 mem out of memory
 mem bridge cap
 mem deny rights
+fs rename truncate double-indirect
+fs dirty flush write-back
+fs journal replay sau crash
+fs crash 7 pha nhat quan
+fs fsck phat hien va sua
 trap nested panic
 EOF
 }
@@ -491,6 +496,15 @@ __EVID24__
 ^# mem: bridge token=[0-9]+ core_obj=[0-9]+ obj_cap=[0-9]+ key=0x[0-9a-f]+ pa=0x82000000 bits=12 slot=[0-9]+ rights_ok=1 obj_ok=1 resolve=1 used_granted=4096 check_caps=1 check_ipc=1 check_objmem=1$
 ^# mem: release released=1 used_after=0 free=1073741824 cap_after=0 caps_check=1 obj=1$
 ^# mem: deny wrong=2 rights=3 invalid=1 used=0 allocs=[0-9]+ atomic=1 obj=1$
+^# fs: rename src=[0-9]+ exp=[0-9]+ replaced_gone=1 dir_over=1 used=[0-9]+->[0-9]+ impl=rename-overwrite$
+^# fs: truncate used=[0-9]+->[0-9]+ freed=[0-9]+ read_empty=(true|false) reuse=[0-9]+ \(=used_again-used_t0\) used_again=[0-9]+ used_t0=[0-9]+ reuse_ok=(true|false) const:from_blocks=4$
+^# fs: double index=143 used=[0-9]+->[0-9]+->[0-9]+ delta=3 \(=3: root\+bang L2\+data\) root=[1-9][0-9]* l2=[1-9][0-9]* data_ptr=[1-9][0-9]* single=0 read=4 data=2CAP fsck=(true|false)$
+^# fs: rename_ok=[01] trunc_ok=(true|false) double_ok=(true|false) fsck=(true|false) const:disk_blocks=48 const:direct=10$
+^# fs: writeback dirty_marks=[0-9]+->[0-9]+ dirty_now=[0-9]+ writes=8 flushes=1 wrote=(true|false) backend_ok=(true|false) reopen_ok=(true|false) const:page=4096 const:sector=512$
+^# fs: journal writes=[0-9]+ issued=[0-9]+ commit_prefix=[0-9]+ \(=writes-3: 2 target \+ 1 clear\) replay=1 new=1 size=7 keep=(true|false) fsck=(true|false) crc_reject=2 crc_applied=0 crc_disk=old reorder_writes=[0-9]+ kept=(true|false) pre=old replay_r=1 new_r=1 post=new keep_r=(true|false)$
+^# fs: crash pha=[0-6] writes=[0-9]+ replay=[0-9]+ content=(old|new) size=[0-9]+ found=0 keep=(true|false) clean=(true|false)$
+^# fs: crash7 phases=7 writes=[0-9]+ old=[0-9]+ new=[0-9]+ torn=0 consistent=7 threshold=[0-9]+ last_old=[0-9]+ atomic=1 replays=[0-9]+$
+^# fs: fsck detect=1 found=[0-9]+ fixed=[0-9]+ unfixed=0 orphan_blocks=1 orphan_inodes=1 bad_nlink=1 bad_blocks=1 used=[0-9]+->[0-9]+->[0-9]+ keep=(true|false) fsck_ok=(true|false) second=0 unfixed_pos=(true|false) unfixed2=[0-9]+ double_blocks2=[0-9]+ second_bad=(true|false) const:disk_blocks=48$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF

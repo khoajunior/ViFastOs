@@ -108,6 +108,17 @@ impl<D: BlockDev> Fs<D> {
         (core::cmp::min(self.used_blocks, total), total)
     }
 
+    /// **Chẩn đoán** (KT-71): 12 con trỏ block thô của inode — để test kiểm **cấu trúc bảng**
+    /// (ví dụ double-indirect hai cấp thật sự được dùng) mà không mở field nội bộ ra ngoài crate.
+    /// `None` nếu inode trống/ngoài dải.
+    pub fn inode_blocks_raw(&self, ino: u16) -> Option<[u32; MAX_BLOCKS_PER_INODE]> {
+        let inode = *self.inodes.get(ino as usize - 1)?;
+        if inode.kind == INODE_FREE {
+            return None;
+        }
+        Some(inode.blocks)
+    }
+
     pub fn info(&self, ino: u16) -> Result<InodeInfo, FsError> {
         let inode = *self.inodes.get(ino as usize - 1).ok_or(FsError::BadFd)?;
         if inode.kind == INODE_FREE {
@@ -752,13 +763,48 @@ impl<D: BlockDev> Fs<D> {
         let ino = self
             .lookup_child(old_parent, &old_name[..old_len])?
             .ok_or(FsError::NotFound)?;
-        if self
-            .lookup_child(new_parent, &new_name[..new_len])?
-            .is_some()
-        {
-            return Err(FsError::Exists);
-        }
         let inode = self.inodes[ino as usize - 1];
+        // KT-71: đích **đã tồn tại** ⇒ THAY THẾ (ngữ nghĩa `rename` POSIX), không trả `Exists`.
+        // Loại phải khớp (file↔file, dir↔dir rỗng); dir không rỗng ⇒ `NotEmpty`.
+        if let Some(dest) = self.lookup_child(new_parent, &new_name[..new_len])? {
+            if dest == ino {
+                let same_name = old_len == new_len && old_name[..old_len] == new_name[..new_len];
+                return if old_parent == new_parent && same_name {
+                    Ok(())
+                } else {
+                    // Hai tên trỏ cùng inode (hard link) — đổi tên chéo không hỗ trợ.
+                    Err(FsError::Exists)
+                };
+            }
+            let dest_inode = self.inodes[dest as usize - 1];
+            if inode.kind == INODE_DIR {
+                if dest_inode.kind != INODE_DIR {
+                    return Err(FsError::NotDir);
+                }
+                if !self.dir_empty(dest)? {
+                    return Err(FsError::NotEmpty);
+                }
+            } else if dest_inode.kind == INODE_DIR {
+                return Err(FsError::IsDir);
+            }
+            self.remove_dir_entry(new_parent, &new_name[..new_len])?;
+            if dest_inode.kind == INODE_DIR {
+                let parent_inode = &mut self.inodes[new_parent as usize - 1];
+                parent_inode.nlink = parent_inode.nlink.saturating_sub(1);
+                self.stage_inode(new_parent)?;
+            }
+            let mut freed = dest_inode;
+            freed.nlink = freed.nlink.saturating_sub(1);
+            if freed.nlink == 0 {
+                self.free_inode_blocks(&mut freed);
+                self.inodes[dest as usize - 1] = Inode::default();
+                self.stage_inode(dest)?;
+                self.stage_bitmap()?;
+            } else {
+                self.inodes[dest as usize - 1] = freed;
+                self.stage_inode(dest)?;
+            }
+        }
         self.remove_dir_entry(old_parent, &old_name[..old_len])?;
         if let Err(error) = self.write_dir_entry(new_parent, &new_name[..new_len], ino) {
             // r299: rollback như create/link/symlink — bỏ tx_count=0 thì

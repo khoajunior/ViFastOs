@@ -24,7 +24,7 @@ pub mod stats;
 pub mod status;
 
 pub use cache::{Key, PageCache, SlotChoice, NO_SLOT};
-pub use core::{Begin, PageSink, PagerCore, PagerStats};
+pub use core::{Begin, PageSink, PageSource, PagerCore, PagerStats};
 pub use disk::{DevRef, RamDev, DISK_BYTES};
 pub use layout::{
     byte_at, file_pages, page_sector, sector_page, CACHE_CAPACITY, DISK_SECTORS, FILE0_PAGES,
