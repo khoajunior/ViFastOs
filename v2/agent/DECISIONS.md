@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-94`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-95`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-94: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-95: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -157,3 +157,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-93** KT-65 — **`vifast-plat-user` được nằm trong danh sách crate đóng của D2-17**: nó khớp tiền tố `kernel/vifast-plat-*` (luật R5 của `v2/bin/v2` + thiết kế §702) và là **shim ABI U-mode**: chỉ `ecall` + đọc tham số trả về, **không** lệnh đặc quyền (không CSR, không `sfence`, không truy cập vật lý). Ba chương trình U-mode (`procsrv`, `shell`, `child`) vì vậy vẫn **0 `unsafe`**. Điều kiện: (a) mọi `unsafe` của crate này phải nằm trong hàm gọi syscall; (b) reviewer phải xác nhận **không** có lệnh đặc quyền nào; (c) nếu sau này cần thêm lệnh đặc quyền ⇒ **D2 mới**, cấm tự mở rộng. Ghi tên crate đích danh vào D2-17 để hết mơ hồ tiền tố.
 
 - **D2-94** **K3.5 DONE** (phase-level): kernel chạy **chương trình U-mode có vòng đời** — `procsrv` nhận `FaultKind::Exit` qua core, `wait` trả `exit_code` thật, `kill` = `Suspend(Abort)`, `ps` đọc `Machine`; shell `help/echo/ps/wait/kill/exit`. Ảnh tách `ktest-proc` (10 TAP) khỏi `ktest-user` (14 TAP); stack syscall **per-hart NOLOAD** + canary **fail-closed**; matrix **12/12**; soak **0/1000**; **L1 400.000 lượt** (4 cấu hình, song song, 33m30s); conformance 61/61; gate **649/84**. **Phạm vi đúng**: K3.5 ≠ kernel đầy đủ — chưa memsrv, chưa IDL/ring, chưa VFS/virtio, chưa UART IRQ→user, chưa multi-hart U-mode (hart 1..3 chưa từng dispatch). **Sự cố quy trình**: commit `97903b15` thiếu 2 tệp nguồn untracked (`ktest_proc.rs`, `user_stack.rs`) ⇒ HEAD không build; vá ở `324d1da9`. Luật bổ sung cho D2-91: **pathspec không kéo tệp untracked** — với tệp mới phải `git add -N <đúng path>` (hoặc `git add`) **và** sau commit chạy `git status` phải rỗng + `v2 check` xanh.
+
+- **D2-95** **K6 roadmap** (10 task ≤ 3 h, theo thiết kế §10.1 dòng K6): **KT-67** memsrv U-mode + `vifast-alloc` (Frame cấp qua IPC, cầu nối D2-83: core giữ cap, obj layer sở hữu VM); **KT-68** capalloc (cấp/thu hồi cap theo cây); **KT-69** IDL + ring chia sẻ; **KT-70** VFS pager + page cache (nhiều client); **KT-71** VFS journal + rename/truncate/double-indirect + fsck; **KT-72** virtio-blk thật (QEMU); **KT-73** virtio-console + UART IRQ→user; **KT-74** `SetTls` + exec chain; **KT-75** `test-persist` 7 pha trên virtio-blk; **KT-76** cổng K6 (`K6-DOD` “tương đương v1” đo được + soak 0/1000 + L1 400k). **Luật**: mỗi task phải có TAP trên QEMU (không host-only), không nới ngưỡng, và tiêu chí “tương đương v1” phải trích từ danh sách đo được của thiết kế §10.1 (Vietnam: VFS journal/fsck/rename/truncate/double-indirect; pager nhiều client; exec chain; test-persist 7 pha) — **không** tự định nghĩa lại cho dễ đạt.
