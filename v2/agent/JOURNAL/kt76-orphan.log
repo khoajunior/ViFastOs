@@ -1,0 +1,7 @@
+# KT-76 — kiểm QEMU orphan (D2-116) trước chuỗi cổng
+# date_utc=2026-11-16T22:14:41Z
+# qemu_all=0
+# qemu_ppid1=0
+# ghi chú: lúc 07:08 (build) đếm được 2 tiến trình qemu KHÔNG phải của tôi (không có PPID 1); nay 0.
+# sau chuỗi cổng + L1 (date_utc=2026-11-16T23:03:03Z):
+# qemu_all=0 qemu_ppid1=0

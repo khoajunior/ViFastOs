@@ -1,0 +1,8 @@
+# KT-76 — L1 400.000 lượt: bốn cấu hình smp 1/2/4/8 × 100.000 seed × 64 op, BỐN tiến trình SONG SONG
+# lệnh mỗi cấu hình: ./v2/bin/v2 nightly --l1 --seeds 100000 --smp <N>  (log riêng kt76-l1-smp<N>.log, có EXIT=…)
+# qemu_orphan_before=0
+start_utc=2026-11-16T22:21:20Z
+end_utc=2026-11-16T22:56:09Z
+wall_s=2089
+# qemu_orphan_after=0
+# xong: mỗi log phải có '# L1 OK: 100000 lượt' + 'EXIT=0'

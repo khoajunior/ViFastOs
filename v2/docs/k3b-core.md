@@ -1797,3 +1797,89 @@ TESTS=729 / SUITES=100
 ```text scope=kt75-ktest-matrix.log
 # KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
 ```
+
+## 24. KT-76 — cổng K6: `K6-DOD` "tương đương v1" theo danh sách đo được + soak + L1 `seeds_total=400000`
+
+Chi tiết + toàn bộ bằng chứng: [`../agent/reports/K6-DOD.md`](../agent/reports/K6-DOD.md). Quy ước
+(D2-112): **mọi số đo nằm trong khối** ```text scope=`<tệp-log>` ``` **và trích nguyên văn**; ngoài
+khối chỉ có **định danh**. Tiêu chí DOD được trích **nguyên văn** từ `docs/v2/ViFastOs-v2-thiet-ke.md`
+§10.1 và `docs/v1/KNOWN-ISSUES.md` bằng `JOURNAL/kt76-extract-criteria.sh` (so từng byte ở
+`JOURNAL/kt76-verify-numbers.sh`).
+
+- **Phạm vi KT-76**: **chỉ** kiểm + viết DOD trung thực + chạy cổng. **Không** sửa code
+  (`v2/kernel/**`, `v2/lib/**`), **không** sửa `spec/`, không sửa test/ngưỡng, không sửa
+  `docs/v2/ViFastOs-v2-thiet-ke.md`, không sửa `docs/v1/`, không chạm `viscript/`/`review/`.
+  Ảnh sản phẩm **không đổi byte** so KT-75 (`sha256=fd202276…`, `build=ef566cfa583e34bb`) ⇒ soak
+  và conformance chạy trên **đúng** ảnh đó. **Nhưng** dòng build trong log là cargo **tái dùng**
+  artifact có sẵn (0.03s); dựng lại **sạch** bằng `git archive` cho **sha khác** (`29d7e875…`,
+  `build=317ffc48e0e71354`) ⇒ **tính tái lập byte của build CHƯA chứng minh** (nợ **P20**).
+- **Kết luận trung thực (không tô hồng)**:
+  - **ĐẠT**: **tám** hạng mục **đo được** của §10.1 dòng K6 — VFS journal/fsck/rename/truncate/
+    double-indirect (KT-71), pager nhiều client (KT-70), exec chain (KT-74), test-persist bảy pha
+    (KT-75). Mỗi hạng mục có `log:dòng` **nằm trong repo** (K6-DOD §3.1/§3.3).
+  - **KHÔNG ĐẠT**: dòng **S1** — **ảnh SẢN PHẨM không có U-mode/shell** (`main.rs:361-362` halt sau
+    `# k3 halt`; U-mode sau `#[cfg(feature = "user")]` `lib.rs:104-105`), trong khi v1 có shell
+    tương tác **trên ảnh boot**. Shell của v2 chỉ nằm ở **ảnh test** `ktest-proc` ⇒ **không** đủ
+    để gọi "tương đương v1" ở mức người dùng. Quyết định thuộc **Agent 0**: KT-77 (đưa U-mode/
+    shell vào ảnh sản phẩm) hoặc hạ phạm vi **có văn bản** — `BLOCKED.md` §K6-U-MODE.
+  - **Bảy lỗi v1**: **ĐẠT** N4 (luật harness có ca âm) và N6 (invariant `Ready ⇔ trong hàng`);
+    **KHÔNG ĐẠT** N2 (T26: chưa tái hiện vi phạm + chưa có “0/50” boot) và N3 (T31: chưa có checker
+    "giao đúng một lần"/ca `clients=4`); **KHÔNG ĐẠT** N1 (một phần)/N2/N3/N7; **KHÔNG ÁP DỤNG ở K6**
+    N5 (`x86` **phần cứng** sau K6 theo D2-10 — **không** miễn ca kiểm sim).
+- **Cổng đã chạy** (không retry, D2-07): `gate --fast` PASS; matrix **bảy** ảnh × `smp_set=1,2,4` sạch;
+  soak ảnh sản phẩm `soak_fail=0` trên `N=1000`, sha **không đổi**; `test-persist` PASS (bảy pha, mỗi pha
+  hai tiến trình QEMU khác nhau); conformance PASS; **L1 `seeds_total=400000`** = **bốn** cấu hình
+  `smp_set=1,2,4,8` × `seeds=100000` × `op=64`, **bốn tiến trình song song**, `EXIT=0` từng cấu hình.
+- **Nợ chuyển tiếp** (đủ danh sách + `file:line` + đề xuất ở `K6-DOD.md` §6): `fsync` từ U-mode;
+  `NoSpace`/torn-write; SMP/ngắt trên ảnh persist; ca âm cho bộ đếm (`overflow/size_bad/absent_bad/
+  replayed/errors/recorded/fsync/durable`, `id_mismatch/timeouts`); `MR4..MR63`; **scheduler** đa hart
+  **chưa dùng** IPI; console/blk **poll** chưa ngắt; ABI `Tcb.Exec(path)`; ca **lỗi-muộn** `exec`; matrix
+  **không** phủ ảnh persist; driver blk/console **không** vào ảnh sản phẩm.
+- **KHÔNG claim**: "tương đương v1" ở mức người dùng (S1); `flush` trên đĩa cứng thật (ca âm là
+  **mô hình cache**); torn-write; SMP trên ảnh persist; "giao đúng một lần" cho pager.
+
+```text scope=kt76-baseline-gate-summary.log
+TESTS=729 / SUITES=100
+```
+
+```text scope=kt76-ktest-matrix.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```
+
+```text scope=kt76-soak.log
+# soak: xong wall=227s (4 boot/s); ok=1000 fail=0 tổng=1000/1000
+# soak: 0/1000 lỗi (PASS)
+```
+
+```text scope=kt76-persist-run.log
+# persist: phases=7 ok=7 boots=10 neg=1 host_checks=10
+# reboot: boots=10 pids=10 phase_reboots=7 (7 pha; mỗi pha ghi ở một tiến trình, đọc lại ở tiến trình KHÁC)
+```
+
+```text scope=kt76-conformance.log
+ok - trace-compare: 61/61 dòng khớp, 5/5 ca (22:16 23:19 24:7 25:7 26:12), build=7304a40491224327
+```
+
+```text scope=kt76-l1-smp1.log
+# L1 OK: smp 1, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 2, ipc_median 12; ipc_sent 1212128, ipc_delivered 226334, ipc_dropped 782515; vm map 257149, walk 71791, unmap 135089, fault 237472, shootdown 135089)
+# L1 OK: 100000 lượt (smp [1], seeds 100000)
+EXIT=0
+```
+
+```text scope=kt76-l1-smp2.log
+# L1 OK: smp 2, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 1, ipc_median 12; ipc_sent 1165183, ipc_delivered 217375, ipc_dropped 734940; vm map 257080, walk 71601, unmap 135157, fault 232545, shootdown 135157)
+# L1 OK: 100000 lượt (smp [2], seeds 100000)
+EXIT=0
+```
+
+```text scope=kt76-l1-smp4.log
+# L1 OK: smp 4, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 1, ipc_median 11; ipc_sent 1137251, ipc_delivered 211851, ipc_dropped 707418; vm map 257644, walk 71499, unmap 135394, fault 228758, shootdown 135394)
+# L1 OK: 100000 lượt (smp [4], seeds 100000)
+EXIT=0
+```
+
+```text scope=kt76-l1-smp8.log
+# L1 OK: smp 8, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 1, ipc_median 11; ipc_sent 1125024, ipc_delivered 209918, ipc_dropped 693268; vm map 257069, walk 71693, unmap 135075, fault 226058, shootdown 135075)
+# L1 OK: 100000 lượt (smp [8], seeds 100000)
+EXIT=0
+```

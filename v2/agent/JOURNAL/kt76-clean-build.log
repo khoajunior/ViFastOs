@@ -1,0 +1,24 @@
+# KT-76 — D (reviewer KT-76): dựng bản SẠCH bằng git archive tại 1f522686, build trong TARGET DIR RIÊNG
+# lệnh: git archive 1f522686 | tar -x -C /tmp/kt76-clean ; CARGO_TARGET_DIR=/tmp/kt76-clean-target cargo build ... --release
+# date_utc=2026-11-16T23:27:27Z
+# worktree_git_status_v2=0 (nguồn của artifact soak: cây làm việc)
+   Compiling vifast-abi v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-abi)
+   Compiling vifast-pte v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-pte)
+   Compiling vifast-alloc v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-alloc)
+   Compiling vifast-virtio v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-virtio)
+   Compiling vifast-ring v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-ring)
+   Compiling vifast-elf v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-elf)
+   Compiling vifast-kbin-riscv64 v0.1.0 (/private/tmp/kt76-clean/v2/kernel/vifast-kbin-riscv64)
+   Compiling vifast-fs v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-fs)
+   Compiling vifast-idl v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-idl)
+   Compiling vifast-traceformat v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-traceformat)
+   Compiling vifast-scenario v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-scenario)
+   Compiling vifast-core v0.1.0 (/private/tmp/kt76-clean/v2/kernel/vifast-core)
+   Compiling vifast-vfs v0.1.0 (/private/tmp/kt76-clean/v2/lib/vifast-vfs)
+   Compiling vifast-plat-common v0.1.0 (/private/tmp/kt76-clean/v2/kernel/vifast-plat-common)
+   Compiling vifast-plat-riscv64 v0.1.0 (/private/tmp/kt76-clean/v2/kernel/vifast-plat-riscv64)
+    Finished `release` profile [optimized] target(s) in 6.44s
+CLEAN_BUILD_EXIT=0
+# bytes=188552
+29d7e875d034dc1eadc6ee2e0571631b581798b2c44819e29eab096fcd6ba146  /tmp/kt76-clean-target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+build=317ffc48e0e71354 text=49874

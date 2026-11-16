@@ -1,0 +1,16 @@
+# KT-76 — baseline: HEAD + máy + ảnh SẢN PHẨM build SẠCH (KHÔNG feature, D2-108A)
+# HEAD=3776689d
+# head_subject=[KT-00] D2-117: KT-75 DONE (persist qua reboot that, flush ca am dung tang); mo KT-76 cong K6
+# origin_main_delta=0
+# date_utc=2026-11-16T22:08:21Z
+# qemu=QEMU emulator version 11.1.3
+# opensbi: OpenSBI tự in trong serial boot — `kt76-product-serial.log:4` (không chép tay)
+# cpu=12 host=arm64 os=27.0.1
+# qemu_orphan_before=2
+# cargo=cargo 1.99.1 (5f94df478 2026-08-27)
+# lệnh: cargo build --manifest-path v2/kernel/Cargo.toml -p vifast-kbin-riscv64 --bin vifast-kbin-riscv64 --target riscv64gc-unknown-none-elf --release
+    Finished `release` profile [optimized] target(s) in 0.03s
+BUILD_EXIT=0
+# bytes=188552
+fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+build=ef566cfa583e34bb text=49874

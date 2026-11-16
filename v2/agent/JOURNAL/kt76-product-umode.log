@@ -1,0 +1,7 @@
+# KT-76 — S1: ảnh SẢN PHẨM có U-mode/shell chưa? (đối chiếu ảnh test ktest-proc)
+# date_utc=2026-11-16T22:25:02Z
+# product strings: procsrv=0 shell=0 init_elf=0
+# ktest-proc strings: procsrv=17 shell=34 init_elf=2
+# product: KHÔNG có chuỗi của chương trình U-mode ⇒ không có ai nhận để bật shell (D2-08/D2-113)
+# nguồn code: main.rs:361-362 halt sau '# k3 halt'; lib.rs:104-105 U-mode sau feature "user"; lib.rs:99-100/123-124 console sau feature
+# kết luận: S1 = KHÔNG ĐẠT — shell chỉ có trong ảnh test ktest-proc, KHÔNG phải ảnh sản phẩm

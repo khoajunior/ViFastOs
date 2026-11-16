@@ -4,31 +4,36 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : nền KT-75 là **`84e0df15`** (sau `[KT-00] D2-115`); trong lúc làm, dòng ViScript
-                commit **`93e1d418`** (chỉ `viscript/agent/`) ⇒ HEAD hiện tại `93e1d418`; **delta
-                KT-75 chưa commit** (lead commit theo pathspec). Cây OS của KT-75 chỉ thêm đường
-                persist (`ktest-persist`, runner `persist.sh`, mô hình host, test host); **không**
-                chạm `viscript/`, `crates/`, `review/`, `.agents/`, `out-b.log`, `spec/`.
-BUILD_ID      : ảnh **sản phẩm** **không đổi byte nào** so D2-115 — `sha256=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da`,
-                `build=ef566cfa583e34bb`, `text=49874`, `bytes=188552` (build **SẠCH** không
-                feature, D2-108A) ⇒ soak chạy lại trên **đúng** sha đó. Ảnh test mới
-                `ktest-persist` `data+bss=27352` ≤ `image_cap=262144` (không nới).
-Task          : **KT-75 (K6 — `test-persist` bảy pha trên virtio-blk)** — DONE phần cài + đo (chờ
-                reviewer kiểm delta). Tóm tắt: (a) ảnh test riêng `ktest-persist` chạy **một**
-                kịch bản/boot đọc từ **LBA=0**; (b) runner `persist.sh` điều khiển **mười** boot
-                trên **một** ảnh đĩa — mỗi pha **ghi** ở một tiến trình QEMU, **đọc lại** ở tiến
-                trình khác, so **từng byte**; (c) bảy pha: tạo/ghi đè/append/truncate/rename/
-                xoá+tạo lại/double-indirect; (d) nhật ký pha `/pstate` để boot cuối tự đếm
-                `phases`/`ok` **từ đĩa**; (e) **ca âm** `flush` bằng cache ghi-bay-hơi mô phỏng
-                (bỏ đúng hiệu lực `flush` ⇒ mất dữ liệu, sha ảnh **không đổi**); (f) kiểm chứng
-                **host độc lập** bằng `vifast-fsutil` sau **mỗi** boot; (g) **đỏ trước** + tự phá.
-Nguồn số     : `v2/docs/k6-persist.md` (D2-112) + `v2/docs/k3b-core.md` §23 + `JOURNAL/kt75-*`.
-                Script kiểm `JOURNAL/kt75-verify-numbers.sh` (tự phá: `kt75-verify-selfbreak.sh`).
-Cổng gần nhất : gate **PASS**, matrix **PASS**, conformance **PASS**, soak **PASS**, clippy
-                **EXIT=0** — số nguyên văn trong **khối trích** ở mục KT-75 cuối tệp.
-Nợ / BLOCKED  : ảnh **sản phẩm** vẫn **thiếu** U-mode/shell (D2-113 mở cho KT-76); ca âm `flush`
-                là **mô hình cache** (QEMU không tự mất dữ liệu); matrix **không** chứa ảnh
-                persist; chưa có SMP/ngắt trên ảnh persist; chưa có `fsync` từ U-mode.
+HEAD          : nền KT-75 là **`3776689d`** (`[KT-00]` D2-117); trong lúc làm, dòng ViScript
+                commit **`c9249b79`** (chỉ `viscript/agent/**` — `git show --stat` xác nhận) ⇒ HEAD
+                lúc soak là `c9249b79`, `dirty-kernel-paths=0`; **delta KT-76 chưa commit** (lead
+                commit theo pathspec). KT-76 **không sửa code**: chỉ DOD + log + docs + STATE/BLOCKED;
+                **không** chạm `viscript/`, `review/`, `spec/`, `docs/v1/`,
+                `docs/v2/ViFastOs-v2-thiet-ke.md`, `v2/kernel/**`, `v2/lib/**`.
+BUILD_ID      : ảnh **sản phẩm** **không đổi byte** so KT-75 — `sha256=fd202276…` (hash đầy đủ ở
+                `kt76-build-sha.log:15`), `build=ef566cfa583e34bb`, `text=49874`, `bytes=188552`
+                (**không feature**, D2-108A — không lẫn ảnh test) ⇒ soak chạy lại trên **đúng** sha đó; **tái lập
+                byte CHƯA chứng minh** (clean-build khác sha — nợ P20).
+Task          : **KT-76 (cổng K6 — `K6-DOD` + soak + L1 `seeds_total=400000`)** — **DONE** (task cổng:
+                DOD trung thực + cổng xanh), **phase K6 = KHÔNG ĐẠT** ("tương đương v1"): tám hạng mục
+                đo được của thiết kế §10.1 dòng K6 **ĐẠT**,
+                nhưng dòng **S1** ("tương đương v1" mức người dùng: ảnh sản phẩm có U-mode/shell)
+                **KHÔNG ĐẠT**. Bảy lỗi v1: N4/N6 ĐẠT; N1/N2/N3/N7 **KHÔNG ĐẠT** (N1 một phần); N5 N/A ở K6.
+Nguồn số     : `v2/agent/reports/K6-DOD.md` + `v2/docs/k3b-core.md` §24 + `JOURNAL/kt76-*`.
+                Script kiểm `JOURNAL/kt76-verify-numbers.sh` (tự phá: `kt76-verify-selfbreak.sh`);
+                tiêu chí trích bằng `kt76-extract-criteria.sh` (nguồn đọc-only, so từng byte).
+Cổng gần nhất : gate **PASS** `TESTS=729`/`SUITES=100`, matrix `KTEST=21/21`, soak `soak_ok=1000`
+                `soak_lanes=3`, persist `phases=7`/`boots=10`, conformance `trace_lines=61/61` +
+                `scn_cases=5/5`, L1 `smp_set=1,2,4,8` × `seeds=100000` × `op=64` — số nguyên văn
+                trong **khối trích** ở mục KT-76 cuối tệp.
+Nợ / BLOCKED  : **S1**: ảnh sản phẩm **thiếu U-mode/shell** ⇒ "tương đương v1" mức người dùng
+                **KHÔNG ĐẠT** (BLOCKED §K6-U-MODE; đề xuất KT-77 hoặc văn bản hạ phạm vi của
+                Agent 0). Nợ khác: `fsync` từ U-mode; `NoSpace`/torn-write; SMP trên ảnh persist;
+                ca âm cho bộ đếm (`overflow/size_bad/absent_bad/replayed/errors/recorded/fsync/
+                durable`, `id_mismatch/timeouts`); `MR4..MR63`; scheduler đa hart **chưa dùng** IPI;
+                console/blk **poll** chưa ngắt; ABI `Tcb.Exec(path)`; ca lỗi-muộn `exec`;
+                matrix **không** phủ ảnh persist; driver blk/console **không** vào ảnh sản phẩm —
+                danh sách đủ ở `K6-DOD.md` §6.
 ```
 ```
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
@@ -3392,3 +3397,68 @@ bằng chứng an toàn; ca âm `flush` là **mô hình cache**
 (QEMU không tự làm mất dữ liệu trên file host); matrix **không** chứa ảnh persist (một pha là
 **hai** boot ⇒ runner riêng, không nới mô hình `ktest.sh`); chưa có SMP/ngắt trên ảnh persist; chưa
 có `fsync` từ U-mode; chưa có ca torn-write (thuộc KT-71).
+
+## KT-76 — cổng K6: `K6-DOD` "tương đương v1" + soak + L1 `seeds_total=400000` (2026-11-17, Agent 2)
+
+**Vào**: `KT-75` DONE; HEAD `3776689d`; `origin_main_delta=0`; DOD mới phải trung thực, **không** thêm
+tính năng, **không** nới ngưỡng. **Việc làm**: (a) trích **nguyên văn** tiêu chí từ thiết kế §10.1
++ `docs/v1/KNOWN-ISSUES.md` bằng script (nguồn đọc-only, so từng byte) — **trước** khi chạy cổng;
+(b) viết `K6-DOD.md` với bảng C1..C8/N1..N7 + dòng **S1**; (c) chạy cổng nặng: build sạch → gate →
+matrix → soak → persist → conformance → **L1 bốn cấu hình song song**; (d) verify số (D2-112) + tự
+phá trên **bản copy** (D2-113F).
+
+**Kết luận trung thực**: **ĐẠT** tám hạng mục **đo được** của §10.1 dòng K6 (C1..C8); **KHÔNG ĐẠT**
+dòng **S1** — ảnh **sản phẩm** không có U-mode/shell (`main.rs:361-362`, U-mode sau feature
+`lib.rs:104-105`), trong khi v1 có `shell>` trên ảnh boot ⇒ **không** tuyên bố "tương đương v1";
+`BLOCKED.md` §KT-76 nêu hai lựa chọn cho **Agent 0** (KT-77 hoặc hạ phạm vi **có văn bản**). Bảy lỗi
+v1: N4/N6 ĐẠT; N1/N2/N3/N7 **KHÔNG ĐẠT** (N1 một phần); N5 N/A ở K6. Nợ đủ danh sách ở
+`K6-DOD.md` §6 (gồm **P20** — tái lập byte của build chưa chứng minh).
+
+**Cổng (số nguyên văn trong khối, không chép tay)**:
+
+```text scope=kt76-baseline-gate-summary.log
+TESTS=729 / SUITES=100
+```
+
+```text scope=kt76-ktest-matrix.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```
+
+```text scope=kt76-soak.log
+# soak: 0/1000 lỗi (PASS)
+```
+
+```text scope=kt76-persist-run.log
+# persist: phases=7 ok=7 boots=10 neg=1 host_checks=10
+```
+
+```text scope=kt76-conformance.log
+ok - trace-compare: 61/61 dòng khớp, 5/5 ca (22:16 23:19 24:7 25:7 26:12), build=7304a40491224327
+```
+
+```text scope=kt76-l1-smp1.log
+# L1 OK: smp 1, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 2, ipc_median 12; ipc_sent 1212128, ipc_delivered 226334, ipc_dropped 782515; vm map 257149, walk 71791, unmap 135089, fault 237472, shootdown 135089)
+# L1 OK: 100000 lượt (smp [1], seeds 100000)
+EXIT=0
+```
+
+```text scope=kt76-l1-smp2.log
+# L1 OK: smp 2, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 1, ipc_median 12; ipc_sent 1165183, ipc_delivered 217375, ipc_dropped 734940; vm map 257080, walk 71601, unmap 135157, fault 232545, shootdown 135157)
+# L1 OK: 100000 lượt (smp [2], seeds 100000)
+EXIT=0
+```
+
+```text scope=kt76-l1-smp4.log
+# L1 OK: smp 4, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 1, ipc_median 11; ipc_sent 1137251, ipc_delivered 211851, ipc_dropped 707418; vm map 257644, walk 71499, unmap 135394, fault 228758, shootdown 135394)
+# L1 OK: 100000 lượt (smp [4], seeds 100000)
+EXIT=0
+```
+
+```text scope=kt76-l1-smp8.log
+# L1 OK: smp 8, 100000 seed × 64 op (2000 seed đầu chạy 2 lần; ipc_min 1, ipc_median 11; ipc_sent 1125024, ipc_delivered 209918, ipc_dropped 693268; vm map 257069, walk 71693, unmap 135075, fault 226058, shootdown 135075)
+# L1 OK: 100000 lượt (smp [8], seeds 100000)
+EXIT=0
+```
+
+**Freeze**: chỉ tài liệu/log của task; **không** sửa code (ảnh sản phẩm **trùng byte** KT-75 —
+`sha256=fd202276…`, `build=ef566cfa583e34bb`). Lead commit theo pathspec (D2-105a).

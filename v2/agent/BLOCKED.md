@@ -417,3 +417,36 @@ Ba giới hạn phải nói rõ để KT-76 **không** nhận “tương đươn
 **Nợ kỹ thuật còn lại**: ảnh persist chạy **một hart**, poll (như KT-72); chưa có `fsync` từ
 U-mode; chưa có ca torn-write giữa transaction trên ảnh này (KT-71 đã có bảy pha crash trên
 journal — bằng chứng riêng); chưa có ca dung lượng đầy (`NoSpace`) trong persist.
+
+## KT-76 — cổng K6: DOD trung thực đã xong; **BLOCKED** mục "tương đương v1" ở mức NGƯỜI DÙNG (S1)
+
+Trạng thái (sau review + quyết định Agent 0): **KT-76 = DONE** (task cổng — DOD trung thực, cổng
+xanh), **phase K6 = KHÔNG ĐẠT** ở nghĩa "tương đương v1" (dòng **S1** dưới đây); Agent 0 **mở
+KT-77**. Tám hạng mục **đo được** của thiết kế §10.1 dòng K6 **ĐẠT** (VFS journal/fsck/rename/truncate/double-indirect; pager nhiều client; exec chain;
+“test-persist 7 pha”) và toàn bộ cổng nặng đã xanh (`v2/agent/reports/K6-DOD.md` §5). Cái **chặn**
+việc tuyên bố "tương đương v1" là **một** dòng phát hiện, không phải một hạng mục của §10.1:
+
+**S1 — "tương đương v1" ở mức người dùng: ảnh SẢN PHẨM không có U-mode/shell.** Ảnh sản phẩm
+`vifast-kbin-riscv64` **halt** ngay sau `# k3 halt` (`v2/kernel/vifast-kbin-riscv64/src/main.rs:361-362`);
+module U-mode chỉ biên dịch khi `feature = "user"` (`v2/kernel/vifast-plat-riscv64/src/lib.rs:104-105`),
+console/UART cũng sau feature (`lib.rs:99-100`, `lib.rs:123-124`) — mà ảnh sản phẩm build **không
+feature** (D2-108A). Shell thật của v2 chỉ có trong **ảnh test** `ktest-proc`; v1 có `shell>` +
+`--input-check` trên **chính ảnh boot** (`docs/v1/agent2-report-21.md:83`,
+`docs/v1/overnight-log.md:1499`). Bằng chứng đo: `JOURNAL/kt76-product-umode.log` (`procsrv`/`shell`
+bằng không ở ảnh sản phẩm, khác không ở `ktest-proc`) + `JOURNAL/kt76-product-boot.log` (dừng ở `# k3 halt`).
+
+**Vì sao đây là BLOCKED (không phải nợ thường):** tiêu chí "Tương đương v1" của §10.1 là **câu chữ
+của thiết kế**; tôi **không** được tự định nghĩa lại cho dễ đạt (yêu cầu KT-76). Muốn đóng, cần
+**một trong hai** quyết định của **Agent 0**:
+
+- **Cách một — KT-77: đưa U-mode/shell vào ảnh sản phẩm**: bật `feature = "user"` cho bin sản phẩm + nhúng
+   `procsrv`/`shell` ELF + bật `vcon`/UART IRQ; đo lại BUILD_ID, trần ảnh, soak. Trần **không**
+   phải lý do (`JOURNAL/kt76-budget.log`: mọi ảnh dưới trần, có headroom; driver console đã có sẵn
+   trong ảnh test).
+- **Cách hai — hạ phạm vi có văn bản**: Agent 0 ra D2/sửa thiết kế nói rõ "tương đương v1 **ở mức tính năng
+   kernel**" (khi đó S1 thành N/A **có nguồn**). Tôi **không** tự làm việc này.
+
+**Không chặn** phần còn lại: cổng K6 xanh, không nới ngưỡng nào; bảy lỗi v1 đã phân loại ĐẠT/KHÔNG/
+N/A trong `K6-DOD.md` §4; nợ kỹ thuật (fsync U-mode, `NoSpace`/torn-write, SMP persist, ca âm bộ
+đếm, `MR4..MR63`, IPI core, poll chưa ngắt, `Tcb.Exec(path)`, lỗi-muộn `exec`, matrix không phủ
+persist, driver không vào ảnh sản phẩm) liệt kê đủ ở `K6-DOD.md` §6 với `file:line` + đề xuất.

@@ -1,0 +1,38 @@
+# KT-76 — ngân sách ảnh (trần .data+.bss = 262.144 B [TK], KHÔNG nới)
+# đo bằng v2/test/boot/budget.sh (llvm-size -A), ảnh release dựng bởi matrix/soak trong task này
+# image=riscv64 path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 file=188552 data+bss=200696 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=49874 .rodata=14432 .data=7824 .bss=192872 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7824 .bss=192872 
+BUDGET_EXIT_riscv64=0
+# image=ktest path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=712968 data+bss=242840 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=225376 .rodata=69616 .data=7992 .bss=234848 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7992 .bss=234848 
+BUDGET_EXIT_ktest=0
+# image=ktest-guard path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=54072 data+bss=2680 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=11356 .rodata=2896 .bss=2680 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .bss=2680 
+BUDGET_EXIT_ktest-guard=0
+# image=ktest-user path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=603184 data+bss=203352 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=156374 .rodata=147072 .data=7768 .bss=195584 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7768 .bss=195584 
+BUDGET_EXIT_ktest-user=0
+# image=ktest-proc path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-proc file=437672 data+bss=207256 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=113396 .rodata=75208 .data=7768 .bss=199488 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7768 .bss=199488 
+BUDGET_EXIT_ktest-proc=0
+# image=ktest-vblk path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-vblk file=132104 data+bss=10976 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=41512 .rodata=8816 .bss=10976 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .bss=10976 
+BUDGET_EXIT_ktest-vblk=0
+# image=ktest-con path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-con file=357856 data+bss=214160 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=106506 .rodata=31544 .data=7768 .bss=206392 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7768 .bss=206392 
+BUDGET_EXIT_ktest-con=0
+# image=ktest-exec path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-exec file=357480 data+bss=202992 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=98204 .rodata=54600 .data=7768 .bss=195224 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7768 .bss=195224 
+BUDGET_EXIT_ktest-exec=0
+# image=ktest-persist path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-persist file=221248 data+bss=27352 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=39866 .rodata=89976 .bss=27352 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .bss=27352 
+BUDGET_EXIT_ktest-persist=0
