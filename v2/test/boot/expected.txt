@@ -76,4 +76,11 @@ ktest-user 35 35
 # Boot kết thúc bằng `PANIC: u-mode fault scause=0xc …` có chủ đích (U-mode thực thi trang RW NX).
 # Matrix đầy đủ vì vậy là **4 ảnh × smp 1/2/4 = 12 boot** (trước KT-66: 9 boot); runner kiểm
 # **mọi slot** (không bỏ ảnh nào) — xem `ktest.sh` `want_rows`.
+# **KT-72** (K6, virtio-blk thật): ảnh **`ktest-vblk`** thứ năm — quét PCI ECAM tìm
+# `0x1af4:0x1001` (vendor/device/capacity **đọc từ thiết bị**), gán BAR (firmware không enumerate),
+# split virtqueue + feature `VIRTIO_F_VERSION_1`, `read`/`write`/`flush`, **format+mount+fsck
+# `vifast_fs` trên đĩa virtio thật** (impl `BlockDev` mới, pager/journal không sửa) và ca **âm**
+# LBA ngoài dung lượng (`OutOfRange` không phát request; ca ép ⇒ thiết bị trả `IOERR`).
+# Runner cấp `-drive` 4 MiB (8192 sector) **mới** mỗi boot ⇒ matrix thành **5 ảnh × smp 1/2/4**.
+ktest-vblk 6 6
 ktest-proc 10 10

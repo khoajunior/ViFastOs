@@ -4,51 +4,62 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`f4005aed`** (nhánh `main`; cây OS không chạm `viscript/`, `crates/`,
-                `review/`, `.agents/`, `out-b.log`). **KT-71 DONE phần cài + đo**, chờ reviewer
-                verdict trước commit `[KT-71]`. Danh sách tệp + log: `JOURNAL/kt71-journal.md`;
-                tài liệu `docs/k6-vfs-journal.md`, `docs/k3b-core.md` §19.
+HEAD          : **`f2edba6a`** (nhánh `main`; cây OS không chạm `viscript/`, `crates/`, `review/`,
+                `.agents/`, `out-b.log`). **KT-72 DONE phần cài + đo**, chờ reviewer verdict trước
+                commit `[KT-72]`. Danh sách tệp + log: `JOURNAL/kt72-journal.md`; tài liệu
+                `docs/k6-virtio-blk.md` (mới), `docs/k3b-core.md` §20.
 BUILD_ID      : ảnh **sản phẩm `.text` không đổi** — FNV-1a 64 **`02ed5a1810ba59ce`, text=49854**
-                (trùng KT-70; ELF sha256 đổi chỉ vì `.symtab` do thêm dep `vifast-fs`, section
-                sizes y hệt: `.text=49854 .rodata=14424 .data=7824 .bss=192360`). Ảnh test
-                `.data+.bss`: ktest **242.840**, guard **2.680**, user **202.832**, proc
-                **206.640** — trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin
-                **196.608 B** (không thêm field core).
-Task          : **KT-71 (K6 tầng 2 — journal + rename/truncate/double-indirect + fsck)** — DONE
-                phần cài + đo (chờ reviewer). (1) **journal write-ahead**: `commit()` flush thân
-                log **trước** commit record `VC01`, rồi áp target, flush, đọc lại từng target so
-                CRC, xoá `VC01`; `replay` khi mount (CRC/seq sai ⇒ `replay_status=2`, **không áp
-                dụng**); (2) **rename đè** POSIX (file↔file, dir↔dir rỗng; `IsDir`/`NotDir`/
-                `NotEmpty`), giải phóng inode/block đích; (3) **truncate** trả mọi block + bảng
-                single/double-indirect; **double-indirect** dùng thật (root + L2 + data = 3
-                block cho file thưa block `10+128+5` (block 143)); (4) **write-back**: `PageCache` có
-                `dirty`, `PageSource`, `mark_dirty`/`flush_page` (8 sector + `dev.flush()`),
-                `flush_all`; `load()` nạp đè slot bẩn ⇒ **`Busy` 14**; (5) **7 pha crash**
-                (`PrefixDisk` "đĩa bền theo tiền tố") + **`fsck_repair`** sửa 4 loại hỏng
-                (block mồ côi/đếm sai, inode không tham chiếu, link count sai) + đếm
-                found/fixed/unfixed; (6) TAP `ktest` **65..69** + evidence `# fs:` fail-closed.
-Bước          : 9/9 — baseline gate **PASS 689/95** (`kt71-baseline-gate.log`) → red host
-                (`kt71-red-host.log`) → crash harness + fsck_repair + rename đè + write-back →
-                red QEMU thật (tràn stack 13 KiB `Fs::mount`; TAP 66 `dirty_marks=1->1`) →
-                xanh TAP 65..69 (`kt71-green-qemu-ktest.log`) → matrix **12/12** → gate + clippy
-                → soak **0/1000** → docs + journal → báo lead spawn reviewer, **đóng băng cây**.
-Cổng gần nhất : host **9 test** mới `vifast-fs` + **5 test** mới `vifast-vfs` PASS; QEMU 1 boot
-                × 4 ảnh **4/4 sạch**, `ktest` **70/70** TAP (`kt71-ktest-boot.log`); matrix
-                **12/12** (`kt71-ktest-matrix.log`); conformance **61/61 + 5/5**
-                (`kt71-conformance.log`); clippy host + kernel 5 ảnh **`EXIT=0`**
-                (`kt71-clippy-kernel.log`); `gate --fast` **PASS 703 test/96 suite**, L1 1.000
-                seed **884 ms** (`kt71-gate.log`); L1 thuần **898/764/891 ms**
-                (`kt71-l1-thuan.log`); soak **0/1000** (`kt71-soak.log`); ảnh `ktest` 242.840 ≤
-                262.144.
-Nợ đang mở    : (1) **pager U-mode ghi trang** (writeback qua shim) + **virtio-blk** → KT-72
-                (chỉ thêm `impl BlockDev`); (2) flush-trước-commit-record **đã có ca âm**
-                (mutation ⇒ host đỏ, QEMU `not ok 67`), nhưng mô hình crash vẫn là tiền tố/tái
-                sắp xếp có kiểm soát — không mô phỏng ghi rách sector; (3) journal chỉ redo,
-                `write` nhiều chunk = nhiều transaction 512 B; (4) `fsck_repair` không sửa block
-                bị hai inode cùng trỏ — **có ca dương** `unfixed_pos=true`; (5) **stack**: chỉ có
-                luật "một `Fs`/pha" + `# fs: stack`, **chưa** assert/canary; (6) ảnh `ktest`
-                242.840/262.144 = 92,6 % — thêm gì vào ảnh test phải đo lại, chạm trần thì **tách
-                ảnh**. Nợ cũ K3.5/K3b/KT-67a/KT-69/KT-70 giữ nguyên.
+                (trùng KT-71/70; ELF sha256 `2e9550bd…` đổi chỉ vì metadata build, section sizes y
+                hệt: `.text=49854 .rodata=14424 .data=7824 .bss=192360`, `data+bss=200184`). Ảnh
+                test `.data+.bss`: ktest **242840** (không đổi), guard **2680**, user **202832**,
+                proc **206640**, **ktest-vblk 10976** (mới) — trần **262144**; `size_of::<Machine>()
+                = 188872 B` ≤ pin **196608 B** (không thêm field core).
+Task          : **KT-72 (K6 — virtio-blk THẬT trên QEMU)** — DONE phần cài + đo (chờ reviewer).
+                (1) **PCI ECAM** (`0x3000_0000`, chọn thay legacy I/O port vì RISC-V không có
+                `in/out`): quét bus 0, tìm `0x1af4:0x1001`, **firmware không enumerate ⇒ driver tự
+                đo cỡ BAR** (ghi `0xffff_ffff` hai dword), **kiểm chồng lấn** (BAR function khác +
+                vùng nền tảng + trang đã map) rồi mới **gán** BAR vào `0x4000_0000`, đọc lại
+                **che 4 bit thuộc tính**, bật `MEMORY|BUS_MASTER`, parse 4 capability;
+                (2) **virtqueue split** trong một trang 4 KiB căn 4096 (`.bss`, identity map nên
+                `VA == PA`, TAP kiểm `walk_sw`), đàm phán **`VIRTIO_F_VERSION_1`** (bit 32) +
+                **`VIRTIO_BLK_F_FLUSH`** (bit 9, chỉ khi thiết bị có ⇒ `driver_features=0x100000200`,
+                `flush()` từ chối nếu chưa đàm phán), `FEATURES_OK`/`DRIVER_OK` đọc lại, queue 8
+                (`queue_max ≥ 3`, `used` lấy offset theo `queue_size` thật), notify + poll `used`,
+                **kiểm `used->id` = head**; (3) **`impl BlockDev`** mới cho virtio (`read`/`write`/`flush`
+                thật) — **không sửa** `vifast-fs`/`vifast-vfs`; (4) **FS thật trên đĩa virtio**:
+                format → mount → ghi `/kt72.txt` (69 B) → fsck `found=0` → **drop + mount lại** đọc
+                so byte → đọc thô LBA 0/1 (`lba0_zero=1`, `lba1_magic=VF04`); (5) **TAP 6** trên
+                ảnh riêng `ktest-vblk` (task cho phép tách ảnh: `ktest` đã **242840** trên trần **262144**) + ca âm
+                **hai lớp** (`OutOfRange` không phát request; ép phát ⇒ thiết bị `IOERR`); (6)
+                bằng chứng **độc lập phía host**: `vifast-fsutil fsck/ls/get` trên ảnh đĩa QEMU.
+Bước          : 9/9 — baseline gate **PASS 703/96** (`kt72-baseline-gate.log`) → red host
+                (`kt72-red-host.log`) → crate logic thuần + test host (15) → PCI/driver → boot thật
+                đỏ **2 lần** (CapLoop; BarUnassigned stage=readback) → xanh 6 TAP
+                (`kt72-green-qemu-ktest.log`) → mutation host + QEMU → matrix **15/15** → gate +
+                clippy 6 ảnh → conformance → soak **0/1000** → docs + journal + verify số
+                (**D2-110A: quét mọi số theo từng tài liệu, fail=0**) → tự rà D2-102 (fs_err in từ hàm ánh xạ, `const:passes=2`) + cache
+                `notify_off` + `config_generation` fail-closed → chạy **lại** matrix/clippy/
+                verify → báo lead spawn reviewer, **đóng băng cây** → reviewer **DRIFT**: vá CAO-1
+                (đàm phán `VIRTIO_BLK_F_FLUSH`), CAO-2 (kiểm chồng lấn BAR **trước** khi ghi,
+                `PciError::BarConflict`), medium (set_desc bool, `queue_max ≥ 3`, `used` theo
+                `qsize`), verify D2-110A quét mọi số theo từng tài liệu, D2-102/106 đầu vào+công
+                thức → chạy **lại** gate (718/99) + matrix 15/15 + conformance + clippy 6 ảnh →
+                đóng băng lại, chờ verdict vòng 2.
+Cổng gần nhất : host **15 test** mới `vifast-virtio` PASS; QEMU ảnh `ktest-vblk` **6/6** TAP
+                (`kt72-green-qemu-ktest.log`); matrix **15/15** = 12 boot cũ + 3 vblk
+                (`kt72-ktest-matrix.log`); conformance **61/61 + 5/5** (`kt72-conformance.log`);
+                clippy host + kernel **6 ảnh `EXIT=0`** (`kt72-clippy-kernel.log`); `gate --fast`
+                **PASS 718 test/99 suite**, L1 cổng **900 ms** (`kt72-gate.log` +
+                `kt72-gate-summary.log`); L1 thuần **897/885/1107 ms** (`kt72-l1-thuan.log`); soak
+                **0/1000** (`kt72-soak.log`); ảnh `ktest` 242840, `ktest-vblk` 10976 ≤ 262144.
+Nợ đang mở    : (1) virtio-blk **poll chưa ngắt**, queue depth 1; (2) **flush** mới chứng minh ở
+                mức thiết bị (request thật + status OK + host đọc lại được) — bền qua reboot thuộc
+                KT-75; (3) bộ đếm `id_mismatch`/`timeouts` **chưa có ca âm** ⇒ ghi "chưa chứng
+                minh" (D2-108B), `errors` **có** ca dương (ca ép + mutation); (4) PCI một bus/một
+                function, BAR gán cố định, map leaf 2 MiB — chưa phải enumerator tổng quát;
+                (5) driver **chưa vào ảnh sản phẩm** (feature `vblk` chỉ ảnh test) → KT-73;
+                (6) ảnh `ktest-vblk` chưa in `# conf image:` — thêm khi KT-73/75 cần neo ảnh.
+                Nợ cũ K3.5/K3b/KT-67a/KT-69/KT-70/KT-71 giữ nguyên (xem các mục dưới).
 ```
 ```
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
@@ -83,13 +94,13 @@ hart đích.
 **16 nhóm**; `check_scn.py` siết hằng số 26 → 27; runner `tests/kt64a_scn.rs` đọc nguyên tệp, so
 từng bước + 6 bất biến/bước + `Ready`/`Cancelled`/`ipc_dropped == 1`.
 
-**Cổng** — `gate --fast` **PASS 647/83** (L1 1.000 seed/999 trace, 833 ms; `.scn` 27/16; gen-check
+**Cổng** — `gate --fast` **PASS 647/83** (L1 1000 seed/999 trace, 833 ms; `.scn` 27/16; gen-check
 ON) `JOURNAL/kt64a-gate.log`; `cargo test -p vifast-sim` **454/0** `JOURNAL/kt64a-sim.log`;
 `ktest.sh 1 matrix` **9/9** boot, TAP **60/60 + 3/3 + 17/17** `JOURNAL/kt64a-ktest-matrix.log`;
 `soak.sh 1000 3` **0/1000** (`dirty-kernel-paths=1` ⇒ core đã sửa; wall 224 s; `BUILD_ID=
-6290c3b0198d37ac`) `JOURNAL/kt64a-soak.log`. Ảnh: product **187.936 / 200.120**, ktest
-**573.744 / 209.856**, guard **53.808 / 2.680**, user **335.928 / 201.008**; `size_of::<Machine>()`
-**188.872** (không đổi). Trace conformance **không đổi** (`.scn` 22..26 + kernel trace không chạm).
+6290c3b0198d37ac`) `JOURNAL/kt64a-soak.log`. Ảnh: product **187936 / 200120**, ktest
+**573744 / 209856**, guard **53808 / 2680**, user **335928 / 201008**; `size_of::<Machine>()`
+**188872** (không đổi). Trace conformance **không đổi** (`.scn` 22..26 + kernel trace không chạm).
 
 **QEMU TAP 55 (đóng D2-90 trên nhân thật)** — thêm `t2_free` (sender `BlockedOnSend` trên Endpoint
 bị finalise ⇒ `Ready` + `Cancelled`) vào `ok55` + evidence `sender=Ready sender_err=Cancelled`;
@@ -126,7 +137,7 @@ sau port **12/12** + **2/2** xanh.
   TCB không chạy lại trên TLB cũ.
 - **Slot CNode từ arena**: `slotpool.rs` → `slotmem.rs`; word slot = hàm thuần của offset arena
   (`(offset+cnode_base)/slot_bytes + slot`); cửa sổ 4096 word chia arena (3584, offset <
-  147.456 B) + harness (1024, ánh xạ lùi); Retype vượt cửa sổ ⇒ `NotEnoughMemory` trước khi cấp;
+  147456 B) + harness (1024, ánh xạ lùi); Retype vượt cửa sổ ⇒ `NotEnoughMemory` trước khi cấp;
   `Revoke` Untyped `Region::reset` trả byte; `cnode_slot_span` chứng minh span trong arena.
 - **Bind/Unbind**: `ScData.bound`, `sched_context_bind/unbind/bound`, 1:1 hai chiều, mã lỗi như
   sim (`SlotEmpty`/`InvalidCapability`/`WrongObjectType`/`IllegalOperation`), `Signal` chỉ đánh
@@ -140,8 +151,8 @@ sau port **12/12** + **2/2** xanh.
 **Kết quả**: parity `kt64_core_parity` **2/2** (bind+signal, resume; so mã lỗi + digest từng
 bước), core-only **15/15** (thêm F1/F4/F5); TAP **56..59** trên QEMU (`# slot:` `# bind:` `# resume:` `# tlb:`),
 `ktest` **60/60**, matrix **9/9**, gate **642/82**, soak **0/1000**; `size_of::<Machine>()`
-**188.872** ≤ **196.608** (pin không nâng); ảnh **200.120 / 209.856 / 2.680 / 201.008** ≤
-**262.144** (file 182.840 / 572.760 / 53.808 / 331.024).
+**188872** ≤ **196608** (pin không nâng); ảnh **200120 / 209856 / 2680 / 201008** ≤
+**262144** (file 182840 / 572760 / 53808 / 331024).
 
 **Nợ mở** (docs §13.9): core multi-hart chưa nối IPI (kernel `active_on` giao hart đang chạy core
 ⇒ targets=0); `TlbFlush` theo `Generation` của KT-51; `SchedContext.YieldTo/Consumed`; đường
@@ -166,16 +177,16 @@ KT-62: gate **607/79**, matrix 53/3/17, soak 0/1000.
   `Cancelled + Ready` (một cửa `transition_tcb`, hook KT-21 trả donation); gỡ Reply cap chết khỏi
   Recv waiter (Q7b); Recv/Notification waiter của object bị finalise **thức** `Cancelled + Ready`
   (khác sim có chủ đích — anti-hang, docs §12.5); hàng Endpoint huỷ + `ipc_dropped`.
-- Tách `core_capxfer.rs`/`core_finalise.rs`/`mdb.rs` giữ R1 (`core_ipc.rs` 1.421,
-  `machine.rs` 1.478 dòng).
+- Tách `core_capxfer.rs`/`core_finalise.rs`/`mdb.rs` giữ R1 (`core_ipc.rs` 1421,
+  `machine.rs` 1478 dòng).
 
 **Kết quả**: parity `kt60_core_parity` **16/16** (5 kịch bản mới, digest sau từng bước, gồm
 `windows`/`cap_stats`); core-only **13/13** (thêm 3 ca **F1/F2/F3** sau review: bảng cap đầy ⇒
 `NotEnoughMemory` trước `admit`; window trỏ CNode chết ⇒ `InvalidCapability`; cap nguồn chết giữa
 hàng ⇒ message vẫn giao + `failed=1`); TAP **53..55** trên QEMU (`# ipc:`), `ktest` **56/56**,
-matrix **9/9**, gate **625/80**, soak **0/1000**; `size_of::<Machine>()` **188.448** ≤ **196.608**
-(pin **không** nâng — thêm `recv_window` +4.608 B, cap trong `Message` +3.648 B); ảnh **199.696 /
-209.856 / 2.680 / 200.584** ≤ **262.144** (file 191.824 / 533.536 / 53.808 / 330.704).
+matrix **9/9**, gate **625/80**, soak **0/1000**; `size_of::<Machine>()` **188448** ≤ **196608**
+(pin **không** nâng — thêm `recv_window` +4608 B, cap trong `Message` +3648 B); ảnh **199696 /
+209856 / 2680 / 200584** ≤ **262144** (file 191824 / 533536 / 53808 / 330704).
 
 **Nợ mở** (docs §12.8): MR>4 qua IPC buffer (KT-64), TCB gửi hàng còn `BlockedOnSend` khi Endpoint
 bị revoke (**nợ D2-90**; procsrv/KT-65), `TlbFlush`/`SlotPool`/`Bind`/`resume_with_regs` (KT-64),
@@ -216,10 +227,10 @@ HEAD cũ ⇒ **ĐỎ** thiếu TAP 5..17 (`kt62-red-before-new-tap.log`).
 - \`tools/vifast-gen/gen.py\` sinh thêm \`MIN_COMPAT\` từ \`[abi].min_compat\` (D2-11) — \`gen-check\` xanh;
   \`spec/\` **không** đổi.
 
-**Kết quả**: gate **606/79** (598 + 8, L1 1.000 seed); matrix **9/9** (TAP **53/53 + 3/3 + 17/17**);
-soak **0/1000** (226 s, BUILD_ID \`34dc594e0f651ed3\`); \`size_of::<Machine>()\` **180.168** ≤
-**196.608**; ảnh **191.416 / 197.568 / 2.680 / 192.304** ≤ **262.144** (file 185.464 / 484.240 /
-53.808 / 316.976); kernel clippy \`-D warnings\` sạch (sửa 2 lint nợ test).
+**Kết quả**: gate **606/79** (598 + 8, L1 1000 seed); matrix **9/9** (TAP **53/53 + 3/3 + 17/17**);
+soak **0/1000** (226 s, BUILD_ID \`34dc594e0f651ed3\`); \`size_of::<Machine>()\` **180168** ≤
+**196608**; ảnh **191416 / 197568 / 2680 / 192304** ≤ **262144** (file 185464 / 484240 /
+53808 / 316976); kernel clippy \`-D warnings\` sạch (sửa 2 lint nợ test).
 
 **Nợ mở** (\`docs/k3b-core.md\` §11.5): chuyển cap (KT-63), MR>4 qua IPC buffer (KT-63/64),
 invocation (D2-53 Q11 giữ \`NotSupported\`), scheduler U-mode (KT-64/65), trace 32 B cho syscall (K6).
@@ -240,7 +251,7 @@ dịch (`JOURNAL/kt59-red-before.log`, `E0433: cannot find TcbState in kc`, exit
 `sched.rs` (`HartSched` 256 mức + bitmap + ready queue liên kết tĩnh `[u16; 257]`, `pick`
 O(1), `pick_where` budget), `mailbox.rs` (`Mailbox<T,8>` FIFO + backpressure trả message,
 `MailboxMsg` Wake/Reschedule/Migrate/Stop/TlbFlush, `HartMailbox` log biên 64 + stopped),
-`core_tcb.rs`/`core_sched.rs` (tách khỏi `machine.rs` 2.893 dòng để giữ R1; **cùng một**
+`core_tcb.rs`/`core_sched.rs` (tách khỏi `machine.rs` 2893 dòng để giữ R1; **cùng một**
 `impl Machine`): một cửa `transition_tcb`, `Tcb.Configure/SetFaultEp/SetPriority/SetAffinity/
 SetHome/SetSchedParams/ReadState/Info`, suspend/resume/finalise + log, `dispatch`/
 `block_current`/`wake`/`yield_current`/preempt, `published`/`publish` guard + push migration,
@@ -257,9 +268,9 @@ stopped, finalise log, pair hits) + 4 bất biến hai bên; log `kt59-parity.lo
 
 **Biên tĩnh**: `MAX_TCBS=64`, `MAX_SCHED_CONTEXTS=32`, `MAX_MAIL_LOG=64`, `MAX_FINALISE=256`;
 đầy body TCB/SC ⇒ `NotEnoughMemory` atomic (test pin + revoke trả body free-list); mailbox
-đầy ⇒ `Busy`. **D2-84:** `size_of::<Machine>() = 167.896 B` (64,0 % trần 262.144; headroom
-28.712 B tới pin 192 KiB); bảng phân bố 14 dòng cộng khớp 100 %; assert pin **196.608**, chỉ
-dùng 262.144 làm mẫu số %. Core chưa link ⇒ budget ảnh không đổi.
+đầy ⇒ `Busy`. **D2-84:** `size_of::<Machine>() = 167896 B` (64,0 % trần 262144; headroom
+28712 B tới pin 192 KiB); bảng phân bố 14 dòng cộng khớp 100 %; assert pin **196608**, chỉ
+dùng 262144 làm mẫu số %. Core chưa link ⇒ budget ảnh không đổi.
 
 **Review `reviewer-kt59`**: **DRIFT M — chặn commit tới khi vá F1**, không UNSAFE; ALLOWED
 byte-identical, mã lỗi/transition không lệch trong phạm vi, sim `src/` rỗng diff. **F1**:
@@ -295,10 +306,10 @@ thật, shootdown thật `-smp≥2`, `skipped=smp1`) → `v2/test/conformance/{r
 image_digest.py}` + `check_scn.py --trace` → `ktest.sh` evidence `# conf image`/`# conf`/`# trace` +
 `check_trace` (đúng **tập** step theo `check_scn --steps`, không chỉ đếm) → **D2-80** BUILD_ID ảnh.
 
-**Kết quả đo**: `gate --fast` PASS **573** (L0; 569 cũ + 4 test scenario, L1 1.000 seed); `ktest.sh
+**Kết quả đo**: `gate --fast` PASS **573** (L0; 569 cũ + 4 test scenario, L1 1000 seed); `ktest.sh
 1 matrix` **9/9** boot (38 TAP/ảnh chính, 65 evidence); `selftest.sh` **17/17**; sim ↔ QEMU
 **61/61 dòng khớp, 5/5 ca** trên `-smp 2` và `-smp 4`; `check_scn --trace` OK; budget **không đổi**
-(13.200 / 2.680 / 11.688 / 11.248 B ≤ 262.144); product `run.sh 1` PASS.
+(13200 / 2680 / 11688 / 11248 B ≤ 262144); product `run.sh 1` PASS.
 
 **Phát hiện**: conformance lộ lỗi platform `W|X` cùng một mapping (D2-67) — sửa atomic + test host;
 reviewer xác nhận là lỗi thật và KT-52 không bắt vì **khoảng trống phủ** (không có ca một request
@@ -339,7 +350,7 @@ script rồi **chạy lại** 450 boot + selftest + gate. Chi tiết `JOURNAL/kt
 **Nợ** (docs §17.7): runner kiểm hình dạng log, không kiểm ngữ nghĩa phép đo (lớp 2 = host test/sim);
 manifest tên TAP là bản sao có kiểm soát; đổi nội dung evidence/PANIC phải sửa mẫu (fail-closed);
 timeout 200 lát 0,1 s; chạy tuần tự 1 QEMU; `selftest.sh` không chạy song song ma trận. **Không** thuộc
-KT-54: TAP mới (kernel sau), `.scn` (KT-55), `FaultKind`/`spec/` (KT-56), soak 1.000/perf/K3-DOD
+KT-54: TAP mới (kernel sau), `.scn` (KT-55), `FaultKind`/`spec/` (KT-56), soak 1000/perf/K3-DOD
 (KT-57), `run.sh` ảnh sản phẩm.
 
 ## KT-53 — U-mode + 3 syscall + nạp `init` ELF (K3)
@@ -449,7 +460,7 @@ tính** (đọc giá trị cũ khi **không** sfence, giá trị mới sau sfenc
 KT-50, hart nhận flush + **ack ngầm**, hart gửi **local flush** rồi chờ ack `active_on`, **không self-target**,
 timeout bằng `rdtime`, bất biến `ack_mask == active_on`; 4) 3 mutation (bỏ sfence / bỏ chờ ack / self-target) đều
 đỏ; 5) TAP `100 vong shootdown Ok`, `stale mapping caught`, `hart ngoai active_on`, `rollover flush`,
-`timeout khong treo`; 6) matrix 1/2/4 + 50 boot mỗi N + gate 569 + budget ≤ 262.144; 7) docs §14 + JOURNAL + STATE.
+`timeout khong treo`; 6) matrix 1/2/4 + 50 boot mỗi N + gate 569 + budget ≤ 262144; 7) docs §14 + JOURNAL + STATE.
 
 **Đỏ trước** (worktree tách `d06607eb`, chỉ chép test/runner): runner 30 TAP trên ảnh KT-50 cũ ⇒ `# KTEST: 1/2`
 (thiếu `ok 25..30` + `tlb-*` evidence) — `JOURNAL/kt51-red-ktest.log`; host test mới ⇒ `unresolved import
@@ -486,7 +497,7 @@ D2-68 không self-target, mutation thật; tự chạy host 78/78 + ktest 6/6 + 
 
 **Giới hạn**: thời gian **ảo** (`-icount shift=6`); một VSpace kernel + một shootdown/lúc (`IN_FLIGHT`); `-smp 1`
 mode=self (không giả 2 hart); không đo latency/TLB hit-miss thật; "hart ngoài `active_on`" dùng hart khác trên
-`-smp 4`, không phải nhiều shooter đồng thời; 300 boot là smoke, soak 1.000 thuộc KT-57.
+`-smp 4`, không phải nhiều shooter đồng thời; 300 boot là smoke, soak 1000 thuộc KT-57.
 
 ## KT-50 — IPI thật + drain hộp thư per-hart (SBI IPI, `Event::Ipi`, coalesce theo kind)
 
@@ -511,7 +522,7 @@ enable/disable SSIE, `post`/`drain`/`on_ipi_interrupt`/`wait_drain`), `lib.rs` (
 **Bằng chứng**: host **67/67**; `ktest.sh 1 matrix` **6/6** (25/25 + guard 3/3); **300 boot** `50 × 1/2/4` →
 **`# KTEST: 300/300`, 0 `not ok`** (`JOURNAL/kt50-boot50-matrix.log`; lần chạy đầu trước vá có dòng tổng bị lẫn do
 hai tiến trình ghi cùng tệp — đã chạy lại **sạch**, không đổi tiêu chí); `run.sh 1 2` PASS
-(`kt50-product-boot-smp2.log`); budget sản phẩm **2840 B**, ktest **4304 B**, guard **2688 B** trên trần 262.144
+(`kt50-product-boot-smp2.log`); budget sản phẩm **2840 B**, ktest **4304 B**, guard **2688 B** trên trần 262144
 (`kt50-budget.log`); gate **569/73** (`kt50-gate-fast.log`); TAP mẫu `kt50-ktest-smp{1,2,4}.log`.
 
 **Deviation D2-76** (đo được, không nới ngưỡng): S-mode đọc ACLINT MSWI `0x0200_0004` ⇒ `load access fault`
@@ -535,7 +546,7 @@ SBI HSM `hart_start` với `start_addr`/`opaque`; barrier khởi động; hart l
 `.trap_stack` + guard **riêng** mỗi hart; `TP`/`sscratch` per-hart; `TimerStats`/`PlicStats` PerHart; PLIC
 enable/context `2*h+1`; `hart_id()` thật; `HartMask` + barrier; `MAX_HARTS=8`; hart vượt DTB bị từ chối; TAP
 `N harts alive` N=1/2/4 + per-hart guard/timer/plic + barrier; matrix `-smp 1|2|4`, `expected.txt`; 50 boot/N; gate 569;
-budget ≤ 262.144.
+budget ≤ 262144.
 
 **Đỏ trước** (`JOURNAL/kt49-red-ktest.log`): runner mới (plan 1..20 + TAP 15..19 + bằng chứng per-hart) trên ảnh KT-48
 (chỉ 15 TAP) ⇒ `not ok - ktest smp=1 boot 1: thiếu plan-1..20 ok-set-1..20 ok-count=15/20 …` + guard `thiếu
@@ -588,13 +599,13 @@ kiểm magic); barrier `released` phải **tăng đơn điệu** (bug đua làm 
 (matrix 1/2/4); TAP 17 không đòi drift per-hart.
 
 **Không làm (đúng phạm vi)**: IPI + drain hộp thư (KT-50), ASID/TLB shootdown (KT-51), object layer (KT-52), U-mode
-(KT-53), harness đầy đủ/conformance (KT-54/55), `FaultKind`/W^X (KT-56), soak 1.000/K3-DOD (KT-57), port core (K3b);
+(KT-53), harness đầy đủ/conformance (KT-54/55), `FaultKind`/W^X (KT-56), soak 1000/K3-DOD (KT-57), port core (K3b);
 hotplug/suspend/scheduler; `spec/`, sim, `.scn`, QUEUE/DECISIONS/AGENTS, `viscript/`, `review/` **không chạm**; không
 thêm dependency; không `cfg(target_arch)`; `unsafe` chỉ `kernel/vifast-plat-*`.
 
 
 HEAD          : `aec27f73` ([KT-48] PLIC + UART IRQ — commit chỉ `v2/`; parent `5db8eaae` = [KT-00] **D2-75** của Agent 0, không chạm)
-BUILD_ID      : — (ảnh K3 KT-48: `vifast-kbin-riscv64` 55.560 B, `vifast-kbin-ktest` 74.264 B, `vifast-kbin-ktest-guard` 51.000 B — `JOURNAL/kt48-budget.log`/`kt48-ktest.log`)
+BUILD_ID      : — (ảnh K3 KT-48: `vifast-kbin-riscv64` 55560 B, `vifast-kbin-ktest` 74264 B, `vifast-kbin-ktest-guard` 51000 B — `JOURNAL/kt48-budget.log`/`kt48-ktest.log`)
 Task          : **KT-48 (PLIC + UART IRQ)** — **DONE (`reviewer-kt48` DRIFT nhẹ: code/DoD đạt, **không** UNSAFE; 4 mục đã vá + D2-75)**: PLIC cổ điển `0x0c00_0000` map **2×2 MiB Device RW NX** (priority/pending/enable + context), context S-mode **`2*hart+1`** (M-mode `2*hart` không bật), `ndev` **probe register** (write-1 → read-back → khôi phục 0 → read-back 0, panic nếu sai — D2-75), threshold **0**, priority IRQ 10 **1**; UART0 IRQ 10 bật `IER.TX-empty`, handler `claim → đọc IIR → complete → re-arm IER 0→2` (level-triggered có gateway), tắt `IER` + enable sau **N=8** ngắt; `scause=(1<<63)|9` ⇒ `Event::Interrupt{code:9}` → PLIC (line lạ đếm + complete, **0 IRQ giả**); `Platform::enable_irq/disable_irq` **PLIC thật** (TAP gọi wrapper); TAP **8..10 PLIC/UART** + timer **11..14** (chạy **sau** PLIC — hồi quy cùng boot) + nested **15**; product cũng bật PLIC+UART IRQ (**không icount**); host test **46/46**; ktest **15/15 + 3/3**; product **50/50**; gate **569**; budget **344/352/344 B**
 Bước          : 8/8 xong (baseline gate 569 → đỏ trước: `ktest.sh` đòi 3 TAP PLIC/UART + `plan-1..15` → `plat-common::plic` (layout/context/stats/host test) + `trap` mã 9 → arch `plic` (probe ndev/init/claim/complete/IER/gate) + MMU 2×2 MiB + `trap_dispatch` nhánh 9 + `Platform` IRQ thật → ảnh test 15 TAP + product PLIC → host 12 test PLIC (tổng 46) → reviewer DRIFT nhẹ: vá `interrupts_delta` thành hiệu thật, thêm TAP `Platform::enable_irq/disable_irq`, quiet 1 ms khớp docs, probe khôi phục 0 + đọc lại (D2-75), sửa comment TAP → ktest 15/15+3/3 ×2, product 50/50, gate 569) — **đã commit `[KT-48]`; `[KT-48b]` cập nhật HEAD + verdict + push**
 Nhánh         : main
@@ -655,7 +666,7 @@ enable_mmode=0 claim_idle=0`; `# uart irq: irqs=8 claims=8 completes=8 traps_del
 spurious=0 unexpected=0 last_irq=10 last_iir=0x2 ier_off=1 plic_enable=0`; `# plic quiet: …
 external_traps=8 interrupts_delta=8 spurious=0 unexpected=0`; timer `ok 11..14`
 `ticks=1000 late=missed=0`, `scause=0x8000000000000005`, `in_range=1`; product **50/50** (không
-icount); host **46/46**; budget **344/352/344 B**/262.144; gate **569**.
+icount); host **46/46**; budget **344/352/344 B**/262144; gate **569**.
 
 **Review độc lập**: `reviewer-kt48` **DRIFT nhẹ** — code/DoD đạt, **không UNSAFE**; tự chạy host
 46/46, ktest 15/15+3/3, product 50/50, gate 569; 4 mục vá trước commit: `interrupts_delta` thành
@@ -709,11 +720,11 @@ ok9-timer-no-lost-tick ok10-timer-irq ok11-timer-drift ok12-nested timer-*-evide
   icount** vẫn chạy 50/50 ([`kt47-boot50.log`](JOURNAL/kt47-boot50.log)).
 
 **Số đo** (do script in — [`kt47-icount-ktest.log`](JOURNAL/kt47-icount-ktest.log)): ktest **12/12** +
-guard **3/3**; `# timer ticks` 100/1.000 tick `late=missed=non_monotonic=0`, `drift in_range=1`;
+guard **3/3**; `# timer ticks` 100/1000 tick `late=missed=non_monotonic=0`, `drift in_range=1`;
 `interrupts=1000 scause=0x8000000000000005 code=5`, `trap_spie_on=handler_sie_off=1000`, `sret_sie=1`;
-host **34/34**; product **50/50**; budget **272/280/272 B**/262.144; gate **569/73**.
+host **34/34**; product **50/50**; budget **272/280/272 B**/262144; gate **569/73**.
 
-**Review độc lập**: `reviewer-kt47` **APPROVE code** — tự chạy host **34/34**, ktest **2 lần liên tiếp** PASS 12/12 + 3/3 (Δ 10,0000–10,0192 ms, `late=missed=non_monotonic=0`, `interrupts=1000 scause=0x8000000000000005`, `trap_spie_on=handler_sie_off=1000`), product **50/50**, gate **569**, product `ktest-strings=0`; tái hiện độc lập flake shift tự động (`min=3.361.400 ns max=16.648.300 ns in_range=0`) ⇒ đổi `shift=6` là thật. 8 mục tài liệu/bằng chứng đã vá trước commit; 5 giới hạn phép đo ghi §10.7 + [`kt47-journal.md`](JOURNAL/kt47-journal.md) §6.
+**Review độc lập**: `reviewer-kt47` **APPROVE code** — tự chạy host **34/34**, ktest **2 lần liên tiếp** PASS 12/12 + 3/3 (Δ 10,0000–10,0192 ms, `late=missed=non_monotonic=0`, `interrupts=1000 scause=0x8000000000000005`, `trap_spie_on=handler_sie_off=1000`), product **50/50**, gate **569**, product `ktest-strings=0`; tái hiện độc lập flake shift tự động (`min=3361400 ns max=16648300 ns in_range=0`) ⇒ đổi `shift=6` là thật. 8 mục tài liệu/bằng chứng đã vá trước commit; 5 giới hạn phép đo ghi §10.7 + [`kt47-journal.md`](JOURNAL/kt47-journal.md) §6.
 
 **Không làm (đúng phạm vi)**: PLIC/UART IRQ (KT-48), SMP/PerHart (KT-49), IPI (KT-50), ASID (KT-51),
 object layer (KT-52), U-mode (KT-53), harness matrix (KT-54), conformance (KT-55), `FaultKind`/W^X
@@ -731,7 +742,7 @@ Trong lúc làm, tab ViScript commit/push `1af01abd` (ST-00) — chỉ `viscript
 `__kernel_end`; map kernel identity + nửa cao 2 MiB, physmap NX, MMIO UART/PLIC 4 KiB Device,
 `.stack` + `.trap_stack` (NOLOAD) + arena; guard page `NONE` ngay dưới `__stack_bottom`; bật `satp`
 hai bước (map xong mới `csrw satp` + `sfence.vma`), walk phần mềm ↔ phần cứng khớp; TAP page-fault
-**thật** `scause=13/15`; 50 boot product; gate 569; budget ≤ 262.144 B.
+**thật** `scause=13/15`; 50 boot product; gate 569; budget ≤ 262144 B.
 
 **Đỏ trước** ([`kt46-red-ktest.log`](JOURNAL/kt46-red-ktest.log)): `ktest.sh` đòi `1..8` + `ok 5 - mmu
 on` + `ok 6 - map layout` + `ok 7 - walk khop` + bằng chứng `# mmu:`; ảnh KT-45 chỉ có `1..5`, không
@@ -767,7 +778,7 @@ ok8-nested mmu-evidence`, `EXIT=1` — đỏ đúng lý do.
   [`kt46-boot.log`](JOURNAL/kt46-boot.log),
   [`kt46-gate-fast.log`](JOURNAL/kt46-gate-fast.log).
 - **Số đo**: host **21/21**; TAP **8/8 + 3/3**; product **50/50**; budget `.data+.bss` **168/168/176
-  B**/262.144 (`.stack=65.536`, `.stack_guard=4.096`, `.trap_stack=16.384` báo riêng); gate
+  B**/262144 (`.stack=65536`, `.stack_guard=4096`, `.trap_stack=16384` báo riêng); gate
   **569/73 PASS**; `satp=0x8000000000080415 mode=8`, root/arena `0x80415000`, guard
   `0x80400000..0x80401000` (`guard_none=1` cả 3 alias), `kernel_high_2m=1`, `physmap_2m_nx=1`,
   `uart_dev=1`, `plic_dev=1`, `walk khop pre=post=1 software=8/8` — số do script/cargo in, không
@@ -836,7 +847,7 @@ claim trap S-mode), `illegal` = host test + **trap tiêm** (ghi rõ "inject"), p
 - Ảnh sản phẩm [`kt45-boot.log`](JOURNAL/kt45-boot.log) `ok 1 - boot 1`, strings `ktest=0`;
   **50 boot** [`kt45-boot50.log`](JOURNAL/kt45-boot50.log) `# 50/50 boot sạch (smp=1)`.
   Ảnh test [`kt45-ktest.log`](JOURNAL/kt45-ktest.log) PASS.
-- Budget [`kt45-budget.log`](JOURNAL/kt45-budget.log): `data+bss=80 B`/262.144 **cả hai** ảnh;
+- Budget [`kt45-budget.log`](JOURNAL/kt45-budget.log): `data+bss=80 B`/262144 **cả hai** ảnh;
   `.stack=65536`, `.stack_guard=4096`, **`.trap_stack=16384`** báo riêng (NOLOAD).
 - Fatal path trên QEMU (tạm tiêm `scause=13`, không commit;
   [`kt45-fatal-trap.log`](JOURNAL/kt45-fatal-trap.log)): `PANIC: trap LoadPageFault scause=0xd …`
@@ -869,7 +880,7 @@ baseline `gate --fast` **569 test/73 suite PASS** (`JOURNAL/kt44-baseline-gate-f
 `v2/kernel/vifast-plat-common` (`no_std`, `#![forbid(unsafe_code)]`) với trait `Platform` tối thiểu
 (`put_str`/`halt`/`now`/`tick_hz`/`hart_id`) + `PanicHandler` dùng chung; **tách 2 ảnh** sản phẩm và
 `ktest` từ cùng crate bằng **feature** (không `cfg(target_arch)`); linker `.stack` `NOLOAD` +
-trang bảo vệ; cổng budget `llvm-size -A` `.data+.sdata+.bss+.sbss ≤ 262.144 B` cho **cả hai** ảnh;
+trang bảo vệ; cổng budget `llvm-size -A` `.data+.sdata+.bss+.sbss ≤ 262144 B` cho **cả hai** ảnh;
 `v2/docs/k3-riscv64.md` (hằng số D2-72, quy trình build/boot, "K3 mới là kernel thật").
 
 **Đỏ trước** ([`kt44-red-ktest.log`](JOURNAL/kt44-red-ktest.log)): `ktest.sh` đòi `ok 1 - ktest image`;
@@ -879,14 +890,14 @@ lỗi hạ tầng).
 
 **Kết quả**:
 - **2 ảnh từ cùng crate** ([`kt44-build.log`](JOURNAL/kt44-build.log)): `vifast-kbin-riscv64`
-  (sản phẩm, 19.216 B) và `vifast-kbin-ktest` (feature `ktest`, `required-features`, 19.080 B);
+  (sản phẩm, 19216 B) và `vifast-kbin-ktest` (feature `ktest`, `required-features`, 19080 B);
   `strings`: ảnh sản phẩm **0** chuỗi `ktest`, ảnh test **8** ⇒ tách ảnh thật (D2-08).
 - **TAP 1 boot xanh cả hai ảnh**: [`kt44-boot.log`](JOURNAL/kt44-boot.log) `ok 1 - boot 1`
   (`ok 1 - k3 boot`, `# hart=0 tick_hz=10000000`); [`kt44-ktest-boot.log`](JOURNAL/kt44-ktest-boot.log)
   `ok 1 - ktest image`; QEMU **11.1.3** (≥ sàn 9.x), OpenSBI **v1.8.1**, `-machine
   virt,aia=none,aclint=on -cpu rv64 -m 128M -smp 1`, timeout 20 s, chỉ `kill <pid>`.
 - **Budget** ([`kt44-budget.log`](JOURNAL/kt44-budget.log)): `data+bss = 0 B` cho **cả hai** ảnh
-  (trần 262.144 B), `.stack` **65.536 B** + `.stack_guard` **4.096 B** báo riêng (NOLOAD);
+  (trần 262144 B), `.stack` **65536 B** + `.stack_guard` **4096 B** báo riêng (NOLOAD);
   `run.sh`/`ktest.sh` **fail** nếu vượt. `nm`: guard `0x80202000..0x80203000`, `__stack_bottom`
   `0x80203000`, `__stack_top` `0x80213000` — guard nằm **ngay dưới** đáy stack.
   Số **0 B là thật, không phải đọc sai** — chứng minh ở [`kt44-budget-probe.log`](JOURNAL/kt44-budget-probe.log):
@@ -894,7 +905,7 @@ lỗi hạ tầng).
   có `.data/.sdata/.sbss`); `budget.sh` in `# sections-seen` + `# data+bss-sections`; khớp tên theo
   **tiền tố** nên `.data.rel.ro`/`.sbss.*` không bị bỏ sót; `--selftest` 3 fixture; **đối chứng
   dương** probe A (bản sao workspace ở `/tmp/kt44-probe`, cùng linker script) thêm `.data` 16 B +
-  `.bss` 1.024 B ⇒ `data+bss=1040`, exit 0; **đối chứng âm** probe B `.bss` 307.200 B ⇒
+  `.bss` 1024 B ⇒ `data+bss=1040`, exit 0; **đối chứng âm** probe B `.bss` 307200 B ⇒
   `data+bss=307216`, exit 1 (`budget: VƯỢT`).
 - **Host test logic dùng chung** (D2-72 Q12): `cargo test -p vifast-plat-common` **3/3**
   (`platform_writer_in_dung_thu_tu`, `panic_handler_in_vi_tri_va_halt_1`,
@@ -928,9 +939,9 @@ verdict reviewer đạt (D2-37).
 
 **Vào**: READY; KT-35..42 DONE; HEAD `66d51f89`; `git rev-list --count HEAD..origin/main` = **0**;
 `v2/` sạch (chỉ `viscript/`+`review/` của tab khác — không chạm); baseline = KT-42 **569/73**, L1
-2.635 ms.
+2635 ms.
 
-**Mục tiêu** (K2-PLAN §4 + D2-65 Q10): `nightly --l1` **100k seed × smp 1/2/4/8** (400.000 lượt)
+**Mục tiêu** (K2-PLAN §4 + D2-65 Q10): `nightly --l1` **100k seed × smp 1/2/4/8** (400000 lượt)
 với driver L1 **phủ thêm VM** (map/unmap/walk/shootdown/fault; giữ 64 op/seed, cùng seed cùng
 trace); **mutation 12 ca §7.2 + 4+ ca VM** (gồm AP→BSP); **Miri** toàn bộ tập K2 + `vifast-pte` +
 `vifast-sync`; `gate --fast` ≥ 569 + `check_scn` 26/16 + fixtures âm; **K2-DOD** với số đo thật và
@@ -943,10 +954,10 @@ nợ có chủ; câu "K2 không phải kernel thật".
   `tlb_violations()==0`, cuối mỗi lượt `check_vm()` (8 checker). **Đỏ trước**:
   [`kt43-red-driver-vm.log`](JOURNAL/kt43-red-driver-vm.log) (bỏ 4 nhánh VM ⇒ panic đúng bất biến
   phủ VM).
-- **100k×4 PASS**: [`kt43-l1-100k.log`](JOURNAL/kt43-l1-100k.log) — 400.000 lượt, **2 lần/seed**
-  (400.000 cặp trace khớp), **0 panic/0 vi phạm TLB-safety** trên **51,2 triệu** op, wall
-  **690,69 s**; counters: `ipc_sent` **4.639.586**, `ipc_delivered` 865.478, `ipc_dropped`
-  2.918.141; VM map **1.028.942**, walk 286.584, unmap/shootdown 540.715, fault 924.833. Bản chạy
+- **100k×4 PASS**: [`kt43-l1-100k.log`](JOURNAL/kt43-l1-100k.log) — 400000 lượt, **2 lần/seed**
+  (400000 cặp trace khớp), **0 panic/0 vi phạm TLB-safety** trên **51,2 triệu** op, wall
+  **690,69 s**; counters: `ipc_sent` **4639586**, `ipc_delivered` 865478, `ipc_dropped`
+  2918141; VM map **1028942**, walk 286584, unmap/shootdown 540715, fault 924833. Bản chạy
   100k **đầu** dừng ở guard per-seed KT-33 (`seed 67453/smp 2 ipc_sent=1`) — đã chỉnh **ngưỡng
   phủ của driver** (per-seed giữ `sent ≥ 1` + bảo toàn; ngưỡng "không tautology" xuống tổng smp
   `sent > 5×seeds`), **không** nới bất biến model/seed/op; bản hỏng giữ ở
@@ -959,7 +970,7 @@ nợ có chủ; câu "K2 không phải kernel thật".
   lại **toàn bộ**; log đầu giữ ở `kt43-mutation-attempt1.log` (không dùng).
 - **Miri 146 test/0 failed**: 7 tệp K2 (57) + lib 64 + pte 9 + sync 16 + driver mẫu nhỏ; thêm
   `kt36..kt39` + `vifast-pte` vào danh sách `nightly --only-miri`.
-- **Gate PASS 569/0**, L1 **1.427 ms** ([`kt43-gate-fast.log`](JOURNAL/kt43-gate-fast.log)); wall
+- **Gate PASS 569/0**, L1 **1427 ms** ([`kt43-gate-fast.log`](JOURNAL/kt43-gate-fast.log)); wall
   505,76 s (wall host — T-INFRA); `.scn` 26 tệp/16 nhóm + 5/5 fixture âm; `git diff spec/` rỗng.
 - **K2-DOD** [`reports/K2-DOD.md`](reports/K2-DOD.md): D1..D11 ĐẠT, nợ có chủ (model-only 1 luồng,
   TLB/PTE/IPI thật = K3, `Busy`/`FaultKind` model-only, pager/COW = K3), câu "K2 **không** phải
@@ -968,7 +979,7 @@ nợ có chủ; câu "K2 không phải kernel thật".
 **Review độc lập**: `reviewer-kt43` **DRIFT** (4 mục) → đã vá: **D2-70** (lead) + `ipc_min`/
 `ipc_median` + log 10k; K2-DOD final (sửa Miri driver/kt41-42/AP→BSP/diff); lưu harness +
 `kt43-mutation-diff.md`; D8 honest (driver smoke không hoàn tất, không claim). Chạy lại
-`gate --fast` **569/0**, L1 **1.427 ms**. Đề xuất: reviewer-kt43 xác nhận ⇒ **K2 DONE (đề xuất)**;
+`gate --fast` **569/0**, L1 **1427 ms**. Đề xuất: reviewer-kt43 xác nhận ⇒ **K2 DONE (đề xuất)**;
 Agent 0 lật QUEUE. Không tự lật (D2-37).
 
 
@@ -1007,12 +1018,12 @@ Miri; **không** sửa `spec/`/test cũ/21 `.scn` cũ, không unsafe/dependency,
   VSpace, TLB 2 hart, shootdown) + `wx_recount` khớp; `vm_check` ở cuối cả 5 kịch bản.
 - **Docs** `v2/docs/k2-vm.md` **§16** (kịch bản/nhóm, quy ước runner, `check_vm` + chi phí,
   self-test, shared read-only, log đỏ, cổng/Miri, ranh giới).
-- **Cổng**: [`kt42-gate-fast.log`](JOURNAL/kt42-gate-fast.log) **PASS 569/73**, L1 2.635 ms;
+- **Cổng**: [`kt42-gate-fast.log`](JOURNAL/kt42-gate-fast.log) **PASS 569/73**, L1 2635 ms;
   baseline 562/71. `git diff spec/` **rỗng**; không `#[ignore]`/unsafe/dep; 21 `.scn` cũ nguyên.
 - **Miri**: `kt42_vmcheck` 1/1 (32,12 s) + `--lib check_vm_` 1/1 (3,37 s)
   ([`kt42-miri.log`](JOURNAL/kt42-miri.log), MIRI1/2_EXIT=0).
 
-**Reviewer `reviewer-kt42`: APPROVE** (tự chạy 5/5 + 1/1, gate 569/73 L1 1.499 ms, scn-check 26/16, fixtures 5/5, spec rỗng; `check_vm` đủ 8 checker, per-op nguyên vẹn +117/−0, self-test 2 lỗi thật; 5 `.scn` 23/27/22/17/18 bước, runner 21 nhánh thật). Đã sửa 3 ghi chú P3 trước commit (đếm 21 op; verdict; lệch chữ per-op dùng bộ checker cũ không `wx_recount` — `check_vm` đầy đủ ở L0/`.scn`/cổng, tương đương phủ, **không nới**); mục số `.scn` 22..26 do Agent 0 chốt **D2-69** (thay G5 "≥30").
+**Reviewer `reviewer-kt42`: APPROVE** (tự chạy 5/5 + 1/1, gate 569/73 L1 1499 ms, scn-check 26/16, fixtures 5/5, spec rỗng; `check_vm` đủ 8 checker, per-op nguyên vẹn +117/−0, self-test 2 lỗi thật; 5 `.scn` 23/27/22/17/18 bước, runner 21 nhánh thật). Đã sửa 3 ghi chú P3 trước commit (đếm 21 op; verdict; lệch chữ per-op dùng bộ checker cũ không `wx_recount` — `check_vm` đầy đủ ở L0/`.scn`/cổng, tương đương phủ, **không nới**); mục số `.scn` 22..26 do Agent 0 chốt **D2-69** (thay G5 "≥30").
 
 **Đề xuất: REVIEW** (chờ Agent 0 xác nhận; không tự DONE, không lật QUEUE — D2-37).
 **YC/Follow-up**: (1) KT-43 cổng cuối K2 — 100k×4 + mutation (4 còn lại) + soak + DoD; (2) K3
@@ -1050,7 +1061,7 @@ dependency; không sửa test cũ ngoài cập nhật cơ học theo D2-65 Q6.
 - **Docs**: `v2/docs/k2-vm.md` **§15** (kiểu dữ liệu, `vm_touch`, bảng `Permission`/`Wx` gồm
   `W+NX`, `va` không căn, `check_fault`, C2, 9 test/property, cập nhật test cũ, ranh giới).
 - **Cổng**: [`kt41-check.log`](JOURNAL/kt41-check.log) PASS; [`kt41-gate-fast.log`](JOURNAL/kt41-gate-fast.log)
-  **PASS 562 test/71 suite**, L1 1.428 ms (đợt 2 47.758 ms — host load `T-INFRA`); `kt41_vmfault`
+  **PASS 562 test/71 suite**, L1 1428 ms (đợt 2 47758 ms — host load `T-INFRA`); `kt41_vmfault`
   9/9; lib 63/63; `git diff spec/` **rỗng**.
 - **Mutation tự kiểm** (nit reviewer): làm tròn `va` trong payload ⇒ test 1 **đỏ** đúng assertion
   ([`kt41-red-va-khong-can.log`](JOURNAL/kt41-red-va-khong-can.log)), khôi phục `cp` + hash khớp,
@@ -1128,7 +1139,7 @@ còn lại của K2-PLAN + soak; (4) K3 thay hộp thư/ack bằng IPI/SBI thậ
 **Vào**: READY (`agentctl next --project v2` trả KT-38) · HEAD `d240026` ([KT-00] lật KT-37 DONE,
 512 test) · `git rev-list --count HEAD..origin/main` = **0** · working tree có `viscript/` của tab
 khác (**không chạm**, chỉ stage `v2/`) · baseline `gate --fast` **PASS 512 test/67 suite**, L1
-1.000 seed **1463 ms** ([`JOURNAL/kt38-baseline-gate-fast.log`](JOURNAL/kt38-baseline-gate-fast.log)).
+1000 seed **1463 ms** ([`JOURNAL/kt38-baseline-gate-fast.log`](JOURNAL/kt38-baseline-gate-fast.log)).
 Trong lúc làm, tab ViScript commit `f158085`/`cc7b096` lên `main` (không đụng `v2/`).
 
 **Mục tiêu** (K2-PLAN §3 KT-38 + §2 Q4/Q9, D2-65/66): `VSpace` object + **một** root PageTable
@@ -1183,7 +1194,7 @@ khác (**không chạm**, chỉ stage `v2/`) · baseline `gate --fast` **PASS 49
 2), thiếu bảng cấp trên ⇒ `MissingPageTable`; trùng ⇒ `AlreadyMapped`; lệch căn ⇒ `Alignment`;
 range ⇒ `RangeError`; unmap chưa map ⇒ `NotMapped`; unmap gỡ bảng còn con ⇒ `HasChildren`; lưu
 rights/attrs **từng mapping** (không suy từ cap); bộ đếm `maps/mapped_w/mapped_x` toàn cục;
-walk ngược VA→PA 100% sau 10.000 op; `check_pages` sau mỗi op; Miri; gate 494+.
+walk ngược VA→PA 100% sau 10000 op; `check_pages` sau mỗi op; Miri; gate 494+.
 
 **Không** làm: VSpace/ASID/TLB (KT-38/40), W^X/protect (KT-39), VM fault (KT-41), `.scn`/
 `check_vm` (KT-42), `spec/`, `vifast-model`, `.scn`, QUEUE/DECISIONS/AGENTS, `viscript/`; không
@@ -1199,7 +1210,7 @@ walk ngược VA→PA 100% sau 10.000 op; `check_pages` sau mỗi op; Miri; gate
   `page_table_{map,map_obj,unmap,walk,attach,detach,count,info,pte_raw}`, `check_pages` (5 nhóm
   bất biến) trong `sched_after_op`, `finalise_page_table` + `revoke_children` kiểm `HasChildren`
   atomic; `tests/kt37_pagetable.rs` **(mới, 10 test)** gồm bảng chân trị **7 mã lỗi × 3 cỡ**,
-  property **10.000 op** (walk ngược 100% + bộ đếm + `check_pages` mỗi op) và 100×10 vòng không
+  property **10000 op** (walk ngược 100% + bộ đếm + `check_pages` mỗi op) và 100×10 vòng không
   rò; 4 unit âm KT-37 (`check_pages` bắt `mapped`/Frame counter/`attached`/bảng chết còn dữ
   liệu/PTE sai, `pa` lệch căn ⇒ `Alignment`).
 - **Docs**: `v2/docs/k2-vm.md` **§11** (object/cây, layout PTE, API, thứ tự kiểm + 7 mã lỗi, 5
@@ -1252,13 +1263,13 @@ frame **không cấp byte thật** (1 GiB vẫn 0 byte arena); frame chết ⇒ 
   `check_bytes`/`untyped_allocated` **bỏ qua** Frame (không tiêu byte arena).
 - **Test**: `tests/kt36_frame.rs` **12 test** (cỡ lạ; 3 cỡ × GetAddress/meta/bộ đếm; biên
   `0/2^12/2^21/2^30`; pa lệch 1 ⇒ `Alignment`; 1 GiB không ăn byte; trộn cỡ giảm dần; frame chết
-  sạch; revoke ⇒ `HasChildren` atomic; bất biến bộ đếm; ownership/chồng `pa`; **10.000 retype +
-  huỷ**; property **10.000 seed**) + **5 unit test âm** `check_frames` + 1 test `FrameArea::carve`.
+  sạch; revoke ⇒ `HasChildren` atomic; bất biến bộ đếm; ownership/chồng `pa`; **10000 retype +
+  huỷ**; property **10000 seed**) + **5 unit test âm** `check_frames` + 1 test `FrameArea::carve`.
 - **Docs**: `v2/docs/k2-vm.md` **§10** (6 trường, cửa sổ PA 1 GiB, thứ tự kiểm `Retype`,
   `GetAddress`, finalise/`check_frames`, ranh giới không làm).
 - **Cổng**: [`kt36-gate-fast.log`](JOURNAL/kt36-gate-fast.log) **PASS 494 test/66 suite (65 suite cũ + `kt36_frame`)**, L1
   **769 ms**; [`kt36-check.log`](JOURNAL/kt36-check.log) PASS; [`kt36-miri.log`](JOURNAL/kt36-miri.log)
-  Miri **12/12** (36,10 s) + **5/5** (2,50 s). Hồi quy cổng tự bắt (L1 54.513 ms khi `check_frames` chưa có cửa sổ
+  Miri **12/12** (36,10 s) + **5/5** (2,50 s). Hồi quy cổng tự bắt (L1 54513 ms khi `check_frames` chưa có cửa sổ
   nhanh) đã sửa — xem `JOURNAL/kt36-journal.md` §4.1.
 
 **Quyết định có thể gây tranh luận** (chi tiết `JOURNAL/kt36-journal.md` §3 + `k2-vm.md` §10):
@@ -1270,9 +1281,9 @@ frame **không cấp byte thật** (1 GiB vẫn 0 byte arena); frame chết ⇒ 
 3. `Revoke` Untyped khi Frame còn mapping ⇒ **`HasChildren` atomic** (K2 chưa có ngược
    Frame→PageTable để tự unmap; unmap thật là KT-39).
 4. Bất biến bộ đếm KT-36 là `w ≤ maps && x ≤ maps` — **chưa** `w + x ≤ maps` (luật W^X là KT-39).
-5. Test 10.000 retype+huỷ = **100 vòng × 100 Frame** (mỗi vòng một `Machine`): bất biến per-op của
+5. Test 10000 retype+huỷ = **100 vòng × 100 Frame** (mỗi vòng một `Machine`): bất biến per-op của
    mô hình là O(#object đã từng cấp) nên dồn 10k object vào một mô hình là O(n²) ~56 s mà không
-   kiểm thêm gì; vẫn là **10.000** lần retype + 10.000 lần huỷ thật.
+   kiểm thêm gì; vẫn là **10000** lần retype + 10000 lần huỷ thật.
 
 **Commit**: `9c54bcf` `[KT-36]`, đã push (`ba3ae01..9c54bcf main -> main`) — **DONE-mã, chờ Agent 0
 lật sổ**; `git rev-list --count HEAD..origin/main` = 0 sau push. Gate/Miri chạy lại trên **cây cuối**
@@ -1313,13 +1324,13 @@ không tạo `spec/kernel.toml`; không đổi ABI.
 - **Test** `tests/kt35_pte.rs` **9 test**: hằng số Q1; roundtrip cỡ/bits/byte; **size_bits lạ
   0..=255** ⇒ chỉ 12/21/30 OK, còn lại `InvalidArgument`; `va=1<<38 ⇒ [256,0,0]`,
   `u64::MAX ⇒ [511,511,511]` (cắt, không panic); `PteArray<512>` 4096 B + mọi chỉ số biên/`usize::MAX`;
-  property **10.000 VA/shape** tất định (LCG) dựng lại bit 12..38; Miri chạy 256 vòng.
+  property **10000 VA/shape** tất định (LCG) dựng lại bit 12..38; Miri chạy 256 vòng.
 - **Docs** [`v2/docs/k2-vm.md`](../docs/k2-vm.md): 7 hằng số `[TK]` (PAGE_SIZE_BITS=[12,21,30],
   PTE_LEVELS=3, VA_BITS=39, ASID_BITS=8, TLB_ENTRIES_PER_HART=16, MAX_FRAMES_PER_VSPACE=4096,
   MAX_MAP_DEPTH=3), hình 3 cấp 9/9/9/12 + bảng lá theo cỡ + căn lề `pa/va % frame_size == 0`,
   bảng **7 mã lỗi dùng lại** (4/6/10/11/12/13/19; `InvalidArgument` 5 là mã chung cho `size_bits`),
   Q1–Q8 theo D2-65, **"K2 không phải kernel thật"**, `spec/` không đổi + `kernel.toml` chưa tạo.
-- **Gate** `gate --fast` **PASS 477 test/65 suite**, L1 1.000 seed **607 ms**, fmt/clippy sạch,
+- **Gate** `gate --fast` **PASS 477 test/65 suite**, L1 1000 seed **607 ms**, fmt/clippy sạch,
   luật R1..R5 OK, gen-check ON ([`JOURNAL/kt35-gate-fast.log`](JOURNAL/kt35-gate-fast.log), chạy
   **sau** fix B1/B2). Hai lần đỏ trước đó: (a) **R2** bắt **chữ** `cfg(target_arch)` trong
   doc-comment (grep thô) — sửa chú thích, log
@@ -1359,7 +1370,7 @@ không `git add -A`, không `viscript/`.
 ## KT-34 — đóng **C2** cuối K1c: cap `Reply` đang active, bất biến liên kết Reply, 100k×4 (D2-63)
 
 **Vào**: READY (D2-63) · HEAD `43c2e3c` · `git rev-list --count HEAD..origin/main` = 0 · baseline
-`gate --fast` **PASS 461 test/62 suite**, L1 **38.973 ms** (máy tải; các gate trước 611–747 ms), wall **236,86 s**
+`gate --fast` **PASS 461 test/62 suite**, L1 **38973 ms** (máy tải; các gate trước 611–747 ms), wall **236,86 s**
 ([`JOURNAL/kt34-baseline-gate-fast.log`](JOURNAL/kt34-baseline-gate-fast.log)).
 
 **Mục tiêu** (D2-63): (1) `recv`/`call` **từ chối** cap `Reply` đang `caller=Some` (**trước** khi
@@ -1388,10 +1399,10 @@ không dùng lại cap Reply active trong driver; không "sửa test cho xanh".
   `kt27_notification` **+1** + `kt28_waitaddr` **+1** property **6/6 hoán vị** (C2 hai chiều);
   `kt22_mailbox` đổi rig 1 → **3 Reply riêng** (3 `Recv` cần 3 Reply chưa bind — one-shot; kỳ
   vọng FIFO giữ nguyên); driver `l1_k1c` chỉ cấp Reply **rảnh** + `check_reply_links` mỗi op.
-- **10k×4 PASS**: 40.000 lượt, **661 s**, `ipc_sent` 144.977/144.871/144.552/145.056; `delivered`
-  27.845/28.155/28.177/28.404; `sent>1` mọi lượt, `delivered>0` mọi smp
+- **10k×4 PASS**: 40000 lượt, **661 s**, `ipc_sent` 144977/144871/144552/145056; `delivered`
+  27845/28155/28177/28404; `sent>1` mọi lượt, `delivered>0` mọi smp
   ([`JOURNAL/kt34-l1-10k.log`](JOURNAL/kt34-l1-10k.log)).
-- **100k×4 PASS**: 400.000 lượt, `ipc_sent` **5.786.296**, `ipc_delivered` 1.123.598, `ipc_dropped` 3.748.173, wall **6306,38 s (105m06,38)**, cùng seed ⇒ cùng trace, `sent>1` mọi lượt, `delivered>0` mọi smp, **0 panic/0 vi phạm `check_reply_links`** ([`JOURNAL/kt34-l1-100k.log`](JOURNAL/kt34-l1-100k.log))
+- **100k×4 PASS**: 400000 lượt, `ipc_sent` **5786296**, `ipc_delivered` 1123598, `ipc_dropped` 3748173, wall **6306,38 s (105m06,38)**, cùng seed ⇒ cùng trace, `sent>1` mọi lượt, `delivered>0` mọi smp, **0 panic/0 vi phạm `check_reply_links`** ([`JOURNAL/kt34-l1-100k.log`](JOURNAL/kt34-l1-100k.log))
 - **Gate cuối PASS 468 test/62 suite**, L1 **275 ms**, wall **239,32 s** (wall host)
   ([`JOURNAL/kt34-gate-fast.log`](JOURNAL/kt34-gate-fast.log)).
 - **Miri 3 tập ảnh hưởng PASS**: `kt25_ipc2` 29/111,28 s, `kt27_notification` 27/66,02 s,
@@ -1410,8 +1421,8 @@ không dùng lại cap Reply active trong driver; không "sửa test cho xanh".
   ([`JOURNAL/kt34-miri-kt22_mailbox.log`](JOURNAL/kt34-miri-kt22_mailbox.log), …).
 - **F2**: bảng §8 K1C-DOD sửa **29/27/13, tổng 138** (khớp gate 468).
 - **F3**: §7 C2 ghi rõ **1 ca đỏ trước + 5 test** (`kt34-red-reply-reuse.log`: `1 failed; 26 filtered out`).
-- **F4**: bảng 100k thêm `ipc_pending` cuối lượt (suy ra từ bất biến): 218.449/229.074/232.012/234.990,
-  **tổng 914.525** ⇒ 5.786.296 = 1.123.598 + 914.525 + 3.748.173.
+- **F4**: bảng 100k thêm `ipc_pending` cuối lượt (suy ra từ bất biến): 218449/229074/232012/234990,
+  **tổng 914525** ⇒ 5786296 = 1123598 + 914525 + 3748173.
 - **F5**: ghi chú **HEAD của log gate**: `kt34-gate-fast.log` chạy ở `43c2e3c` + cây KT-34 chưa
   commit (**nội dung `v2/` == `40a8e5a`**); reviewer-kt34b đã chạy lại `gate --fast` tại `40a8e5a`
   — **PASS 468 test**, khớp.
@@ -1455,7 +1466,7 @@ không `#[ignore]`/`#[allow]`/unsafe/dependency; không commit đột biến; kh
   [`JOURNAL/kt33-miri-all.log`](JOURNAL/kt33-miri-all.log).
 - **Driver siết** (chỉ `tests/l1_k1c.rs`, +32/−18): `ipc_sent > 1` từng lượt (prologue chỉ 1 ⇒
   64 op phải sinh thêm), `ipc_delivered > 0` tổng mỗi smp, panic `kiem` kèm `seed/smp`. **10k×4
-  PASS**: 40.000 lượt, **658,60 s**, bộ đếm **trùng khít** KT-32 (144.977/27.850/95.461; …) ⇒
+  PASS**: 40000 lượt, **658,60 s**, bộ đếm **trùng khít** KT-32 (144977/27850/95461; …) ⇒
   không đổi hành vi/trace, chỉ mạnh hơn bất biến. Log
   [`JOURNAL/kt33-l1-10k.log`](JOURNAL/kt33-l1-10k.log).
 - **Gate cuối PASS 461 test/62 suite**, L1 **653 ms** (⇒ **đạt** ngưỡng 60 s của QD §5.2 cho L1),
@@ -1479,7 +1490,7 @@ wall host) — chờ Agent 0 lật `KT-33 DONE`.
 
 **Vào**: READY · HEAD khi mở `83df94a` (khi commit `efa787f` — hai commit `739fc3e`/`efa787f`
 dòng ViScript đến trong lúc chạy, **không chạm `v2/`**) · `git rev-list --count HEAD..origin/main`
-= 0 · baseline `gate --fast` PASS **461 test**, wall **233,94 s**, L1 **2.846 ms**
+= 0 · baseline `gate --fast` PASS **461 test**, wall **233,94 s**, L1 **2846 ms**
 ([`JOURNAL/kt32-baseline-gate-fast.log`](JOURNAL/kt32-baseline-gate-fast.log)).
 
 **Mục tiêu**: mở rộng **chỉ** driver [`sim/vifast-sim/tests/l1_k1c.rs`](sim/vifast-sim/tests/l1_k1c.rs)
@@ -1495,14 +1506,14 @@ QUEUE/DECISIONS/AGENTS/`viscript/`, không `#[ignore]`/`unsafe`/dependency.
   `NBSend` bảo đảm `ipc_sent ≥ 1` từ seed đầu. Sau **mỗi** op (kể cả prologue):
   `check_sched/check_harts/check_ipc/check_waitaddr/check_mailboxes/check_caps`; cuối lượt
   `sent == delivered+pending+dropped`; 2 lần/seed + `assert_eq` trace **và** bộ đếm.
-- **100k×4 PASS**: 4 dòng `# L1 OK: smp 1/2/4/8`, **400.000 lượt**, wall **6596,88 s**
-  (109,95 phút), `ipc_sent` **5.786.297** (14,47/seed), `ipc_delivered` **1.123.586**,
-  `ipc_dropped` **3.748.540**, `1 passed; 0 failed`, 0 panic (51,2 triệu lần kiểm) —
+- **100k×4 PASS**: 4 dòng `# L1 OK: smp 1/2/4/8`, **400000 lượt**, wall **6596,88 s**
+  (109,95 phút), `ipc_sent` **5786297** (14,47/seed), `ipc_delivered` **1123586**,
+  `ipc_dropped` **3748540**, `1 passed; 0 failed`, 0 panic (51,2 triệu lần kiểm) —
   [`JOURNAL/kt32-l1-100k-mixed.log`](JOURNAL/kt32-l1-100k-mixed.log).
 - **1k×4** PASS 62,54 s (`kt32-l1-1k-mixed.log`); **10k×4** PASS 503,02 s (`kt32-l1-10k-mixed.log`).
-- **Gate cuối**: PASS **461 test**, L1 1.000 seed **269 ms**, wall **124,25 s**, fmt/clippy
+- **Gate cuối**: PASS **461 test**, L1 1000 seed **269 ms**, wall **124,25 s**, fmt/clippy
   `-D warnings` sạch ([`JOURNAL/kt32-gate-fast.log`](JOURNAL/kt32-gate-fast.log)); driver cũng
-  chạy trong L0 (1.000 seed/1 hart) **4,71 s** `1 passed`.
+  chạy trong L0 (1000 seed/1 hart) **4,71 s** `1 passed`.
 - **Review độc lập**: `reviewer-kt32` (lead spawn, read-only) **APPROVE** — tự chạy 100 seed
   (14,67 ipc_sent/seed), 1k×4 64,03 s (bộ đếm khớp byte-for-byte log tác giả), gate 461; xác
   nhận đủ 10 op/6 checker/tất định/1 tệp test/không ignore-unsafe-dep.
@@ -1527,7 +1538,7 @@ dependency/`unsafe`/`#[ignore]`/`#[allow]`/`#[should_panic]`; không "sửa test
 lật QUEUE.
 
 **Kết quả**:
-- **100k×4 L1 PASS**: 4 dòng `# L1 OK: smp 1/2/4/8, 100000 seed × 64 op`, tổng **400.000 lượt**
+- **100k×4 L1 PASS**: 4 dòng `# L1 OK: smp 1/2/4/8, 100000 seed × 64 op`, tổng **400000 lượt**
   (`# L1 OK: 400000 lượt (smp [1, 2, 4, 8], seeds 100000)`), wall **5043,84 s** (84,06 phút;
   `[ƯL]` plan 20 phút — **T-INFRA** dự toán, không giảm seed). Driver chạy **2 lần/seed** và
   `assert_eq!(a, b)` ⇒ **cùng seed cùng trace**; `check_sched`/`check_harts`/`check_ipc` sau **mỗi**
@@ -1547,7 +1558,7 @@ lật QUEUE.
   [`JOURNAL/kt31-miri-all.log`](JOURNAL/kt31-miri-all.log).
 - **Gate cuối PASS 461 test**, L1 720 ms, wall **254,19 s** ⇒ **T-INFRA** (> 60 s, tải máy,
   không nới ngưỡng). Log [`JOURNAL/kt31-gate-fast.log`](JOURNAL/kt31-gate-fast.log).
-- **Parity 10k PASS**: `kt11_diff_model_va_sim_10000_seed` 10.000 seed × 24 op, 15,52 s. Log
+- **Parity 10k PASS**: `kt11_diff_model_va_sim_10000_seed` 10000 seed × 24 op, 15,52 s. Log
   [`JOURNAL/kt31-parity-10k.log`](JOURNAL/kt31-parity-10k.log).
 - **Bảng DoD K1c**: [`reports/K1C-DOD.md`](reports/K1C-DOD.md) — C1 **đạt một phần** (100k không
   phủ IPC), C2 đạt (model 1 luồng), C3 **6/6 ca** (không đủ 12 mục §7.2), C4 **ĐẠT**; 60/60 mục
@@ -1619,7 +1630,7 @@ qua `Mailbox::Wake` + ngưỡng `published.cur_prio`; guard luật 3.
 `current_hart`/`set_current_hart`, `publish`/`published` + guard luật 3, `migrate_count`,
 `mailbox_len`; (4) `push_step`/`push_migration`/`apply_migrate` + `post_mail` kiểm Migrate; (5)
 wake chéo hart + preempt theo `cur_prio`; (6) `check_smp`/`check_harts` + `sched_after_op`/`dispatch`;
-(7) test 11 + fuzz 1.000×64×4 + driver `l1_k1c` + `nightly --l1`; (8) doc `k1c-smp.md`, gate,
+(7) test 11 + fuzz 1000×64×4 + driver `l1_k1c` + `nightly --l1`; (8) doc `k1c-smp.md`, gate,
 Miri, JOURNAL, review, commit.
 
 **Kết quả**: gate PASS **442 test/58 suite**, L1 **767 ms**; Miri `kt29_smp` **13/13** (261,03 s)
@@ -1644,7 +1655,7 @@ Notification mới; không sửa `spec/`, `vifast-model`, `.scn`, QUEUE, DECISIO
 không dependency/`unsafe`/`#[allow]`/`#[ignore]`; không đổi ABI.
 **Bước**: (1) baseline; (2) test đỏ `tests/kt28_waitaddr.rs` (E0432/E0599) + probe; (3) bảng băm +
 `addr_words`; (4) `wait_addr`/`wake_addr`/`set_addr_word`/`addr_word`; (5) `check_waitaddr` +
-`sched_after_op`; (6) `unlink_tcb_queues`/sweep theo bucket; (7) test 12 + fuzz 1.000×64; (8) doc
+`sched_after_op`; (6) `unlink_tcb_queues`/sweep theo bucket; (7) test 12 + fuzz 1000×64; (8) doc
 `v2/docs/k1c-waitaddr.md` + Miri list; (9) gate + Miri + mutation + log; (10) review độc lập → commit.
 **Kết quả**: test đỏ [`JOURNAL/kt28-red-compile.log`](JOURNAL/kt28-red-compile.log) (24 lỗi
 E0432/E0599) + [`JOURNAL/kt28-red-semantics.log`](JOURNAL/kt28-red-semantics.log); `check` PASS
@@ -1660,7 +1671,7 @@ khi frame chết — chưa có vòng đời Frame (K2 Frame thật, K3 xem lại
 lỗi giữa chừng (hiện không xảy ra: mọi nút đều `BlockedOnAddress` theo bất biến); (d) docs §6:
 "giữ khoá = một hàm" **chấp nhận cho K1c**, `WaitAddr` trên TCB `suspended` ⇒ `IllegalOperation`
 là **nợ K3 conformance**, giữ `InvalidArgument`, `set_addr_word`/`addr_word` là **model API**.
-**Commit**: `ff94538` (đã push `origin/main`, 14 tệp: +3.348/−25 — gồm 12 test `kt28_waitaddr`, 2
+**Commit**: `ff94538` (đã push `origin/main`, 14 tệp: +3348/−25 — gồm 12 test `kt28_waitaddr`, 2
 unit checker, doc `v2/docs/k1c-waitaddr.md`, `v2/bin/v2` Miri list, log `JOURNAL/kt28-*`).
 **Trạng thái**: **REVIEW → chờ Agent 0 lật** (reviewer độc lập `reviewer-kt28` verdict **APPROVE**
 2026-11-13); **không** tự DONE, **không** lật QUEUE.
@@ -1684,14 +1695,14 @@ ngữ nghĩa; (2) `NotificationState`/`TcbData.notif`/`NotificationValue`; (3) `
 `wait`/`poll`/`word`/`badge`/`bound_sc`; (4) `recv`/`nb_recv`/`send`/`nb_send` nhánh Notification;
 (5) bind TCB 1:1 + `SchedContext.Bind` 1:1 + dọn khi cap/SC chết; (6) `check_notifications` +
 `block_current` ghi waiter; (7) `scenario.rs` `Step::{Signal, WaitNotification, PollNotification}`;
-(8) `kt27_scn.rs` đọc 21; (9) fuzz 1.000 seed × 64 op; (10) gate + Miri + docs + STATE/JOURNAL.
+(8) `kt27_scn.rs` đọc 21; (9) fuzz 1000 seed × 64 op; (10) gate + Miri + docs + STATE/JOURNAL.
 
 **Commit**: `093b986` (đã push `origin/main`). **Kết quả**: test đỏ [`JOURNAL/kt27-red-compile.log`](JOURNAL/kt27-red-compile.log) (44 lỗi:
 1×E0432 + 43×E0599) + [`JOURNAL/kt27-red-semantics.log`](JOURNAL/kt27-red-semantics.log) (probe
 tạm); `gate --fast` **PASS 413 test/55 suite**, L1 738 ms ([`JOURNAL/kt27-gate-fast.log`](JOURNAL/kt27-gate-fast.log));
 Miri `kt27_notification` **PASS 26/26** ([`JOURNAL/kt27-miri.log`](JOURNAL/kt27-miri.log)); reviewer-kt27 **APPROVE**
 (1 yêu cầu `reset_ipc_error` đã sửa + test); fuzz
-**1.000 seed × 64 op** bất biến `check_sched`/`check_ipc`/`check_notifications`/`check_caps`/
+**1000 seed × 64 op** bất biến `check_sched`/`check_ipc`/`check_notifications`/`check_caps`/
 `check_all_bytes` sau mỗi bước + cùng seed cùng trace; `.scn` 21 chạy qua runner. Chi tiết DoD 1..8
 + 8 quyết định mô hình + giới hạn K3: [`JOURNAL/kt27-journal.md`](JOURNAL/kt27-journal.md), docs
 [`../docs/k1c-notification.md`](../docs/k1c-notification.md).
@@ -1713,7 +1724,7 @@ dependency/`unsafe`/`#[allow]`/`#[ignore]`; không đổi ABI.
 (2) `tcb.rs` 4 FaultKind; (3) `kobj.rs` `inject_fault`/delivery fault Call+Reply/`tcb_resume_with_regs`/
 `tcb_last_fault`/`tcb_regs` + nới `check_mailboxes` cho fault-Call; (4) `procsrv_model.rs`; (5)
 `scenario.rs` `Step::{Fault, ReplyFault, ResumeWithRegs}`; (6) `kt26_scn.rs` đọc 13/14/20; (7) fuzz
-1.000 seed × 64 op; (8) gate + Miri + mutation "resume không ghi MR"; (9) `v2/docs/k1c-fault.md`,
+1000 seed × 64 op; (8) gate + Miri + mutation "resume không ghi MR"; (9) `v2/docs/k1c-fault.md`,
 STATE/JOURNAL, review độc lập rồi commit/push.
 
 **Kết quả**: test đỏ [`JOURNAL/kt26-red-compile.log`](JOURNAL/kt26-red-compile.log) (53 lỗi:
@@ -1721,7 +1732,7 @@ STATE/JOURNAL, review độc lập rồi commit/push.
 tạm); `gate --fast` **PASS 386 test/53 suite**, L1 713 ms ([`JOURNAL/kt26-gate-fast.log`](JOURNAL/kt26-gate-fast.log));
 Miri `kt26_fault` **PASS 24/24** ([`JOURNAL/kt26-miri.log`](JOURNAL/kt26-miri.log));
 đột biến "resume không ghi MR" ⇒ 3 test resume **đỏ** rồi khôi phục
-([`JOURNAL/kt26-mutation-resume.log`](JOURNAL/kt26-mutation-resume.log)); fuzz **1.000 seed × 64 op**
+([`JOURNAL/kt26-mutation-resume.log`](JOURNAL/kt26-mutation-resume.log)); fuzz **1000 seed × 64 op**
 bất biến sau mỗi bước + cùng seed cùng trace; `.scn` 13/14/20 chạy qua runner. Chi tiết DoD 1..8 +
 8 quyết định mô hình + verdict **reviewer-kt26 APPROVE** (và 3 yêu cầu bằng chứng đã sửa):
 [`JOURNAL/kt26-journal.md`](JOURNAL/kt26-journal.md); docs [`../docs/k1c-fault.md`](../docs/k1c-fault.md).
@@ -1776,7 +1787,7 @@ DECISIONS, AGENTS, `viscript/`; không dependency/`unsafe`/`#[allow]`/`#[ignore]
 
 | Hạng mục | Kết quả | Log |
 |---|---|---|
-| `gate --fast` | **PASS 361 test/51 suite** (+25), L1 1.000 seed/999 trace 708 ms, clippy `-D warnings` sạch | [`kt25-gate-fast.log`](JOURNAL/kt25-gate-fast.log) |
+| `gate --fast` | **PASS 361 test/51 suite** (+25), L1 1000 seed/999 trace 708 ms, clippy `-D warnings` sạch | [`kt25-gate-fast.log`](JOURNAL/kt25-gate-fast.log) |
 | Miri `--test kt25_ipc2` | **PASS 24/24**, 75,99 s | [`kt25-miri.log`](JOURNAL/kt25-miri.log) |
 
 ### Review độc lập (reviewer-kt25)
@@ -1828,12 +1839,12 @@ DECISIONS, AGENTS, `viscript/`; không dependency/`unsafe`/`#[allow]`/`#[ignore]
   `ipc_*`, `tcb_ipc_*`, `endpoint_msg_ids`.
 - `v2/sim/vifast-sim/src/scenario.rs`: `Msg` (MessageInfo + 64 MR) + `Step::{Send, NBSend, NBRecv}`
   (đủ `name`/`actor`/`execute`/`is_tcb_syscall`).
-- `v2/sim/vifast-sim/tests/kt24_ipc.rs` (**mới, 13 test**): layout 35 bit + round-trip 1.000 giá
+- `v2/sim/vifast-sim/tests/kt24_ipc.rs` (**mới, 13 test**): layout 35 bit + round-trip 1000 giá
   trị LCG + biên; 64 MR byte-for-byte + `mr[4]` **chỉ** ở buffer; `transfer` xoá dữ liệu cũ;
   `send` chặn/`nb_send` không chặn/FIFO/`nb_recv` Busy; `recv` chặn + giao thẳng; Call/Reply +
   `send` trên Reply; `no_reply` caller (a1/a2) + kernel thiếu Reply (b1/b2) ⇒ `Cancelled`;
   Call non-Endpoint `NotSupported` (CNode/Tcb/Reply/Untyped) + `Send` sai kiểu; hàng đầy `Busy`;
-  fuzz **1.000 seed × 64 op** (Miri giảm `cfg(miri)` 3×8), cùng seed cùng trace; bảo toàn
+  fuzz **1000 seed × 64 op** (Miri giảm `cfg(miri)` 3×8), cùng seed cùng trace; bảo toàn
   message không abort (`dropped == 0`, `sent == delivered + pending`).
 - `v2/sim/vifast-sim/tests/kt24_scn.rs` (**mới, 2 test**): runner **đọc tệp** `.scn` 04/06/17 và
   chạy đúng chuỗi bước, 0 lệch; scenario `Step::{Send,NBSend,NBRecv}` qua `run_sequential`.
@@ -1845,9 +1856,9 @@ DECISIONS, AGENTS, `viscript/`; không dependency/`unsafe`/`#[allow]`/`#[ignore]
 
 | Việc | Số | Log |
 |---|---|---|
-| Gate | `gate --fast` **336 test/49 suite**, 0 failed; **L1 1.000 seed/999 trace 674 ms** (đo bởi cổng) | [`JOURNAL/kt24-gate-fast.log`](JOURNAL/kt24-gate-fast.log) |
+| Gate | `gate --fast` **336 test/49 suite**, 0 failed; **L1 1000 seed/999 trace 674 ms** (đo bởi cổng) | [`JOURNAL/kt24-gate-fast.log`](JOURNAL/kt24-gate-fast.log) |
 | Test mới | **15** = 13 `kt24_ipc` + 2 `kt24_scn` | cùng log |
-| Fuzz IPC | **1.000 seed × 64 op**, `check_sched`+`check_mailboxes`+`check_ipc` sau **mỗi** op, 0 vi phạm; cùng seed ⇒ cùng trace | `cargo test -p vifast-sim --test kt24_ipc` |
+| Fuzz IPC | **1000 seed × 64 op**, `check_sched`+`check_mailboxes`+`check_ipc` sau **mỗi** op, 0 vi phạm; cùng seed ⇒ cùng trace | `cargo test -p vifast-sim --test kt24_ipc` |
 | `no_reply` | 4 ca: caller bật cờ (có/không waiter) ⇒ `Ok` ngay không Reply; kernel thiếu Reply (giao thẳng/xếp hàng) ⇒ `Cancelled` + message vẫn giao + cờ bật | cùng log |
 | Miri | `v2 miri -p vifast-sim --test kt24_ipc` — **PASS 13/13 (37,77 s)**; 2 warning "integer-to-pointer cast" là của `vifast-objmem` (có từ trước, không do KT-24) | [`JOURNAL/kt24-miri.log`](JOURNAL/kt24-miri.log) |
 
@@ -1855,13 +1866,13 @@ DECISIONS, AGENTS, `viscript/`; không dependency/`unsafe`/`#[allow]`/`#[ignore]
 
 | # | Tiêu chí | Kết quả |
 |---|---|---|
-| 1 | `MessageInfo` 35 bit đúng layout + round-trip 1.000 + biên `caps>4`/`len>64` | **ĐẠT** (`message_info_dung_layout_35_bit`, `message_info_roundtrip_1000_va_bien`) |
+| 1 | `MessageInfo` 35 bit đúng layout + round-trip 1000 + biên `caps>4`/`len>64` | **ĐẠT** (`message_info_dung_layout_35_bit`, `message_info_roundtrip_1000_va_bien`) |
 | 2 | `Message` 64 MR + 4 MR thanh ghi/60 MR IPC buffer **hai vùng riêng**, `mr[4]` chỉ ở buffer | **ĐẠT** (`message_64_mr_hai_vung...`, `transfer_mot_duong...`) |
 | 3 | `ipc::transfer` là đường copy **duy nhất** (`transfer_calls == ipc_delivered`) | **ĐẠT** — grep chỉ `kobj::deliver_to` gọi `ipc::transfer`; `check_ipc` kiểm sau mỗi op |
 | 4 | `Send`/`NBSend`/`Recv`/`NBRecv` + FIFO + không mất message + hàng đầy `Busy` | **ĐẠT** (`send_nb_send_fifo_va_nb_recv_busy`, `hang_gui_day...`) — **ghi rõ**: K1C-PLAN ghi "hàng gửi không giới hạn" nhưng KT-22 DONE đã chốt `MAILBOX_CAP = 8` + `Busy`; KT-24 **giữ nguyên** KT-22 (không nới/hạ), đã ghi trong `v2/docs/k1c-ipc-semantics.md` §4 |
 | 5 | `no_reply` **hai chiều** (Q7) + `.scn` 17 | **ĐẠT** (`no_reply_caller_dat_co...`, `no_reply_kernel_thieu_reply_tra_cancelled`, `kt24_scn`) |
 | 6 | Call non-Endpoint **không chặn/không Reply**, `NotSupported`, `TcbState` không đổi | **ĐẠT** (`call_non_endpoint_not_supported...`) |
-| 7 | Bảo toàn message `check_ipc` sau **mỗi** op; 1.000 seed × 64 op; cùng seed cùng trace | **ĐẠT** — `ipc_sent == ipc_delivered + ipc_pending` khi không abort (thêm `ipc_dropped` cho đường huỷ hợp lệ D2-25) |
+| 7 | Bảo toàn message `check_ipc` sau **mỗi** op; 1000 seed × 64 op; cùng seed cùng trace | **ĐẠT** — `ipc_sent == ipc_delivered + ipc_pending` khi không abort (thêm `ipc_dropped` cho đường huỷ hợp lệ D2-25) |
 | 8 | `scenario.rs` có `Step::{Send,NBSend,NBRecv}` + `Msg`; runner `.scn` 04/06/17 đọc tệp, 0 lệch | **ĐẠT** (`kt24_scn`) |
 | 9 | `gate --fast` PASS không retry; Miri `--test kt24_ipc` PASS; 0 unsafe; `spec/`/`vifast-model`/`.scn` không đổi | **ĐẠT** (gate PASS; `git diff --stat spec/ v2/lib/vifast-model v2/test/scn` rỗng) |
 
@@ -1933,8 +1944,8 @@ hoãn K1c), không sửa `spec/`/`vifast-model`; `.scn` chỉ sửa **một dòn
   3. interleaved 64 seed: 64 trace khác nhau, cùng seed ⇒ cùng trace, 12 bước/kịch bản;
   4. ca âm **hết budget** (`Sleeping{Budget}` ⇒ bế tắc; có `SchedTick` refill ⇒ chạy);
   5. ca âm **`Ready + suspended`** ⇒ bế tắc; `TcbResume` rồi chạy;
-  6. **fuzz 1.000 seed × 64 bước** (LCG**: retype/call/recv/reply/suspend/resume/tick/pick/
-     exit/wait-notify/wait-addr/wake/mail/finalise): **256.000** lần kiểm 4 miền
+  6. **fuzz 1000 seed × 64 bước** (LCG**: retype/call/recv/reply/suspend/resume/tick/pick/
+     exit/wait-notify/wait-addr/wake/mail/finalise): **256000** lần kiểm 4 miền
      (`check_sched`/`check_budget`/`check_sc_refs`/`check_all_bytes` + `check_mailboxes`),
      **0 vi phạm**; ops coverage **45/46** (thiếu `Stopping→Dead` — K1b không có nguồn nhập
      `Stopping`; 46/46 chứng minh ở test ma trận, không hạ tiêu chí); `forbidden_attempts`
@@ -1944,7 +1955,7 @@ hoãn K1c), không sửa `spec/`/`vifast-model`; `.scn` chỉ sửa **một dòn
   8. regression exit-fault-waiter (giao thẳng cho `Recv` waiter, `len == 0`, `Inactive`);
   9. chốt 2 cặp `Stopping` reserved / 48 allowed / 73 cấm.
 - `v2/bin/v2`: `nightly --only-miri` thêm **kt18_tcb, kt19_sched, kt20_budget, kt21_donation,
-  kt22_mailbox** (mỗi tệp tự giảm seed bằng `cfg(miri)`); **không** thêm `kt23_k1b` (1.000 seed —
+  kt22_mailbox** (mỗi tệp tự giảm seed bằng `cfg(miri)`); **không** thêm `kt23_k1b` (1000 seed —
   không có I/O cần Miri) và **không** thêm test I/O.
 - `v2/test/scn/12-suspend-abort-while-reply-wait.scn`: **đúng một dòng** `Defer => ok` →
   `Defer => InvalidArgument` (**D2-52**); không sửa `.scn` khác.
@@ -1955,13 +1966,13 @@ hoãn K1c), không sửa `spec/`/`vifast-model`; `.scn` chỉ sửa **một dòn
 | Việc | Số | Log |
 |---|---|---|
 | Coverage cặp thiết kế | **46/46 (100%)**; toàn bảng 48/48; cặp cấm **73/73** thử, `forbidden_attempts = 73` | `cargo test -p vifast-sim --test kt23_k1b` → `# KT-23 ma trận: ...` |
-| Fuzz 1.000 seed × 64 bước | 256.000 kiểm 4 miền, **0 vi phạm**; ops coverage 45/46 | cùng log → `# KT-23 fuzz: ...` |
+| Fuzz 1000 seed × 64 bước | 256000 kiểm 4 miền, **0 vi phạm**; ops coverage 45/46 | cùng log → `# KT-23 fuzz: ...` |
 | Budget | `budget_sleeps = 542`, `refills = 7056`, `ticks = 12883`, **0** vi phạm | cùng log |
 | Interleaver | 64 seed/64 trace khác nhau, 2 ca âm đúng (hết budget, suspended) | cùng log |
 | Exit `Busy` | `exit_code=None`, donation/`Reply.caller`/hàng đợi không đổi | cùng log |
-| Gate | `gate --fast` **321 test/47 suite** (+10 so KT-22: 9 `kt23_k1b` + 1 unit `tcb`), L1 1.000 seed/999 trace 687 ms | `JOURNAL/kt23-gate-fast.log` |
-| Miri | `nightly --only-miri`: **12/12 PASS** (2.608 giây, ~43 phút) — objmem + sim 11 mục, thêm 5 test K1b (không thêm `kt23_k1b`, không test I/O) | `JOURNAL/kt23-miri-only.log` |
-| Parity (Q7) | `kt11_diff_sim` 10.000 seed / 0 lệch — **chỉ** Untyped/CNode, **không** phải oracle TCB/scheduler | `JOURNAL/kt23-parity.log` |
+| Gate | `gate --fast` **321 test/47 suite** (+10 so KT-22: 9 `kt23_k1b` + 1 unit `tcb`), L1 1000 seed/999 trace 687 ms | `JOURNAL/kt23-gate-fast.log` |
+| Miri | `nightly --only-miri`: **12/12 PASS** (2608 giây, ~43 phút) — objmem + sim 11 mục, thêm 5 test K1b (không thêm `kt23_k1b`, không test I/O) | `JOURNAL/kt23-miri-only.log` |
+| Parity (Q7) | `kt11_diff_sim` 10000 seed / 0 lệch — **chỉ** Untyped/CNode, **không** phải oracle TCB/scheduler | `JOURNAL/kt23-parity.log` |
 | `.scn` | **21 tệp / 11 nhóm**, 0 blocked, fixtures 5 ca âm PASS; fixture 12 sửa 1 dòng (D2-52) | `JOURNAL/kt23-scn.log` |
 
 ### K1b DoD (4 dòng — K1B-PLAN §1.1/§5 + D2-49(a)) — trung thực, không tô hồng
@@ -1969,7 +1980,7 @@ hoãn K1c), không sửa `spec/`/`vifast-model`; `.scn` chỉ sửa **một dòn
 | # | Tiêu chí K1b | Kết quả | Bằng chứng |
 |---|---|---|---|
 | 1 | **TCB + transition + `suspended`**: bảng `ALLOWED` 11×11 một cửa, **100%** cặp ALLOWED, mọi cặp cấm `IllegalOperation` | **ĐẠT** — 46/46 cặp thiết kế (48/48 toàn bảng), 73/73 cặp cấm bị thử | `kt23_k1b::ma_tran_46_cap_va_73_cap_cam` + `kt18_tcb` 18 test |
-| 2 | **Scheduler 1 hart + budget (chu kỳ thẳng hàng)**: ready queue 256 mức/bitmap, `pick` O(1), preempt mọi bước, affinity, không đói; **0 vi phạm budget** | **ĐẠT** — 1.000 seed × 64 bước, 0 vi phạm; `budget_sleeps=542`/`refills=7056`/`ticks=12883`; `Running ⇒ còn budget` kiểm sau mỗi bước | `kt23_k1b::fuzz_1000_seed_64_buoc_k1b` + `kt19_sched`/`kt20_budget` |
+| 2 | **Scheduler 1 hart + budget (chu kỳ thẳng hàng)**: ready queue 256 mức/bitmap, `pick` O(1), preempt mọi bước, affinity, không đói; **0 vi phạm budget** | **ĐẠT** — 1000 seed × 64 bước, 0 vi phạm; `budget_sleeps=542`/`refills=7056`/`ticks=12883`; `Running ⇒ còn budget` kiểm sau mỗi bước | `kt23_k1b::fuzz_1000_seed_64_buoc_k1b` + `kt19_sched`/`kt20_budget` |
 | 3 | **Hộp thư**: hàng cố định, đầy ⇒ backpressure `Busy`, thứ tự tất định | **ĐẠT** — KT-22 (10 test, `MAILBOX_CAP=8`, `pushed == popped + removed + len`) + KT-23 fuzz `mail_pushed=1742` sau mỗi bước; **bug exit-fault-waiter** fuzz tìm ra đã sửa | `kt22_mailbox` + `kt23_k1b::exit_fault_giao_thang_cho_recv_waiter` + `kt23_k1b::exit_busy_...` |
 | 4 | **Push migration** (tiêu chí gốc thiết kế `:874`) | **CHƯA ĐẠT trong K1b** — **hoãn K1c** theo **D2-49(a)**: K1b 1 hart, K1c mới có `smp 1/2/4/8`; `Migrate` bị từ chối rõ `NotSupported`, không im lặng bỏ | D2-49(a) + `kt22_mailbox::migrate_tren_1_hart_bi_tu_choi_not_supported` |
 
@@ -2027,11 +2038,11 @@ của tab khác — **không chạm**, chỉ stage `v2/`.
   - `wake` tách `wake_step` (không tự kiểm bất biến) để `process_mail` chỉ kiểm một lần/bước.
 - `v2/sim/vifast-sim/src/lib.rs`: `pub mod mailbox`.
 - `v2/sim/vifast-sim/tests/kt22_mailbox.rs` (**mới**, 10 test): FIFO + đầy trả lại message; backpressure
-  1.000 lần; `retain` đếm `removed`; `Migrate` ⇒ `NotSupported` trên 1 hart; hộp thư hart FIFO +
+  1000 lần; `retain` đếm `removed`; `Migrate` ⇒ `NotSupported` trên 1 hart; hộp thư hart FIFO +
   đầy `Busy` + `Wake` đánh thức + `Stop` đặt cờ + `send_mail` không lộ trạng thái giữa; endpoint
   đầy ⇒ `Call` `Busy` (TCB vẫn `Ready`) rồi `Recv` giải phóng; nhiều endpoint độc lập; `Exit` fault
   đầy ⇒ `Busy` không đổi gì, có chỗ ⇒ fault vào **cuối** hàng; FIFO bắc cầu Call/fault Exit; invariant
-  **1.000 seed × 64 op** (stable; Miri 3 seed × 8 op bằng `cfg(miri)`) — không mất/thêm message,
+  **1000 seed × 64 op** (stable; Miri 3 seed × 8 op bằng `cfg(miri)`) — không mất/thêm message,
   `check_sched` xanh sau mỗi op, cùng seed cùng trace.
 
 ### Review độc lập (verdict APPROVE — `reviewer-kt22`)
@@ -2109,9 +2120,9 @@ stage `v2/`.
   >1 TCB ⇒ không donate**; **không chuỗi 2 tầng qua guard `donated_sc`** (donee `Call` vào endpoint
   có server `Recv`); **`Tcb.SetPriority` từ chối donor, chấp nhận donee đổi MCP** (priority hiệu
   lực/bucket đổi theo); **Reply nhầm Reply object ⇒ không trả donation** (cảnh báo giới hạn K1c,
-  [`JOURNAL/kt21-reply-owner.md`](JOURNAL/kt21-reply-owner.md)); **invariant 1.000 seed × 64 op**
+  [`JOURNAL/kt21-reply-owner.md`](JOURNAL/kt21-reply-owner.md)); **invariant 1000 seed × 64 op**
   (stable; `#[cfg(miri)]` 3×8) — mỗi bước `check_sched`, không TCB `Running` nào thiếu SC cấp/thiếu
-  budget, donation hai chiều, **14.609 bước có donation** / 64.000 bước (ngưỡng test `≥ 12.000`,
+  budget, donation hai chiều, **14609 bước có donation** / 64000 bước (ngưỡng test `≥ 12000`,
   log tái lập [`JOURNAL/kt21-invariant-donation.log`](JOURNAL/kt21-invariant-donation.log)), cùng
   seed cùng trace.
 
@@ -2142,16 +2153,16 @@ stage `v2/`.
 ### Cổng + Miri (không retry — D2-07)
 
 - [`JOURNAL/kt21-gate-fast.log`](JOURNAL/kt21-gate-fast.log) — `gate --fast` **PASS 298 test / 0
-  failed** (**45 suite**; KT-20: 284/44 ⇒ **+14 test** = 13 integration + 1 unit `mcs`), **L1 1.000
+  failed** (**45 suite**; KT-20: 284/44 ⇒ **+14 test** = 13 integration + 1 unit `mcs`), **L1 1000
   seed/999 trace** (550 ms), gen-check ON, `.scn` 21 tệp OK, **không retry**; `kt21_donation` native
   ~4,5 s.
 - [`JOURNAL/kt21-miri.log`](JOURNAL/kt21-miri.log) — `v2 miri -p vifast-sim --test kt21_donation`
   **PASS 13/13** (0 failed, 0 ignored, **128,57 s**); 2 cảnh báo `integer-to-pointer cast` **có
   sẵn** từ objmem (`v2/lib/vifast-objmem/src/obj.rs`, D2-14/D2-17), không phát sinh từ KT-21;
   `v2/sim/**` **0 unsafe**. Invariant test dưới Miri giảm còn 3 seed × 8 bước (`#[cfg(miri)]`;
-  stable giữ **1.000 × 64**) — không `#[ignore]`, không nới `gate --fast`/L1.
+  stable giữ **1000 × 64**) — không `#[ignore]`, không nới `gate --fast`/L1.
 - [`JOURNAL/kt21-invariant-donation.log`](JOURNAL/kt21-invariant-donation.log) — số bước có
-  donation in bằng `--nocapture`: **14.609 / 64.000** bước; test assert `≥ 12.000` (stable),
+  donation in bằng `--nocapture`: **14609 / 64000** bước; test assert `≥ 12000` (stable),
   Miri `> 0`.
 
 ### Phạm vi / không chạm
@@ -2191,7 +2202,7 @@ khi lật sổ, không phải YC mới); (2) KT-22 hộp thư; (3) KT-23 thêm `
   **58 × `E0599`** cho API chưa có (`tick`, `virtual_now`, `sched_info`, `sched_consumed`,
   `sched_remaining`, `tcb_has_budget`) + **`E0432`** (`ScInfo`) + `E0308`.
 - [`JOURNAL/kt20-red-mutation-bo-charge.log`](JOURNAL/kt20-red-mutation-bo-charge.log) — đột biến tay
-  **bỏ dòng `consumed += 1`** trong `ScBudget::charge` (không commit): test invariant **1.000 seed**
+  **bỏ dòng `consumed += 1`** trong `ScBudget::charge` (không commit): test invariant **1000 seed**
   đỏ đúng lý do (`SC 0 cửa sổ 0: 1+1 > budget 1`) ⇒ bộ kiểm bắt được "quên trừ budget" (DoD 10).
 
 ### Sản phẩm
@@ -2222,7 +2233,7 @@ khi lật sổ, không phải YC mới); (2) KT-22 hộp thư; (3) KT-23 thêm `
   nhận lại sau refill; **không SC / SC chưa `Configure` ⇒ không có budget ⇒ không chạy**, sau
   `Configure` mới chạy, gỡ SC khi `Running` ⇒ ngủ ngay; yield không mất budget/thời gian; gắn SC cạn
   cho TCB `Running` ⇒ ngủ ngay + refill đánh thức nhiều TCB; gỡ SC khi `Sleeping{Budget}` không còn
-  biên refill; invariant **1.000 seed × 64 bước ngẫu nhiên** với cửa sổ thẳng hàng.
+  biên refill; invariant **1000 seed × 64 bước ngẫu nhiên** với cửa sổ thẳng hàng.
 
 ### Quyết định đã chốt (model-only `[TK]`, ghi rõ)
 
@@ -2246,7 +2257,7 @@ khi lật sổ, không phải YC mới); (2) KT-22 hộp thư; (3) KT-23 thêm `
 - **Rig test cập nhật (test-only, không đổi kỳ vọng cũ)**: `kt19_sched.rs` — `Rig` thêm
   `SchedControl` (slot 6) + `SchedControl.Configure` SC slot 4 với `SC_MAC_DINH = 64` rồi gắn cho 3
   TCB qua helper `gan_sc_mac_dinh`; `pick_du_256` thêm SchedControl/SchedContext (slot 256/257) và
-  gắn cho **256** TCB; TCB "D" của test dispatch và 3 TCB của `RandRig` (1.000 seed) cũng được gắn.
+  gắn cho **256** TCB; TCB "D" của test dispatch và 3 TCB của `RandRig` (1000 seed) cũng được gắn.
   KT-18 không cần (không `dispatch`; chuyển trạng thái trực tiếp là model API, suite vẫn xanh).
 - **Mục 2 — Miri**: reviewer đọc `kt20-miri.log` **giữa lúc tệp đang ghi** nên thấy 11/12 và chưa có
   `test result`; log hoàn chỉnh của lần chạy trước đã có `test result: ok. 12 passed`. Sau khi sửa
@@ -2256,13 +2267,13 @@ khi lật sổ, không phải YC mới); (2) KT-22 hộp thư; (3) KT-23 thêm `
 
 - [`JOURNAL/kt20-gate-fast.log`](JOURNAL/kt20-gate-fast.log) — `gate --fast` **PASS 284 test / 0 failed**
   (**44 suite**; KT-19: 263/43 ⇒ **+21 test** = 12 integration + 8 unit `mcs` + 1 unit `pick_where`),
-  **L1 1.000 seed/999 trace**, gen-check ON, `.scn` 21 tệp OK, **không retry**; `kt20_budget` native
+  **L1 1000 seed/999 trace**, gen-check ON, `.scn` 21 tệp OK, **không retry**; `kt20_budget` native
   2,8 s.
 - [`JOURNAL/kt20-miri.log`](JOURNAL/kt20-miri.log) — chạy lại sau sửa review:
   `v2 miri -p vifast-sim --test kt20_budget` **PASS 12/12** (0 failed, 0 ignored, **117,12 s**);
   2 cảnh báo `integer-to-pointer cast` **có sẵn** từ objmem (`v2/lib/vifast-objmem/src/obj.rs`,
   D2-14/D2-17), không phát sinh từ KT-20; `v2/sim/**` **0 unsafe**. Invariant test dưới Miri vẫn
-  chạy nhưng giảm `N_SEED = 5`, `N_STEP = 16` (`#[cfg(miri)]`; stable giữ **1.000 × 64**) — không
+  chạy nhưng giảm `N_SEED = 5`, `N_STEP = 16` (`#[cfg(miri)]`; stable giữ **1000 × 64**) — không
   `#[ignore]`, không nới `gate --fast`/L1.
 
 ### Phạm vi / không chạm
@@ -2333,9 +2344,9 @@ không `#[allow]`/`#[ignore]`. Working tree: `viscript/` + tệp ngoài `v2/` c�
   trọng priority + preempt khi có mức cao hơn; (3) `check_sched` sau **mỗi** public op (tour đủ
   Configure/SetFaultEp/set_sched_params/bind_notification/affinity/home/Ready/Call/Recv/Reply/Suspend/
   Resume/Wait notification/WaitAddr/Exit/finalise); (4) preempt ép **mọi bước**: 2 TCB cùng mức xen kẽ
-  40 bước, **không đói** (≥19/40 mỗi TCB); (5) **1.000 seed × 64 op** ngẫu nhiên
+  40 bước, **không đói** (≥19/40 mỗi TCB); (5) **1000 seed × 64 op** ngẫu nhiên
   (call/recv/reply/suspend/resume/exit/retype): cùng seed ⇒ cùng trace, bất biến sau **mỗi** op,
-  1.000/1.000 trace khác nhau; (6) wake TCB `suspended` **không** enqueue, `Resume` enqueue đúng
+  1000/1000 trace khác nhau; (6) wake TCB `suspended` **không** enqueue, `Resume` enqueue đúng
   priority; (7) `block_current`/`yield_current` đổi `current`, `block_current(Ready)` bị từ chối;
   (8) finalise TCB đang chạy + Suspend(Abort) + Revoke Untyped ⇒ `ready_len` giảm đúng, `current` được
   thay, không ObjId chết trong hàng; (9) affinity/home mặc định (1/0) + rebucket khi đổi priority;
@@ -2347,24 +2358,24 @@ không `#[allow]`/`#[ignore]`. Working tree: `viscript/` + tệp ngoài `v2/` c�
   `pick == mức p` và `sched_cur_prio == p` cho **mọi** p (255→0) — O(1) theo 4 word bitmap, FIFO cùng mức.
 - **≤1 Running/hart**: mỗi bước `dem_running(...) == 1`; `Running` không nằm trong hàng (`ready_contains`).
 - **`Ready` ⇔ hàng + `!suspended`**: `check_sched` bắt mọi lệch (gồm cả `Ready+suspended` trong hàng);
-  gọi sau mỗi public op + sau mỗi preempt; test gọi thêm sau từng op trong 1.000 seed (kể cả op lỗi).
-- **Preempt/không đói**: 40 bước preempt trên 2 TCB cùng mức cho 20/20 lượt; 1.000 seed × 64 op =
-  **64.000 op** (đo phân bố tạm thời: call 5.077 ok/4.137 lỗi, recv 5.476/3.714, reply 1.781/7.223,
-  suspend 5.436/3.812, resume 8.936/0, exit 9.340/0, retype 9.068/0) — mọi op đều kiểm bất biến.
+  gọi sau mỗi public op + sau mỗi preempt; test gọi thêm sau từng op trong 1000 seed (kể cả op lỗi).
+- **Preempt/không đói**: 40 bước preempt trên 2 TCB cùng mức cho 20/20 lượt; 1000 seed × 64 op =
+  **64000 op** (đo phân bố tạm thời: call 5077 ok/4137 lỗi, recv 5476/3714, reply 1781/7223,
+  suspend 5436/3812, resume 8936/0, exit 9340/0, retype 9068/0) — mọi op đều kiểm bất biến.
 - **Gỡ hàng**: `Suspend(Abort)`/`finalise_tcb`/`Revoke Untyped` giảm `ready_len` đúng và thay `current`;
   `check_sched` xác nhận không còn ObjId chết/không Ready trong hàng (revoke 2 TCB ⇒ hàng 2→0).
 
 ### Cổng + Miri (không retry — D2-07)
 
 - [`JOURNAL/kt19-gate-fast.log`](JOURNAL/kt19-gate-fast.log) — `gate --fast` **PASS 263 test / 0 failed**
-  (43 suite; KT-18 là 251/42 ⇒ **+12 test**: 10 integration + 2 unit `HartSched`), **L1 1.000 seed/999
+  (43 suite; KT-18 là 251/42 ⇒ **+12 test**: 10 integration + 2 unit `HartSched`), **L1 1000 seed/999
   trace**, gen-check ON, `.scn` 21 tệp OK, **không retry**; KT-19 test native 2,8 s.
 - [`JOURNAL/kt19-miri.log`](JOURNAL/kt19-miri.log) — `v2 miri -p vifast-sim --test kt19_sched` **PASS
   10/10** (0 ignored, 4 m 32 s); 2 cảnh báo `integer-to-pointer cast` **có sẵn** từ objmem
   (`v2/lib/vifast-objmem/src/obj.rs:166,175`, D2-14/D2-17), không phát sinh từ KT-19; `v2/sim/**` **0 unsafe**.
 - **Miri cần giảm phạm vi (ghi rõ, chỉ dưới `cfg(miri)`; stable giữ nguyên DoD)**: `check_sched` sau
-  **mỗi** op quét toàn bộ TCB sống nên Miri chậm hơn ~1000 lần — đo thật 1.000 seed sẽ >4 h. Trên
-  stable vẫn **1.000 seed × 64 op** và **đủ 256 mức**; dưới Miri: **5 seed × 64 op** và **64 mức**
+  **mỗi** op quét toàn bộ TCB sống nên Miri chậm hơn ~1000 lần — đo thật 1000 seed sẽ >4 h. Trên
+  stable vẫn **1000 seed × 64 op** và **đủ 256 mức**; dưới Miri: **5 seed × 64 op** và **64 mức**
   (`#[cfg(miri)] N_SEED = 5`, `N_PRIO = 64`; log 20 seed = 5 m 46 s trước khi giảm:
   [`JOURNAL/kt19-miri-1000seed-aborted.log`](JOURNAL/kt19-miri-1000seed-aborted.log)). Không `#[ignore]`,
   không nới ngưỡng `gate --fast`/L1.
@@ -2447,7 +2458,7 @@ Bảng `ALLOWED` đặt ở `v2/docs/k1b-tcb-transition.md` (model-only `[TK]`) 
 ### Cổng + Miri
 
 - [`JOURNAL/kt18-gate-fast.log`](JOURNAL/kt18-gate-fast.log) — `gate --fast` **PASS**, **251 test / 0 failed**
-  (42 suite; KT-17: 231/41 ⇒ +20 test), **L1 1.000 seed/999 trace**, gen-check ON, **không retry** (D2-07).
+  (42 suite; KT-17: 231/41 ⇒ +20 test), **L1 1000 seed/999 trace**, gen-check ON, **không retry** (D2-07).
 - [`JOURNAL/kt18-miri.log`](JOURNAL/kt18-miri.log) — `./v2/bin/v2 miri -p vifast-sim --test kt18_tcb`
   **PASS 18/18** (0 failed, 0 ignored); 2 cảnh báo `integer-to-pointer cast` **có sẵn** từ
   `v2/lib/vifast-objmem/src/obj.rs:175` (arena objmem, D2-14/D2-17), không phải code KT-18; `v2/sim/**` 0 `unsafe`.
@@ -2491,7 +2502,7 @@ bằng objmem (API closure) + Miri*; các ca Untyped/CNode của KT-04c chạy t
 | # | Điều kiện DoD | Bằng chứng |
 |---|---|---|
 | a | Thay store giả bằng objmem + **Miri từ commit đầu** | `vifast-objmem` Miri **40 test** (20 lib + 8 alias + 1 compile-fail + 1 fuzz 200 chuỗi/197,30 s + 10 contract); `./v2/bin/v2 nightly --only-miri` **PASS 365 s, exit 0** (sim `--lib` 13/13, kt16 4/4, kt09_untyped 8/8, kt09_revoke 7/7, kt10_cnode 13/13, kt17_align 3/3); `v2 miri` cũ vẫn xanh 13/13 — [`JOURNAL/kt17-nightly-only-miri.log`](JOURNAL/kt17-nightly-only-miri.log), [`JOURNAL/kt17-miri-old-cmd.log`](JOURNAL/kt17-miri-old-cmd.log) |
-| b | Ca Untyped/CNode của KT-04c chạy trên mô hình, không hồi quy | `.scn` Untyped/CNode **9/9** bước khớp, 0 lệch (3 bước setup Frame để K2); **parity 10.000 seed/240.000 thao tác/9.065 trace khác nhau/0 lệch**; `gate --fast` **231 test/41 suite**, L1 1.000 seed/999 trace, `.scn` 21 tệp OK — [`JOURNAL/kt17-kt04c-scn-parity.log`](JOURNAL/kt17-kt04c-scn-parity.log), [`JOURNAL/kt17-gate-fast.log`](JOURNAL/kt17-gate-fast.log) |
+| b | Ca Untyped/CNode của KT-04c chạy trên mô hình, không hồi quy | `.scn` Untyped/CNode **9/9** bước khớp, 0 lệch (3 bước setup Frame để K2); **parity 10000 seed/240000 thao tác/9065 trace khác nhau/0 lệch**; `gate --fast` **231 test/41 suite**, L1 1000 seed/999 trace, `.scn` 21 tệp OK — [`JOURNAL/kt17-kt04c-scn-parity.log`](JOURNAL/kt17-kt04c-scn-parity.log), [`JOURNAL/kt17-gate-fast.log`](JOURNAL/kt17-gate-fast.log) |
 
 > **Cập nhật 06:40 bởi Agent 2**: **KT-17 xong mã — K1a' đủ DoD** (task cuối phase K1a'):
 > (1) đóng **2 follow-up KT-16** — `alloc_place_span` cap `align ≤ ARENA_ALIGN` (fail-closed,
@@ -2500,7 +2511,7 @@ bằng objmem (API closure) + Miri*; các ca Untyped/CNode của KT-04c chạy t
 > (2) **`v2 nightly --only-miri`** (D2-47(a), không vào `gate --fast`, không L1 100k/mutation/
 > soak; dùng chung `require_miri_toolchain` với `v2 miri` nên thiếu toolchain fail rõ);
 > (3) Miri tổng **PASS 365 s/exit 0** (objmem 40 test + sim 48 test); (4) `.scn` Untyped/CNode
-> **9/9** + parity **10.000 seed/0 lệch**; (5) `gate --fast` **PASS 231 test/41 suite**
+> **9/9** + parity **10000 seed/0 lệch**; (5) `gate --fast` **PASS 231 test/41 suite**
 > (KT-16: 227/40; +4 test mới), L1 999 trace, **không retry**. Reviewer `reviewer-kt17`:
 > **DRIFT nhẹ (chỉ tài liệu/DoD)** — đã sửa đủ 4 mục. Chi tiết + log: `JOURNAL/kt17-journal.md`,
 > `JOURNAL/kt17-*.log`.
@@ -2514,10 +2525,10 @@ bằng objmem (API closure) + Miri*; các ca Untyped/CNode của KT-04c chạy t
 > (parity hash cả object chết), `Cap` vẫn `Vec<Cap>`. Thêm `OwnedArena`/`OwnedMem` (feature
 > `heap`) vào objmem — **toàn bộ `unsafe` nằm trong objmem**, `v2/sim/**` 0 `unsafe` (R5
 > xanh); guard `chua_header` áp cho **cả** `with`/`with_mut` (reviewer KT-15, test đỏ trước
-> `Ok(7)` vs `Dead`); bảng kind → ctor **đo 8.192 B = 8 KiB** (không phình); `ObjMem` có
+> `Ok(7)` vs `Dead`); bảng kind → ctor **đo 8192 B = 8 KiB** (không phình); `ObjMem` có
 > `id_base` để `id` duy nhất giữa các vùng. Test đỏ trước `kt16_objmem.rs` **10 × E0599**.
 > Bằng chứng: **227 test/40 suite**, old test `git diff --stat kt09*/kt10*/kt11*` **rỗng**;
-> parity 10.000 seed 0 lệch; **Miri PASS** (objmem 39 test; kt16 4/4; kt09_untyped 8/8;
+> parity 10000 seed 0 lệch; **Miri PASS** (objmem 39 test; kt16 4/4; kt09_untyped 8/8;
 > kt10_cnode 13/13); `aarch64-unknown-none` xanh (feature off); `gate --fast` PASS không
 > retry. Reviewer `reviewer-kt16`: **APPROVE** (không DRIFT/UNSAFE). Chi tiết + log:
 > `JOURNAL/kt16-journal.md`, `JOURNAL/kt16-*.log`.
@@ -2535,7 +2546,7 @@ bằng objmem (API closure) + Miri*; các ca Untyped/CNode của KT-04c chạy t
 > chồng vùng, ref chết, kind lạ ⇒ `Alias` fail-closed, closure không gọi); `N = 9` **không build**
 > (`const { assert!(N <= 8) }`, log `kt15-red-n9.log`). Crate **34 test** (lib 14, alias 8,
 > compile_fail 1, fuzz 1, contract 10); **Miri PASS** (alias 8/8; fuzz **200 chuỗi/191,95 s** < 20 phút
-> ⇒ giữ 200); fuzz stable **10.000 chuỗi × 32 thao tác** PASS (4,51 s); build `aarch64-unknown-none`
+> ⇒ giữ 200); fuzz stable **10000 chuỗi × 32 thao tác** PASS (4,51 s); build `aarch64-unknown-none`
 > xanh; `gate --fast` **PASS 218 test** không retry. Reviewer `reviewer-kt15` **DRIFT (nhẹ), không
 > UNSAFE** — đã sửa: bỏ claim sai "fail-closed" (ref không mang identity store → thành hợp đồng
 > `place`/`reset`), guard `chua_header`/`Arena::chua` (ref store khác/`pa` ngoài arena ⇒ `Alias`),
@@ -2579,7 +2590,7 @@ bằng objmem (API closure) + Miri*; các ca Untyped/CNode của KT-04c chạy t
 
 | Luật | Nội dung | Nguồn | Case âm |
 |---|---|---|---|
-| **R1** | Tệp trong `kernel/`, `lib/` ≤ **1.500** dòng | thiết kế §8 (cổng cứng, D2-06) | `case-r1-long` (1.501 dòng) |
+| **R1** | Tệp trong `kernel/`, `lib/` ≤ **1500** dòng | thiết kế §8 (cổng cứng, D2-06) | `case-r1-long` (1501 dòng) |
 | **R2** | Cấm `cfg(target_arch)` trong `kernel/vifast-core/**` + `lib/**` | thiết kế **:701** | `case-r2-cfg-arch` |
 | **R3** | SPDX theo loại tệp: `//` cho `.rs/.s/.asm`, `#` cho `.toml/.vis/.vish/.vidl/.sh/.py`, sidecar `.license` cho `.json/.bin/.txt` | QD §9.3 | `case-r3-no-spdx` |
 | **R4** | Cấm path-dependency sang `crates/` (v1 đóng băng) | D2-26 | `case-r4-path-dep` |
@@ -2595,7 +2606,7 @@ Ghi chú: bộ **5 luật này là R1..R5** (Agent 2 chọn; không phải 6 lu�
 | Cổng | `./v2/bin/v2 check` PASS (gồm `abi spec`, `abi reserved`, `scn`); `gate --fast` PASS (thời gian: xem log, không ghi tay — Q12); `gate`/`nightly` exit 2 | log cổng; `v2/bin/v2:255` |
 | Luật | self-test **6/6** (`ok 1..6`); R1..R5 có case âm đúng mã luật | `bash v2/test/rules/run.sh` |
 | Build/test | `cargo test --manifest-path v2/Cargo.toml --workspace` xanh: fs **55** (52 unit + 3 T26) + elf **20** = **100**, 0 failed; clippy `-D warnings` 0 warning; fmt sạch | trong `gate --fast` |
-| Luật 1.500 dòng | tệp lớn nhất `vifast-fs/src/fs.rs` = **1.248** dòng | `wc -l` |
+| Luật 1500 dòng | tệp lớn nhất `vifast-fs/src/fs.rs` = **1248** dòng | `wc -l` |
 | `spec/` | **có** `spec/abi.toml`: 16 syscall (0..14 + **15 DebugGetInfo** D2-29), dải reserved **16..31**, 19 mã lỗi, object **1..8** (SchedControl 8 = lõi, D2-32) + reserved **9..16** (`[object_reserved]` 17..31); `status = "REVIEW"` | `./v2/bin/v2 check` |
 | `v2/bin/v2` | **có** (wrapper), `.gitkeep` giữ thư mục | `ls v2/bin` |
 
@@ -2626,7 +2637,7 @@ hỏng (2); cả 5 đều in câu bootstrap, không im lặng bỏ qua.
 `./v2/bin/v2 miri -p vifast-sim --lib` → **13 passed; 0 failed** (7 unit `lib.rs` + 6 unit `kobj.rs`;
 Miri 33,17 s, tổng 50,28 s, EXIT=0), không `#[ignore]`, không cần `-Zmiri-disable-isolation`.
 
-**Toolchain**: [`JOURNAL/kt13-toolchain.log`](JOURNAL/kt13-toolchain.log) — nightly `1.102.0-nightly
+**Toolchain**: [`JOURNAL/kt13-toolchain.log`](JOURNAL/kt13-toolchain.log) — nightly `1102.0-nightly
 (3ef0c22cd)`, `miri 0.1.0`; component `miri` + `rust-src` có.
 
 **Cổng**: [`JOURNAL/kt13-check.log`](JOURNAL/kt13-check.log) `check` **PASS**;
@@ -2688,7 +2699,7 @@ production (không `mdb_prev/mdb_next` 48 B), **không** `vifast-model` (KT-11),
   `RangeError`/`SlotOccupied`/`InvalidCapability`/`InsufficientRights`/`InvalidArgument`, phạm vi revoke,
   delete reparent, finalise CNode (kể cả CNode lồng nhau).
 - `tests/kt10_property.rs` (**5 test**): generator LCG tự viết + oracle cây trong test;
-  **128 seed × 48 bước = 6.144 thao tác** (copy 1.102, mint 1.109, delete 802, revoke 1.141 xoá 1.093 cap,
+  **128 seed × 48 bước = 6144 thao tác** (copy 1102, mint 1109, delete 802, revoke 1141 xoá 1093 cap,
   lỗi 762) — kiểm bất biến sau **mỗi** thao tác; 64 seed `Untyped.Revoke` finalise; 2 ca chuỗi sâu;
   tái lập cùng seed.
 - `src/kobj.rs` unit: **2 test** chứng minh `check_caps` không rỗng (bắt cap mồ côi, slot không đối xứng,
@@ -2706,14 +2717,14 @@ property 128×48=6144, staged chỉ `v2/`); yêu cầu sửa tài liệu F1/F2 +
 
 **Đề xuất**: Agent 0 lật `KT-10 = DONE` sau review commit cuối (không có YC mới; KT-11 mở sau khi DONE).
 
-## KT-11 — `vifast-model` Untyped/CNode, F3 quyền, so sim 10.000 seed (xong mã, 2026-11-13 00:50)
+## KT-11 — `vifast-model` Untyped/CNode, F3 quyền, so sim 10000 seed (xong mã, 2026-11-13 00:50)
 
 **Vào**: READY, phụ thuộc KT-10 DONE (`c78e814`) · HEAD `f98e1e7` · baseline `gate --fast` PASS
 161 test / L1 1000 seed ([`JOURNAL/kt11-baseline-gate-fast.log`](JOURNAL/kt11-baseline-gate-fast.log)).
 
 **Phạm vi**: crate **`v2/lib/vifast-model`** (thêm workspace) — mô hình Untyped/CNode **tái sử dụng**,
 không test-only; chạy 4 ca `.scn` Untyped/CNode của KT-04c; F3 (review KT-10); parity test với
-`vifast-sim` **10.000 seed**. Không MDB 48 B, không Frame/VSpace/K2; không sửa `spec/`/`QUEUE`/
+`vifast-sim` **10000 seed**. Không MDB 48 B, không Frame/VSpace/K2; không sửa `spec/`/`QUEUE`/
 `DECISIONS`/`AGENTS`; không `#[ignore]`, không nới ngưỡng. Review `reviewer-kt11` **DRIFT** → sửa đủ;
 Agent 0 ban hành **D2-44..46**.
 
@@ -2739,7 +2750,7 @@ Agent 0 ban hành **D2-44..46**.
   3 setup `Retype Frame` chưa mô hình (K2). **D2-46** sửa fixture `02-cnode-mint-badge.scn`
   (`02:11` badge trên Untyped → `src=ep0`; `02:12` hai Mint cùng `dst` → thêm `c2`, `dst=c2`) —
   sửa dữ liệu test, không đổi ABI, không hard-code 7/9.
-- **Parity test** (không re-export `kobj` của sim): **10.000 seed / 240.000 thao tác, 0 lệch**
+- **Parity test** (không re-export `kobj` của sim): **10000 seed / 240000 thao tác, 0 lệch**
   (9065 trace khác nhau, 10,5 s), assert `check_caps` + `check_all_bytes` **sau mỗi bước**:
   [`JOURNAL/kt11-diff-10000.log`](JOURNAL/kt11-diff-10000.log). `Move` không có trong sim nên test riêng.
 - 19 test model mới + 4 test sim F3 mới, 0 ignored.
@@ -2756,7 +2767,7 @@ DoD đủ 5 mệnh đề (khôi phục theo review #7 — không được tự r
 (2) **block giả + cache**; (3) `MAX_IO = 256`; (4) đọc **RAW** kiểm read-your-own-write;
 (5) đánh **"ai chen giữa"** theo D-03.
 
-**Đã làm**: `v2/lib/vifast-fs/tests/t26_read_your_own_write.rs` (3 test, 1.000 seed, `CachedDev` đang ship,
+**Đã làm**: `v2/lib/vifast-fs/tests/t26_read_your_own_write.rs` (3 test, 1000 seed, `CachedDev` đang ship,
 ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-t26-analysis.md` (bảng kẻ chen giữa).
 **Chưa làm được trong crate**: tái hiện đầy đủ T26 (`-smp 2`, 50 boot) — **YC-06**.
 
@@ -2799,8 +2810,8 @@ BLOCKED** (ABI chưa đủ — `agent/BLOCKED.md` §5, `docs/k6-memsrv.md` §6, 
   `check_objmem` uỷ quyền bất biến `Σ Frame sống + Σ hole == watermark`; `UNTYPED_PA_WINDOW` =
   `vifast_alloc::WINDOW_BYTES`, `MAX_HOLES` re-export.
 - Cầu nối D2-83 **một chiều**: `vifast-core` object đại diện (`add_foreign_object`/`foreign_key`/
-  `kill_foreign_object`, tệp mới `core_foreign.rs`; `size_of::<Machine>()` **188.872 B** không
-  đổi, pin 196.608) + `vifast-plat-riscv64::mem_bridge` (`grant`/`release`/`resolve`/`budget`):
+  `kill_foreign_object`, tệp mới `core_foreign.rs`; `size_of::<Machine>()` **188872 B** không
+  đổi, pin 196608) + `vifast-plat-riscv64::mem_bridge` (`grant`/`release`/`resolve`/`budget`):
   kiểm **cap client gửi** (`WrongObjectType{2}`/`InsufficientRights{3}`/`InvalidCapability{1}`),
   cấp Frame ở object layer, cap Frame đi qua **KT-63** vào receive window (bỏ `RIGHT_GRANT`),
   tra ngược `core obj → (obj cap, pa, size_bits)`, release trả byte về 0.
@@ -2808,15 +2819,15 @@ BLOCKED** (ABI chưa đủ — `agent/BLOCKED.md` §5, `docs/k6-memsrv.md` §6, 
   alloc 2M+4K (ghi/đọc thật; `used=2101248`, `stats=2101248`, `live4/live2`), revoke→0 + cấp lại
   đúng PA cũ, hết memory **mã 9** nguyên tử không panic, bridge cap + resolve + release,
   deny mã **2/3/1** atomic. Matrix **12/12**; crate test **10/10**; obj host test **15/15**.
-- Budget: product **200.184**, ktest **209.920**, guard **2.680**, user **202.344**, proc
-  **206.536** B ≤ 262.144 (`JOURNAL/kt67-budget.log`).
+- Budget: product **200184**, ktest **209920**, guard **2680**, user **202344**, proc
+  **206536** B ≤ 262144 (`JOURNAL/kt67-budget.log`).
 
 **Chưa xong**: memsrv U-mode (BLOCKED, 2 lựa chọn); Frame 1 GiB chỉ nhãn (D2-66);
 double-free cùng cỡ vẫn chốt ở object layer (như KT-52).
 
-**Cổng cuối (sau vá reviewer)**: `gate --fast` **PASS 661 test/87 suite**, L1 **1.282 ms**;
+**Cổng cuối (sau vá reviewer)**: `gate --fast` **PASS 661 test/87 suite**, L1 **1282 ms**;
 matrix **12/12**; soak **0/1000** wall **238 s** (`BUILD_ID=a6dff9f704e6cd88`); crate test
-**12/12**; obj host **15/15**; budget 5 ảnh ≤ 262.144.
+**12/12**; obj host **15/15**; budget 5 ảnh ≤ 262144.
 **Log**: `JOURNAL/kt67-journal.md`, `kt67-ktest-matrix.log`, `kt67-red-before.log`,
 `kt67-alloc-host.log`, `kt67-obj-host.log`, `kt67-budget.log`, `kt67-gate.log`, `kt67-soak.log`.
 
@@ -2824,48 +2835,48 @@ matrix **12/12**; soak **0/1000** wall **238 s** (`BUILD_ID=a6dff9f704e6cd88`); 
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |
 |---|---|---|---|---|---|---|
-| 2026-11-16 | **KT-66** | 11/11 | `97903b15` `[KT-66]` + `324d1da9` `[KT-66b]` (sửa 2 tệp nguồn thiếu) — **đã push**; sau đó `[ST-120b]/[ST-121]` của tab ViScript | product 188.184 / 200.120; ktest 574.032 / 209.856; guard 54.048 / 2.680; **user 335.520 / 202.280**; **proc 375.512 / 206.472**; NOLOAD per-hart 950.272 B riêng; `size_of` **188.872** ≤ 196.608 | `v2 check` PASS + `gate --fast` PASS **649/84** (L1 **911 ms** log / **919 ms** lead chạy lại) + `ktest.sh 1 matrix` **12/12** (TAP **60/60 + 3/3 + 14/14 + 10/10**) + `selftest.sh` **18/18** + `soak.sh 1000 3` **0/1000** (225 s) + **L1 100k × smp 1/2/4/8 = 400.000 lượt, 0 vi phạm** (4 tiến trình song song, 33m30s) + conformance **61/61, 5/5** + clippy kernel 5 tổ hợp sạch | **K3.5 GATE — stack syscall per-hart + tách ảnh demo**: `vifast-kbin-ktest-proc` (10 TAP 15..24→1..10) chạy script riêng, `ktest-user` 14 TAP **−36.936 B**; `SYSCALL_STACK` global **xoá** → block 32 KiB/hart trong NOLOAD per-hart (`HART_STRIDE 0x1D000`, canary + low, `distinct=1 canary=0` smp 1/2/4; demo dùng **22.088 B** chứng minh 16 KiB không đủ); arena **đỏ thật** (`stval=0xffffffc082007ff8` — root user không physmap); 3 log đỏ-trước split/stack/canary; `K35-DOD.md` D1..D12 (mỗi số có `log:dòng`), `k35-procsrv.md` §9/§10; nợ: fault bridge K3.6, kill chưa Revoke, `kill pid sai`, shim không workspace member, shell chưa UART IRQ, core chưa IPI, `TlbFlush targets/acked` chưa quan sát, slot 192 word |
-| 2026-11-16 | **KT-65** | 8/8 | `c607d0a9` + `[KT-65]` (b: STATE này) | product 187.936 / 200.120; ktest 573.744 / 209.856; guard 53.808 / 2.680; **user 401.448 / 239.216**; `size_of` **188.872** ≤ 196.608 | `gate --fast` PASS **649/84** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 24/24**, 48 evidence user) + `soak.sh 1000 3` **0/1000** (wall 225 s) + clippy core/plat/kbin `-D warnings` sạch | **K3.5 tầng 4 — procsrv U-mode + shell tối thiểu (first real user-process lifecycle)**: 3 ELF Rust U-mode riêng (`procsrv`/`shell`/`con`) nạp như `init`, shim `vifast-plat-user` (D2-93, chỉ `ecall`, 3 chương trình user **0 unsafe**); core `last_fault`→message IPC cho `Exit`, procsrv `Recv` rồi TCB `Inactive`, `wait` trả 42, `kill`=`Suspend(Abort)` có `suspend_ok`, shell `help/echo/ps/wait/kill/exit`, `ps` đọc `Machine` + TAP18 so từng dòng snapshot, không syscall mới/không procsrv-in-kernel; **phát hiện nền**: dispatch IPC trong trap tràn trap stack 16 KiB ⇒ stack dispatch riêng 32 KiB `.bss` + continuation `fault_phase` giữ TAP22..24; **nợ**: fault bridge là cầu nối ABI K3.6, kill chưa Revoke cap TCB, `kill pid sai` chưa từ chối, shim không phải workspace member, `SYSCALL_STACK` global chưa per-hart (KT-66) |
-| 2026-11-16 | **KT-64a** | 6/6 | `519d2e55` + `[KT-64a]`; `cff3faff` + `[KT-64a-b]` | product/ktest/guard/user **không đổi** (chỉ sim + core IPC; `size_of` **188.872** ≤ 196.608) | `gate --fast` PASS **647/83** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + `cargo test -p vifast-sim` **454/0** + `.scn` **27 tệp/16 nhóm** | **Đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` D2-92c — xoá hai loại trừ parity, một nguồn sự thật**: sim `finalise_ipc_waiters` đánh thức `BlockedOnRecv`/`BlockedOnNotification`/`BlockedOnSend` ⇒ `Cancelled + Ready` + huỷ hàng + `ipc_dropped`; core đóng **nợ D2-90** cho sender; parity `kt60` **18/18** (digest thêm `last_ipc_error`, 3 đường finalise phủ trọn, chốt pha trước `Revoke`) + `kt64` **4/4** (kịch bản C `TlbFlush`: `seq/targets/pending/acked/Busy`, `tlb_pending_ack` + trivial-complete thêm vào sim; **nợ quan sát** `targets/acked ≠ 0` của core ghi §13.9); `.scn` 26→**27 tệp**/16 nhóm đỏ-trước trên sim cũ; TAP 55 QEMU in `sender=Ready sender_err=Cancelled` (D2-90 trên nhân thật); **không còn loại trừ** §12.5/§13.1 |
-| 2026-11-16 | **KT-63** | 9/9 | `5380164b` + `[KT-63]` | product 191.824 / 199.696; ktest 533.536 / 209.856; guard 53.808 / 2.680; user 330.704 / 200.584 | `gate --fast` PASS **625/80** + `ktest.sh 1 matrix` **9/9** (TAP **56/56 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch + `v2 check` PASS | **K3.5 tầng 2 — chuyển cap qua IPC + finalise IPC khi Revoke**: `Message` mang cap nguồn/ảnh chụp + `TcbData.recv_window` + `plan_cap_transfer` nguyên sim (bỏ `RIGHT_GRANT`, unwrap badge, thất bại mềm, lỗi cứng trước giao); `delete`/`revoke` huỷ caller ⇒ `Cancelled + Ready`, Recv/Notification waiter thức (**chuẩn anti-hang D2-89**; sim treo = lỗi mô hình, KT-64a đóng lệch), hàng huỷ + `ipc_dropped`; parity **16/16** (5 kịch bản), core-only **13/13** (F1/F2/F3 review), TAP **53..55** (`# ipc:`), `size_of` **188.448** ≤ **196.608**, ảnh **200.584** ≤ **262.144**; nợ: MR>4 (KT-64), sender treo khi revoke (**D2-90**, KT-64a) |
-| 2026-11-16 | **KT-62** | 9/9 | `ebae897e` + `[KT-62]` | product 185.736 / 191.416; ktest 484.704 / 197.568; user 323.296 / 192.304 | `gate --fast` PASS **607/79** + `ktest.sh 1 matrix` **9/9** (TAP **53/53 + 3/3 + 17/17**, `harts` pin **1/2/4**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch | **K3.5 tầng 1 — 16 syscall `0..15` đi vào `Machine` thật**: `vifast-core/src/syscall.rs` (bảng 16 + `SyscallEnv` + `SyscallOutcome`), ngoài dải ⇒ **19 RangeError** (D2-79); façade plat-common xoá shim 3-syscall; `init` U-mode gọi `DebugGetInfo`/`Yield`/`Exit` qua core, `Exit` có `fault_ep` ⇒ `BlockedOnSend{call:false, fault=Exit{42}}` **không Reply**; TAP `ktest-user` **17** + evidence `# sys:` (`src=core`), host test **8** sim + **9** façade; `size_of` **180.168** ≤ **196.608**, ảnh **192.304** ≤ **262.144** (link `Machine` vào ảnh test user); nợ: cap transfer (KT-63), MR>4, invocation, scheduler U-mode, trace 32 B |
-| 2026-11-15 | **KT-61** | 9/9 | `1e2455c8` + `[KT-61]` | product 185.464 / 191.416; ktest 484.600 / 197.568 | `gate --fast` PASS **598/78** (L1 1.000 seed **849 ms**) + `ktest.sh 1 matrix` **9/9** (TAP **53/53 + 3/3 + 7/7**) + `soak.sh 1000 3` **0/1000** (wall 227 s, BUILD_ID `34dc594e0f651ed3`) + conformance **61/61 / 5/5** (`build=aab21609a80ca7a1`) + L1 100k **một phần** (smp 1: 100k, 3 cấu hình dừng vì ngân sách) + kernel clippy `-D warnings` sạch | **K3b cổng — core `no_std` chạy trên nhân thật**: `core_bridge` (static `.bss` + `init_zeroed` từ nhãn PA, lock, boot smoke) + TAP **43..52** trên QEMU (link/untyped/retype TCB/configure+resume+suspend/sched 2 TCB/IPC một vòng/Notification/WaitAddr/D2-83/invariants) + ảnh sản phẩm chạy vòng đời TCB mỗi boot; **hai ngưỡng**: `size_of` **180.168** ≤ **196.608**, ảnh **191.416/197.568/2.680/11.752** ≤ **262.144**; `.bss` **không** vào file (`filesz` 7.760/7.912; bản `.data` từng 365.632/664.824 — bỏ); D2-83 một chiều (VM ở obj layer, core `NotSupported` 3/3 atomic, WaitAddr nhãn PPN); `SlotPool` giữ nguyên + nợ K3.5 §9.6; **không claim kernel đầy đủ** (procsrv/shell/cap transfer/finalise IPC/TlbFlush/Bind = K3.5, DOD §11) |
-| 2026-11-15 | **KT-60** | 9/9 | `70fd5e45` + `[KT-60]` | — | `gate --fast` PASS (**598 test/78 suite**, L1 1.000 seed **822 ms**) + `ktest.sh 1 matrix` **9/9** (TAP **43/3/7**) + core bare-metal build/clippy xanh | **K3b tầng 3 — commit `[KT-60]` + `[KT-60b]` pushed**; port `no_std` IPC/Reply/Notification/WaitAddr/fault + donation KT-21 + 2 hook KT-59 tại `transition_tcb`; parity sim↔core **6 kịch bản** (KT-24/25+34/27/28/26/21) so mã lỗi + digest **sau từng bước** (hàng Endpoint đủ nội dung, IpcArea, Reply caller, Notification, WaitAddr, counters, hộp thư) + 3 test core-only + pin; accessor sim **chỉ đọc** (`endpoint_queued`/`mail_items`); **D2-85b** `MAX_MAIL_LOG` 64→32 ⇒ `size_of::<Machine>() = 180.168 B` `[ĐO]` (91,6 % pin 196.608, còn 16.440; **chưa link**, ảnh `.data+.bss` 11.248 không đổi); red-before + M1/M2/M3 (M3 phải thêm bước OR 0x10\|0x02 mới bắt — tăng phủ, ghi nhận); reviewer-kt60 DRIFT → vá **F1/F2/F3/F5**, F4 ghi nợ `SchedContext.Bind` (`bound_sc` trường chết), D2-85a hai ngưỡng tách |
-| 2026-11-15 | **KT-58** | 9/9 | `95021ca4` + `[KT-58]` | — | `gate --fast` PASS (**579 test/76 suite**, L1 1.000 seed **830 ms**, wall 4 m 41,3 s) + `ktest.sh 1 matrix` **9/9** (TAP **43/3/7**, `expected.txt` không đổi) + product `run.sh 1 1` PASS + core bare-metal build/clippy xanh | **K3b tầng 1 — commit `[KT-58]` + `[KT-58b]` pushed**; crate mới `v2/kernel/vifast-core` (`no_std`, `forbid(unsafe_code)`, không alloc; Untyped/CNode/MDB/cap, 1.919 dòng); gen sinh hằng `[object_size]` từ `spec/abi.toml` (không hardcode 48/64/4096) + `vifast-abi` no_std; parity host với sim: 14 kịch bản KT-09/10/11 + D2-83, differential **32 seed × 48 op** (2.016 bước, 877 ok/1.139 lỗi, 57 Retype/71 Copy/13 Mint/37 Delete/79 cap revoke) khớp kết quả + digest + `check_caps`/`check_bytes` **sau từng bước**; reviewer DRIFT thấp → vá 7 mục (mã lỗi CNode đã finalise `InvalidCapability`, D2-83 nhãn PA + biên giới VM + test pin, 3 kịch bản nhánh còn thiếu, M1 độc lập); đỏ trước + mutation M1/M2/M3 độc lập (sha `acde4970…`); `docs/k3b-core.md` (bản đồ sim→core, khác biệt/nợ); kernel **không đổi** (TAP 43/3/7, budget 11.248/17.344/2.680/11.752 B ≤ 262.144), core tĩnh `68.264 B` chưa link |
-| 2026-11-15 | **KT-56** | 9/9 | `25251719` | — | `gate --fast` PASS (**574 test/75 suite**, L1 1.000 seed) + `ktest.sh 50 matrix` **450/450** boot (43/3/7 TAP) + trace **61/61** + `selftest.sh` **17/17** + product `run.sh 1` PASS | **commit `25251719` + `[KT-56b]` pushed**; `FaultKind` ABI **khớp K2** (Exit/Vm/UnknownSyscall/UserException, `Vm{access,reason}`, `va=stval`) từ **trap phần cứng thật** (`probe` load/store/insn; `.scn` 25/26 `fault` không còn phân loại PTE; ca 26 scratch-map đúng PA/cờ tại đúng VA, `reason` đọc leaf thật `mmu::walk_sw`); `spec/abi.toml` **đúng 1 hunk** + `vifast-gen` sinh `FAULT_KINDS` (D2-81, 2 lần cùng sha256); W^X: map `W\|X` ⇒ `WxViolation`+ABI 4 atomic, U-mode thực thi trang RW NX ⇒ `Vm{Execute,Wx}`+PANIC, `Frame.mapped_device` chặn Device↔exec **toàn cục** (giải nợ L3 KT-52); TAP 38..42 (ktest 43, trap lồng 43) + user 5..7; reviewer-kt56 **APPROVE → vá 4/4** (M1 reason từ leaf thật, M2 450 boot thật, L2 nhánh non-ktest, L1/L3 ghi nợ) |
-| 2026-11-15 | **KT-55** | 8/8 | `b3b8ed01` | — | `gate --fast` PASS (**573 test/75 suite**, L1 1.000 seed) + `ktest.sh 1 matrix` **9/9** boot (38 TAP, 65 evidence) + `selftest.sh` **17/17** | **commit `b3b8ed01` + `[KT-55b]` pushed**; conformance 5 `.scn` nền tảng (22..26) chạy **cùng chương trình bước** ở sim host + kernel QEMU, `# trace:` chuẩn hoá **61/61 dòng khớp 5/5 ca** (smp2/4); IR `vifast-scenario` loại bước **có lý do** (Frame 1 GiB, TLB per-hart model, TCB/procsrv Q13); `fault` kernel = phân loại **PTE** (không phải trap/KT-56); ca 24 shootdown **thật** `-smp≥2`, `-smp1` `skipped`; TAP **37** (`5/5` / `4/5 + 1 skipped`), trap lồng dời 38; **D2-80** `# conf image: build=…` (FNV `.text`) — runner + `trace_compare --image` **từ chối** log thiếu/lệch, chứng minh chép trace sim vào log khác bị **đỏ**; **conformance bắt lỗi platform thật**: `map`/`protect` cho phép **một** mapping `W|X` (tự phá D2-67, K2 từ chối) → sửa atomic + test host đỏ→xanh (KT-52 không bắt vì khoảng trống phủ); ngân sách không đổi; docs §18 + `check_scn --trace` kiểm **chiều sim**; reviewer-kt55 **DRIFT → vá 7/7** |
-| 2026-11-15 | **KT-50** | 8/8 | `74c22d4b` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed) + **300/300 boot** (matrix 1/2/4 × 50, 0 `not ok`) | **commit `74c22d4b` đã push**; SBI IPI EID `0x735049` + `Event::Ipi` (tách 1/5/9), hộp thư per-hart coalesce 3 kind, `sent/delivered/coalesced/spurious`, **không self-target** (D2-68), **drain trước mỗi bước** + timeout luôn hết; **D2-76** `sip.SSIP` thay ACLINT MSWI (PMP chặn, log `-d int`); **D2-77** post hart offline ⇒ `Invalid` + gỡ bit khi SBI lỗi; TAP 20..24 (`100 ipi delivered` / `100 ipi traps (self)`), nested dời 25 (25/25 + guard 3/3); host **67/67**; **reviewer-kt50 DRIFT nhẹ, 6/6 mục vá**; budget 2840/4304/2688 B ≤ 262.144; product `run.sh 1 2` PASS |
-| 2026-11-14 | **KT-44** | 8/8 | `efe128fb` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1.000 seed; baseline cùng số) | **xong mã — chờ Agent 0 lật sổ**; `vifast-plat-common` no_std/`forbid(unsafe)` + trait `Platform`/`PanicHandler`; 2 ảnh bằng feature `ktest` (sản phẩm 0 chuỗi `ktest`, ảnh test 8); budget `data+bss 0 B`/262.144, `.stack` 65.536 + guard 4.096 báo riêng; TAP 1 boot ×2 ảnh; host test 3/3 |
-| 2026-11-13 | **KT-30** | 8/8 | `29718a6` | — | `gate --fast` PASS (**461 test/62 suite**, L1 1000 seed/999 trace, 750 ms; wall 199,3 s — **T-INFRA** tải máy) | **xong mã — chờ Agent 0 lật sổ**; `vifast-sync` `no_std` **1.346 dòng** (src 845, test 501), **0 dependency**, 8 khối `unsafe` có `SAFETY`; MCS lock FIFO qua **pool node cố định 16 slot** (không con trỏ thô, `Guard` giữ chỉ số slot), **không reentrant**; `Mailbox<N>` MPSC **7 loại** (`Wake/TlbFlush/Reschedule/Migrate/Stop/VmKick/PowerReq`), đầy ⇒ `Busy` (không mất message đầu), **ack thế hệ** `AtomicU32`; stress 4×500 (≈2,6 ms) + **200 lần / 0 fail**; Miri **16/16**; **reviewer-kt30 DRIFT đã sửa 2/2 chặn** (assertion stress; hook test `pub`→`pub(crate)`+`cfg(test)`); **không** loom/explorer (D2-53 Q9(a)) |
-| 2026-11-13 | **KT-28** | 10/10 | `ff94538` | — | `gate --fast` PASS (**427 test/56 suite**, L1 1000 seed/999 trace, 704 ms) | **commit `ff94538` đã push**; WaitOnAddress bảng băm `(frame, offset)` 64 bucket hằng model `[TK]` (không tạo `spec/kernel.toml`), `wait_addr` đọc giá trị + xếp hàng một lần (expected lệch ⇒ `InvalidArgument` không xếp hàng), **không timeout** (D2-53 Q4), `wake_addr(n)` FIFO tối đa n, `check_waitaddr` sau mỗi op, API K1b giữ nguyên; 12 test + fuzz **1.000 seed × 64 op**, Miri **12/12** + lib **2/2**; đột biến "xếp hàng trước rồi so" bị bắt; **reviewer-kt28 APPROVE**; chờ Agent 0 lật sổ |
-| 2026-11-13 | **KT-23** | 7/8 | `67aa8bc` | — | `gate --fast` PASS (**321 test/47 suite**, L1 1000 seed/999 trace, 687 ms) | **xong mã — chờ review độc lập rồi mới commit**; coverage **46/46** (bảng 48/48) + **73/73** cặp cấm (`forbidden_attempts=73`), fuzz 1.000×64 = **256.000** kiểm 4 miền/0 vi phạm; **bug fuzz tìm ra đã sửa** (Exit fault giao thẳng Recv waiter); Miri **12/12** (2.608 s); parity 10.000 seed/0 lệch (chỉ Untyped/CNode); `.scn` 21 tệp/11 nhóm, fixture 12 sửa **1 dòng** (D2-52); DoD K1b: 3/4 ĐẠT, push migration **hoãn K1c** (D2-49(a)) |
-| 2026-11-13 | **KT-21** | 8/8 | `d547bbf` | — | `gate --fast` PASS (**298 test/45 suite**, L1 1000 seed/999 trace, 550 ms) | donation tự động Call/Reply + passive server + MCP (model-only `[TK]`); **13 test** (invariant **1.000 seed × 64 op**, **14.609** bước có donation), Miri **13/13** (129 s); commit `eae876b` + follow-up `[KT-21]` (3 điều kiện `reviewer-kt21`) đã push; **chờ Agent 0 ghi D2-51 + lật sổ** |
+| 2026-11-16 | **KT-66** | 11/11 | `97903b15` `[KT-66]` + `324d1da9` `[KT-66b]` (sửa 2 tệp nguồn thiếu) — **đã push**; sau đó `[ST-120b]/[ST-121]` của tab ViScript | product 188184 / 200120; ktest 574032 / 209856; guard 54048 / 2680; **user 335520 / 202280**; **proc 375512 / 206472**; NOLOAD per-hart 950272 B riêng; `size_of` **188872** ≤ 196608 | `v2 check` PASS + `gate --fast` PASS **649/84** (L1 **911 ms** log / **919 ms** lead chạy lại) + `ktest.sh 1 matrix` **12/12** (TAP **60/60 + 3/3 + 14/14 + 10/10**) + `selftest.sh` **18/18** + `soak.sh 1000 3` **0/1000** (225 s) + **L1 100k × smp 1/2/4/8 = 400000 lượt, 0 vi phạm** (4 tiến trình song song, 33m30s) + conformance **61/61, 5/5** + clippy kernel 5 tổ hợp sạch | **K3.5 GATE — stack syscall per-hart + tách ảnh demo**: `vifast-kbin-ktest-proc` (10 TAP 15..24→1..10) chạy script riêng, `ktest-user` 14 TAP **−36936 B**; `SYSCALL_STACK` global **xoá** → block 32 KiB/hart trong NOLOAD per-hart (`HART_STRIDE 0x1D000`, canary + low, `distinct=1 canary=0` smp 1/2/4; demo dùng **22088 B** chứng minh 16 KiB không đủ); arena **đỏ thật** (`stval=0xffffffc082007ff8` — root user không physmap); 3 log đỏ-trước split/stack/canary; `K35-DOD.md` D1..D12 (mỗi số có `log:dòng`), `k35-procsrv.md` §9/§10; nợ: fault bridge K3.6, kill chưa Revoke, `kill pid sai`, shim không workspace member, shell chưa UART IRQ, core chưa IPI, `TlbFlush targets/acked` chưa quan sát, slot 192 word |
+| 2026-11-16 | **KT-65** | 8/8 | `c607d0a9` + `[KT-65]` (b: STATE này) | product 187936 / 200120; ktest 573744 / 209856; guard 53808 / 2680; **user 401448 / 239216**; `size_of` **188872** ≤ 196608 | `gate --fast` PASS **649/84** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 24/24**, 48 evidence user) + `soak.sh 1000 3` **0/1000** (wall 225 s) + clippy core/plat/kbin `-D warnings` sạch | **K3.5 tầng 4 — procsrv U-mode + shell tối thiểu (first real user-process lifecycle)**: 3 ELF Rust U-mode riêng (`procsrv`/`shell`/`con`) nạp như `init`, shim `vifast-plat-user` (D2-93, chỉ `ecall`, 3 chương trình user **0 unsafe**); core `last_fault`→message IPC cho `Exit`, procsrv `Recv` rồi TCB `Inactive`, `wait` trả 42, `kill`=`Suspend(Abort)` có `suspend_ok`, shell `help/echo/ps/wait/kill/exit`, `ps` đọc `Machine` + TAP18 so từng dòng snapshot, không syscall mới/không procsrv-in-kernel; **phát hiện nền**: dispatch IPC trong trap tràn trap stack 16 KiB ⇒ stack dispatch riêng 32 KiB `.bss` + continuation `fault_phase` giữ TAP22..24; **nợ**: fault bridge là cầu nối ABI K3.6, kill chưa Revoke cap TCB, `kill pid sai` chưa từ chối, shim không phải workspace member, `SYSCALL_STACK` global chưa per-hart (KT-66) |
+| 2026-11-16 | **KT-64a** | 6/6 | `519d2e55` + `[KT-64a]`; `cff3faff` + `[KT-64a-b]` | product/ktest/guard/user **không đổi** (chỉ sim + core IPC; `size_of` **188872** ≤ 196608) | `gate --fast` PASS **647/83** + `ktest.sh 1 matrix` **9/9** (TAP **60/60 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + `cargo test -p vifast-sim` **454/0** + `.scn` **27 tệp/16 nhóm** | **Đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` D2-92c — xoá hai loại trừ parity, một nguồn sự thật**: sim `finalise_ipc_waiters` đánh thức `BlockedOnRecv`/`BlockedOnNotification`/`BlockedOnSend` ⇒ `Cancelled + Ready` + huỷ hàng + `ipc_dropped`; core đóng **nợ D2-90** cho sender; parity `kt60` **18/18** (digest thêm `last_ipc_error`, 3 đường finalise phủ trọn, chốt pha trước `Revoke`) + `kt64` **4/4** (kịch bản C `TlbFlush`: `seq/targets/pending/acked/Busy`, `tlb_pending_ack` + trivial-complete thêm vào sim; **nợ quan sát** `targets/acked ≠ 0` của core ghi §13.9); `.scn` 26→**27 tệp**/16 nhóm đỏ-trước trên sim cũ; TAP 55 QEMU in `sender=Ready sender_err=Cancelled` (D2-90 trên nhân thật); **không còn loại trừ** §12.5/§13.1 |
+| 2026-11-16 | **KT-63** | 9/9 | `5380164b` + `[KT-63]` | product 191824 / 199696; ktest 533536 / 209856; guard 53808 / 2680; user 330704 / 200584 | `gate --fast` PASS **625/80** + `ktest.sh 1 matrix` **9/9** (TAP **56/56 + 3/3 + 17/17**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch + `v2 check` PASS | **K3.5 tầng 2 — chuyển cap qua IPC + finalise IPC khi Revoke**: `Message` mang cap nguồn/ảnh chụp + `TcbData.recv_window` + `plan_cap_transfer` nguyên sim (bỏ `RIGHT_GRANT`, unwrap badge, thất bại mềm, lỗi cứng trước giao); `delete`/`revoke` huỷ caller ⇒ `Cancelled + Ready`, Recv/Notification waiter thức (**chuẩn anti-hang D2-89**; sim treo = lỗi mô hình, KT-64a đóng lệch), hàng huỷ + `ipc_dropped`; parity **16/16** (5 kịch bản), core-only **13/13** (F1/F2/F3 review), TAP **53..55** (`# ipc:`), `size_of` **188448** ≤ **196608**, ảnh **200584** ≤ **262144**; nợ: MR>4 (KT-64), sender treo khi revoke (**D2-90**, KT-64a) |
+| 2026-11-16 | **KT-62** | 9/9 | `ebae897e` + `[KT-62]` | product 185736 / 191416; ktest 484704 / 197568; user 323296 / 192304 | `gate --fast` PASS **607/79** + `ktest.sh 1 matrix` **9/9** (TAP **53/53 + 3/3 + 17/17**, `harts` pin **1/2/4**) + `soak.sh 1000 3` **0/1000** + kernel clippy sạch | **K3.5 tầng 1 — 16 syscall `0..15` đi vào `Machine` thật**: `vifast-core/src/syscall.rs` (bảng 16 + `SyscallEnv` + `SyscallOutcome`), ngoài dải ⇒ **19 RangeError** (D2-79); façade plat-common xoá shim 3-syscall; `init` U-mode gọi `DebugGetInfo`/`Yield`/`Exit` qua core, `Exit` có `fault_ep` ⇒ `BlockedOnSend{call:false, fault=Exit{42}}` **không Reply**; TAP `ktest-user` **17** + evidence `# sys:` (`src=core`), host test **8** sim + **9** façade; `size_of` **180168** ≤ **196608**, ảnh **192304** ≤ **262144** (link `Machine` vào ảnh test user); nợ: cap transfer (KT-63), MR>4, invocation, scheduler U-mode, trace 32 B |
+| 2026-11-15 | **KT-61** | 9/9 | `1e2455c8` + `[KT-61]` | product 185464 / 191416; ktest 484600 / 197568 | `gate --fast` PASS **598/78** (L1 1000 seed **849 ms**) + `ktest.sh 1 matrix` **9/9** (TAP **53/53 + 3/3 + 7/7**) + `soak.sh 1000 3` **0/1000** (wall 227 s, BUILD_ID `34dc594e0f651ed3`) + conformance **61/61 / 5/5** (`build=aab21609a80ca7a1`) + L1 100k **một phần** (smp 1: 100k, 3 cấu hình dừng vì ngân sách) + kernel clippy `-D warnings` sạch | **K3b cổng — core `no_std` chạy trên nhân thật**: `core_bridge` (static `.bss` + `init_zeroed` từ nhãn PA, lock, boot smoke) + TAP **43..52** trên QEMU (link/untyped/retype TCB/configure+resume+suspend/sched 2 TCB/IPC một vòng/Notification/WaitAddr/D2-83/invariants) + ảnh sản phẩm chạy vòng đời TCB mỗi boot; **hai ngưỡng**: `size_of` **180168** ≤ **196608**, ảnh **191416/197568/2680/11752** ≤ **262144**; `.bss` **không** vào file (`filesz` 7760/7912; bản `.data` từng 365632/664824 — bỏ); D2-83 một chiều (VM ở obj layer, core `NotSupported` 3/3 atomic, WaitAddr nhãn PPN); `SlotPool` giữ nguyên + nợ K3.5 §9.6; **không claim kernel đầy đủ** (procsrv/shell/cap transfer/finalise IPC/TlbFlush/Bind = K3.5, DOD §11) |
+| 2026-11-15 | **KT-60** | 9/9 | `70fd5e45` + `[KT-60]` | — | `gate --fast` PASS (**598 test/78 suite**, L1 1000 seed **822 ms**) + `ktest.sh 1 matrix` **9/9** (TAP **43/3/7**) + core bare-metal build/clippy xanh | **K3b tầng 3 — commit `[KT-60]` + `[KT-60b]` pushed**; port `no_std` IPC/Reply/Notification/WaitAddr/fault + donation KT-21 + 2 hook KT-59 tại `transition_tcb`; parity sim↔core **6 kịch bản** (KT-24/25+34/27/28/26/21) so mã lỗi + digest **sau từng bước** (hàng Endpoint đủ nội dung, IpcArea, Reply caller, Notification, WaitAddr, counters, hộp thư) + 3 test core-only + pin; accessor sim **chỉ đọc** (`endpoint_queued`/`mail_items`); **D2-85b** `MAX_MAIL_LOG` 64→32 ⇒ `size_of::<Machine>() = 180168 B` `[ĐO]` (91,6 % pin 196608, còn 16440; **chưa link**, ảnh `.data+.bss` 11248 không đổi); red-before + M1/M2/M3 (M3 phải thêm bước OR 0x10\|0x02 mới bắt — tăng phủ, ghi nhận); reviewer-kt60 DRIFT → vá **F1/F2/F3/F5**, F4 ghi nợ `SchedContext.Bind` (`bound_sc` trường chết), D2-85a hai ngưỡng tách |
+| 2026-11-15 | **KT-58** | 9/9 | `95021ca4` + `[KT-58]` | — | `gate --fast` PASS (**579 test/76 suite**, L1 1000 seed **830 ms**, wall 4 m 41,3 s) + `ktest.sh 1 matrix` **9/9** (TAP **43/3/7**, `expected.txt` không đổi) + product `run.sh 1 1` PASS + core bare-metal build/clippy xanh | **K3b tầng 1 — commit `[KT-58]` + `[KT-58b]` pushed**; crate mới `v2/kernel/vifast-core` (`no_std`, `forbid(unsafe_code)`, không alloc; Untyped/CNode/MDB/cap, 1919 dòng); gen sinh hằng `[object_size]` từ `spec/abi.toml` (không hardcode 48/64/4096) + `vifast-abi` no_std; parity host với sim: 14 kịch bản KT-09/10/11 + D2-83, differential **32 seed × 48 op** (2016 bước, 877 ok/1139 lỗi, 57 Retype/71 Copy/13 Mint/37 Delete/79 cap revoke) khớp kết quả + digest + `check_caps`/`check_bytes` **sau từng bước**; reviewer DRIFT thấp → vá 7 mục (mã lỗi CNode đã finalise `InvalidCapability`, D2-83 nhãn PA + biên giới VM + test pin, 3 kịch bản nhánh còn thiếu, M1 độc lập); đỏ trước + mutation M1/M2/M3 độc lập (sha `acde4970…`); `docs/k3b-core.md` (bản đồ sim→core, khác biệt/nợ); kernel **không đổi** (TAP 43/3/7, budget 11248/17344/2680/11752 B ≤ 262144), core tĩnh `68264 B` chưa link |
+| 2026-11-15 | **KT-56** | 9/9 | `25251719` | — | `gate --fast` PASS (**574 test/75 suite**, L1 1000 seed) + `ktest.sh 50 matrix` **450/450** boot (43/3/7 TAP) + trace **61/61** + `selftest.sh` **17/17** + product `run.sh 1` PASS | **commit `25251719` + `[KT-56b]` pushed**; `FaultKind` ABI **khớp K2** (Exit/Vm/UnknownSyscall/UserException, `Vm{access,reason}`, `va=stval`) từ **trap phần cứng thật** (`probe` load/store/insn; `.scn` 25/26 `fault` không còn phân loại PTE; ca 26 scratch-map đúng PA/cờ tại đúng VA, `reason` đọc leaf thật `mmu::walk_sw`); `spec/abi.toml` **đúng 1 hunk** + `vifast-gen` sinh `FAULT_KINDS` (D2-81, 2 lần cùng sha256); W^X: map `W\|X` ⇒ `WxViolation`+ABI 4 atomic, U-mode thực thi trang RW NX ⇒ `Vm{Execute,Wx}`+PANIC, `Frame.mapped_device` chặn Device↔exec **toàn cục** (giải nợ L3 KT-52); TAP 38..42 (ktest 43, trap lồng 43) + user 5..7; reviewer-kt56 **APPROVE → vá 4/4** (M1 reason từ leaf thật, M2 450 boot thật, L2 nhánh non-ktest, L1/L3 ghi nợ) |
+| 2026-11-15 | **KT-55** | 8/8 | `b3b8ed01` | — | `gate --fast` PASS (**573 test/75 suite**, L1 1000 seed) + `ktest.sh 1 matrix` **9/9** boot (38 TAP, 65 evidence) + `selftest.sh` **17/17** | **commit `b3b8ed01` + `[KT-55b]` pushed**; conformance 5 `.scn` nền tảng (22..26) chạy **cùng chương trình bước** ở sim host + kernel QEMU, `# trace:` chuẩn hoá **61/61 dòng khớp 5/5 ca** (smp2/4); IR `vifast-scenario` loại bước **có lý do** (Frame 1 GiB, TLB per-hart model, TCB/procsrv Q13); `fault` kernel = phân loại **PTE** (không phải trap/KT-56); ca 24 shootdown **thật** `-smp≥2`, `-smp1` `skipped`; TAP **37** (`5/5` / `4/5 + 1 skipped`), trap lồng dời 38; **D2-80** `# conf image: build=…` (FNV `.text`) — runner + `trace_compare --image` **từ chối** log thiếu/lệch, chứng minh chép trace sim vào log khác bị **đỏ**; **conformance bắt lỗi platform thật**: `map`/`protect` cho phép **một** mapping `W|X` (tự phá D2-67, K2 từ chối) → sửa atomic + test host đỏ→xanh (KT-52 không bắt vì khoảng trống phủ); ngân sách không đổi; docs §18 + `check_scn --trace` kiểm **chiều sim**; reviewer-kt55 **DRIFT → vá 7/7** |
+| 2026-11-15 | **KT-50** | 8/8 | `74c22d4b` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1000 seed) + **300/300 boot** (matrix 1/2/4 × 50, 0 `not ok`) | **commit `74c22d4b` đã push**; SBI IPI EID `0x735049` + `Event::Ipi` (tách 1/5/9), hộp thư per-hart coalesce 3 kind, `sent/delivered/coalesced/spurious`, **không self-target** (D2-68), **drain trước mỗi bước** + timeout luôn hết; **D2-76** `sip.SSIP` thay ACLINT MSWI (PMP chặn, log `-d int`); **D2-77** post hart offline ⇒ `Invalid` + gỡ bit khi SBI lỗi; TAP 20..24 (`100 ipi delivered` / `100 ipi traps (self)`), nested dời 25 (25/25 + guard 3/3); host **67/67**; **reviewer-kt50 DRIFT nhẹ, 6/6 mục vá**; budget 2840/4304/2688 B ≤ 262144; product `run.sh 1 2` PASS |
+| 2026-11-14 | **KT-44** | 8/8 | `efe128fb` | — | `gate --fast` PASS (**569 test/73 suite**, L1 1000 seed; baseline cùng số) | **xong mã — chờ Agent 0 lật sổ**; `vifast-plat-common` no_std/`forbid(unsafe)` + trait `Platform`/`PanicHandler`; 2 ảnh bằng feature `ktest` (sản phẩm 0 chuỗi `ktest`, ảnh test 8); budget `data+bss 0 B`/262144, `.stack` 65536 + guard 4096 báo riêng; TAP 1 boot ×2 ảnh; host test 3/3 |
+| 2026-11-13 | **KT-30** | 8/8 | `29718a6` | — | `gate --fast` PASS (**461 test/62 suite**, L1 1000 seed/999 trace, 750 ms; wall 199,3 s — **T-INFRA** tải máy) | **xong mã — chờ Agent 0 lật sổ**; `vifast-sync` `no_std` **1346 dòng** (src 845, test 501), **0 dependency**, 8 khối `unsafe` có `SAFETY`; MCS lock FIFO qua **pool node cố định 16 slot** (không con trỏ thô, `Guard` giữ chỉ số slot), **không reentrant**; `Mailbox<N>` MPSC **7 loại** (`Wake/TlbFlush/Reschedule/Migrate/Stop/VmKick/PowerReq`), đầy ⇒ `Busy` (không mất message đầu), **ack thế hệ** `AtomicU32`; stress 4×500 (≈2,6 ms) + **200 lần / 0 fail**; Miri **16/16**; **reviewer-kt30 DRIFT đã sửa 2/2 chặn** (assertion stress; hook test `pub`→`pub(crate)`+`cfg(test)`); **không** loom/explorer (D2-53 Q9(a)) |
+| 2026-11-13 | **KT-28** | 10/10 | `ff94538` | — | `gate --fast` PASS (**427 test/56 suite**, L1 1000 seed/999 trace, 704 ms) | **commit `ff94538` đã push**; WaitOnAddress bảng băm `(frame, offset)` 64 bucket hằng model `[TK]` (không tạo `spec/kernel.toml`), `wait_addr` đọc giá trị + xếp hàng một lần (expected lệch ⇒ `InvalidArgument` không xếp hàng), **không timeout** (D2-53 Q4), `wake_addr(n)` FIFO tối đa n, `check_waitaddr` sau mỗi op, API K1b giữ nguyên; 12 test + fuzz **1000 seed × 64 op**, Miri **12/12** + lib **2/2**; đột biến "xếp hàng trước rồi so" bị bắt; **reviewer-kt28 APPROVE**; chờ Agent 0 lật sổ |
+| 2026-11-13 | **KT-23** | 7/8 | `67aa8bc` | — | `gate --fast` PASS (**321 test/47 suite**, L1 1000 seed/999 trace, 687 ms) | **xong mã — chờ review độc lập rồi mới commit**; coverage **46/46** (bảng 48/48) + **73/73** cặp cấm (`forbidden_attempts=73`), fuzz 1000×64 = **256000** kiểm 4 miền/0 vi phạm; **bug fuzz tìm ra đã sửa** (Exit fault giao thẳng Recv waiter); Miri **12/12** (2608 s); parity 10000 seed/0 lệch (chỉ Untyped/CNode); `.scn` 21 tệp/11 nhóm, fixture 12 sửa **1 dòng** (D2-52); DoD K1b: 3/4 ĐẠT, push migration **hoãn K1c** (D2-49(a)) |
+| 2026-11-13 | **KT-21** | 8/8 | `d547bbf` | — | `gate --fast` PASS (**298 test/45 suite**, L1 1000 seed/999 trace, 550 ms) | donation tự động Call/Reply + passive server + MCP (model-only `[TK]`); **13 test** (invariant **1000 seed × 64 op**, **14609** bước có donation), Miri **13/13** (129 s); commit `eae876b` + follow-up `[KT-21]` (3 điều kiện `reviewer-kt21`) đã push; **chờ Agent 0 ghi D2-51 + lật sổ** |
 | 2026-11-13 | **KT-18** | 8/8 | `5cccb72` | — | `gate --fast` PASS (**251 test/42 suite**, L1 1000 seed/999 trace) | **commit `5cccb72` đã push**; TCB 11 trường + **một cửa** `transition_tcb` + bảng `ALLOWED` 48 = **46+2 reserved**, 18 test (ma trận 121 cặp, coverage bảng 100%), Miri kt18 **18/18**; drift D2-33 sửa; reviewer DRIFT nhẹ đã sửa; chờ Agent 0 lật sổ |
-| 2026-11-13 | **KT-15** | 8/8 | `c0d3163` | — | `gate --fast` PASS (**218 test**, L1 1000 seed/999 trace, 596 ms) | **commit `c0d3163` đã push — reviewer DRIFT nhẹ đã sửa, chờ Agent 0 lật sổ**; `with_many_mut` D2-48(a): bảng `kind→ctor`, alias từng cặp, N=9 không build; Miri PASS (alias 8/8, fuzz 200/191,95 s); fuzz 10.000 chuỗi/4,51 s; `aarch64-none` xanh; guard `chua_header` + `TypeId` |
+| 2026-11-13 | **KT-15** | 8/8 | `c0d3163` | — | `gate --fast` PASS (**218 test**, L1 1000 seed/999 trace, 596 ms) | **commit `c0d3163` đã push — reviewer DRIFT nhẹ đã sửa, chờ Agent 0 lật sổ**; `with_many_mut` D2-48(a): bảng `kind→ctor`, alias từng cặp, N=9 không build; Miri PASS (alias 8/8, fuzz 200/191,95 s); fuzz 10000 chuỗi/4,51 s; `aarch64-none` xanh; guard `chua_header` + `TypeId` |
 | 2026-11-13 | **KT-14** | 8/8 | `e1921ab` | — | `gate --fast` PASS (199 test, L1 1000 seed/999 trace, 433 ms) | **DONE** `36c51bc`; `vifast-objmem` 15 test, Miri 15/15, build `aarch64-unknown-none`; reviewer DRIFT nhẹ đã sửa; **YC-18** chốt **D2-48** |
 | 2026-11-13 | **KT-13** | 8/8 | `5ad86e5` | — | `check` + `gate --fast` PASS (184 test, L1 1000 seed/999 trace, 603 ms) | **reviewer-kt13 APPROVE — chờ Agent 0 lật sổ**; `v2 miri` (D2-47(a): lệnh rời, không trong `gate --fast`); Miri PoC 13 test PASS; nhánh thiếu toolchain fail rõ |
-| 2026-11-13 | **KT-11** | 8/8 | — | — | `gate --fast` PASS (L1 1000 seed/999 trace, **184 test**) | **DONE** `035584b`; `vifast-model` Untyped/CNode + F3; parity sim **10.000 seed/0 lệch**; `.scn` **9/9** (D2-44..46) |
-| 2026-11-12 | **KT-10** | 8/8 | — | — | `gate --fast` PASS (L1 1000 seed/999 trace, 161 test) | **xong mã — chờ Agent 0**; CNode/MDB test-first: `mint`, `check_caps`, delete reparent, finalise CNode; **20 test mới**, property 6.144 thao tác |
+| 2026-11-13 | **KT-11** | 8/8 | — | — | `gate --fast` PASS (L1 1000 seed/999 trace, **184 test**) | **DONE** `035584b`; `vifast-model` Untyped/CNode + F3; parity sim **10000 seed/0 lệch**; `.scn` **9/9** (D2-44..46) |
+| 2026-11-12 | **KT-10** | 8/8 | — | — | `gate --fast` PASS (L1 1000 seed/999 trace, 161 test) | **xong mã — chờ Agent 0**; CNode/MDB test-first: `mint`, `check_caps`, delete reparent, finalise CNode; **20 test mới**, property 6144 thao tác |
 | 2026-11-12 | **KT-09b** | 8/8 | — | — | `gate --fast` PASS (L1 1000 seed/999 trace) | sửa review Agent 0: `TcbState` đủ 11 variant (test spec), `check_bytes` siết allocated/gap, revoke Untyped lồng nhau; **29 test** |
 | 2026-11-12 | **KT-09** | 8/8 | — | — | `gate --fast` PASS (L1 1000 seed/999 trace) | **xong mã — chờ Agent 0 lật sổ** (D2-37); Untyped/Revoke/e2e + C5; **27 test**; fixture âm kiểm thông điệp |
 | 2026-11-12 | **KT-12b** | 8/8 | — | — | `gate --fast` PASS (có bước no_std) | **xong mã — chờ Agent 0 lật sổ** (D2-37); no_std + std gating đúng D2-42; gen sinh TRACE_* từ `[trace]` |
 | 2026-11-12 | **KT-12** | 8/8 | — | — | `check`+`gate --fast` PASS | **DONE**: `vifast-traceformat` (Record 32 B D2-38, ring, decode_all) + golden nhị phân 200×32 B + cross-check text↔nhị phân |
 | 2026-11-12 | **KT-05** | 8/8 | — | — | `check`+`gate --fast` PASS (gen-check ON) | **DONE**: `[method_signature]` stable-draft vào spec; `vifast-gen` sinh code+`docs/v2/abi.md`; gen-check so byte + 3 fixture âm |
 | 2026-11-12 | **KT-R1** | 8/8 | — | — | `check` PASS (báo cáo) | **DONE**: `R1-v2.md` 6 mục + `R1-v2.json` 11 khoá (project v2); `check_report.py` nối vào `v2 check`; ghi cả hai trạng thái khi sổ lệch |
-| 2026-11-12 | **KT-08** | 8/8 | — | — | `gate --fast` PASS (**L1 1000 seed**) | **DONE**: `v2/sim/vifast-sim` (store giả + scheduler 1 hart, trace băm FNV-1a); `v2 sim` CLI; **L1 1.000 seed bật trong gate --fast**; 7 test unit + 1 test L1 |
+| 2026-11-12 | **KT-08** | 8/8 | — | — | `gate --fast` PASS (**L1 1000 seed**) | **DONE**: `v2/sim/vifast-sim` (store giả + scheduler 1 hart, trace băm FNV-1a); `v2 sim` CLI; **L1 1000 seed bật trong gate --fast**; 7 test unit + 1 test L1 |
 | 2026-11-12 | **KT-06** | 8/8 | — | — | `check` PASS (agentctl 9/9 test) | **DONE** (sửa theo review #10): `vifast-agentctl next/list/report/start/done/block` (đọc mặc định; `--write` mới ghi; `start` chỉ READY); parser nhận **KT- và ST-**, chuẩn hoá `**DONE**`, `set_status` giữ escape; `v2 agentctl` nối đúng dispatch; **13/13** test |
-| 2026-11-12 | **KT-T26** | 8/8 | — | — | `check` PASS + 3 test T26 | **DONE đèn host** (1.000 seed, RAW, ca âm mất ghi im lặng); **tái hiện đầy đủ BLOCKED** (YC-06: crate không có VFS/smp) |
+| 2026-11-12 | **KT-T26** | 8/8 | — | — | `check` PASS + 3 test T26 | **DONE đèn host** (1000 seed, RAW, ca âm mất ghi im lặng); **tái hiện đầy đủ BLOCKED** (YC-06: crate không có VFS/smp) |
 | 2026-11-12 | **KT-04c** | 8/8 | — | — | `check` PASS (scn 21 tệp) | **DONE đủ**: 21 `.scn` 0 blocked, arity theo draft D2-33, 4 fixture âm, ca 18 mở |
 | 2026-11-12 | **KT-04b** | 8/8 | — | — | `check` PASS | **BLOCKED** (YC-04): không được ghi `spec/`; draft id 8..16 + `check_reserved.py` gắn cổng; vá 2 lỗ máy kiểm (trùng id/ngoài dải), sửa 2 sai số KT-04a |
 | 2026-11-12 | KT-04b | 1–7/8 | `a8bb272` | — | — | review#5 **DRIFT** → dừng trước `spec/`, chuyển draft + YC-04; đỏ trước: 9 object reserved thiếu |
 | 2026-11-12 | **KT-04a** | 8/8 | `545f3b4` | — | `gate --fast` PASS | **DONE**: `spec/abi.toml` (REVIEW) + 3 bảng ánh xạ + `check_abi.py` gắn cổng; 4 điều kiện review #4 xử lý |
 | 2026-11-12 | KT-04a | 1–7/8 | `545f3b4` | — | — | review#4 ON-TRACK; đỏ trước `abi-check: KHÔNG có spec/abi.toml`; quy ước gọi lấy từ code v1 (4 MR) |
-| 2026-11-12 | **KT-07** | 8/8 | `c9cdc9e` | — | boot 50/50 + `gate --fast` | **DONE**: K0.5 boot riscv64 qua OpenSBI; TAP 1 test; `image 14.512 B`, `.data+.bss = 0 B` (trần 256 KiB), `.stack 64 KiB` NOLOAD báo riêng |
+| 2026-11-12 | **KT-07** | 8/8 | `c9cdc9e` | — | boot 50/50 + `gate --fast` | **DONE**: K0.5 boot riscv64 qua OpenSBI; TAP 1 test; `image 14512 B`, `.data+.bss = 0 B` (trần 256 KiB), `.stack 64 KiB` NOLOAD báo riêng |
 | 2026-11-12 | KT-07 | 1–7/8 | `c9cdc9e` | — | — | review#3 ON-TRACK (3 điều kiện) → đỏ trước (`chưa có crate kbin`); `vifast-plat-riscv64` (unsafe, UART/SBI) + `vifast-kbin-riscv64` (safe, linker 0x80200000); kernel workspace tách khỏi v2 |
 | 2026-11-12 | **KT-03** | 8/8 | `785996a` | — | `gate --fast` PASS | **DONE**: wrapper `v2/bin/v2` (check/gate --fast/rules; gate đầy đủ + nightly từ chối), 5 luật R1..R5 + self-test 6/6, `check` PASS, `gate --fast` 4,1 s |
 | 2026-11-12 | KT-03 | 1–7/8 | `785996a` | — | — | review#2 ON-TRACK (5 điều kiện) → đỏ trước 6/6 (`chưa có v2/bin/v2`); viết fixture + run.sh; sửa R2/R3/`--manifest-path`; `JOURNAL/review-2026-11-12-2.md` |
-| 2026-11-12 | **KT-02** | 8/8 | `329177e` | — | cổng chưa có | **DONE**: workspace `v2/` + `bin/` + port `vifast-fs`(10 tệp, max 1.248 dòng)/`vifast-fsutil`/`vifast-elf`; commit `b4a8693`, `054c3e2` |
-| 2026-11-12 | KT-02 | 2–7/8 | `329177e` | — | cổng chưa có | tách 4.543 dòng v1 → 10 tệp; `cargo fix` gỡ 13 import; D2-27/D2-28 nhận trong lúc làm |
+| 2026-11-12 | **KT-02** | 8/8 | `329177e` | — | cổng chưa có | **DONE**: workspace `v2/` + `bin/` + port `vifast-fs`(10 tệp, max 1248 dòng)/`vifast-fsutil`/`vifast-elf`; commit `b4a8693`, `054c3e2` |
+| 2026-11-12 | KT-02 | 2–7/8 | `329177e` | — | cổng chưa có | tách 4543 dòng v1 → 10 tệp; `cargo fix` gỡ 13 import; D2-27/D2-28 nhận trong lúc làm |
 | 2026-11-12 | KT-02 | 1/8 | `329177e` | — | cổng chưa có | lập kế hoạch nhỏ 4 bước; review#1 ON-TRACK |
 | 2026-11-12 | **KT-01** | 8/8 | `329177e` | — | cổng chưa có | **DONE**: tag annotated `v1-archive` trên `ca2eaf5` (subject "T33a mở"); 7/7 mục KNOWN-ISSUES khớp QD §6; test đỏ **N/A** — commit `19659ee` |
 | 2026-11-12 | KT-01 | 3–7/8 | `329177e` | — | cổng chưa có | đỏ trước: `git tag -l v1-archive` rỗng; tạo tag; dán review#1; sửa câu chữ Exit + mở Q-01 |
@@ -2917,10 +2928,10 @@ cap VSpace đại diện), nạp `inv.elf` ô 1, đăng ký bridge; `ktest.sh`/`
 - TAP `ktest-user` **18/18**; matrix `ktest.sh 1 matrix` **12/12** (65/65 + 3/3 + 18/18 + 10/10 ×
   smp 1/2/4, `JOURNAL/kt67a-ktest-matrix.log`); soak ảnh sản phẩm **0/1000** wall **251 s**
   (`JOURNAL/kt67a-soak.log`, `build=02ed5a1810ba59ce` sha256 `7f7a7936…`).
-- `gate --fast` **PASS 661/87** (L1 1.000 seed **1.118 ms**); `cargo test -p vifast-core` **25/25**
+- `gate --fast` **PASS 661/87** (L1 1000 seed **1118 ms**); `cargo test -p vifast-core` **25/25**
   (`JOURNAL/kt67a-core-tests.log`).
-- Budget `.data+.bss`: product **200.184**, ktest **209.920**, guard **2.680**, user **202.408**,
-  proc **206.560** / trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin **196.608**
+- Budget `.data+.bss`: product **200184**, ktest **209920**, guard **2680**, user **202408**,
+  proc **206560** / trần **262144**; `size_of::<Machine>() = 188872 B` ≤ pin **196608**
   (D2-84/85).
 
 **Nợ** (chi tiết `k6-memsrv.md` §7.5 / `k3b-core.md` §14.6): chuyển cap giữa **hai TCB U-mode**
@@ -2970,8 +2981,8 @@ guard 3/3, user **24/24**, proc 10/10 × smp 1/2/4) — `kt68-ktest-matrix.log`;
 (`kt68-clippy-kernel.log`); `cargo test -p vifast-core --lib` **42 passed** (9 test mới,
 `kt68-core-tests.log`).
 
-**Hai ngưỡng (D2-85a)**: `size_of::<Machine>()` **không đổi 188.872 B** ≤ **196.608 B** (không
-thêm field — `move_cap` là hàm, method id là hằng); ảnh test vẫn dưới trần **262.144 B** (runner
+**Hai ngưỡng (D2-85a)**: `size_of::<Machine>()` **không đổi 188872 B** ≤ **196608 B** (không
+thêm field — `move_cap` là hàm, method id là hằng); ảnh test vẫn dưới trần **262144 B** (runner
 in budget từng ảnh). Không nới ngưỡng nào.
 
 **Vá literal evidence theo D2-102** (sau verdict sơ bộ): 6 literal `# capa:` → biến đo
@@ -3034,13 +3045,13 @@ reopen_ok=true`; TAP 67 `writes=7 issued=7 commit_prefix=4 replay=1 new=1 keep=t
 crc_applied=0 crc_disk=old reorder_writes=5 kept=true pre=old replay_r=1 new_r=1 post=new`;
 TAP 68 `pha 0..2 old, 3..6 new, found=0, clean=true, threshold=4 last_old=3 atomic=1`;
 TAP 69 `detect=1 found=4 fixed=4 unfixed=0 (1 mỗi loại) used=2->4->2 second=0 unfixed_pos=true
-unfixed2=1 double_blocks2=1 second_bad=true`; stack `entry=39761 end=40577` của 65.536 B.
+unfixed2=1 double_blocks2=1 second_bad=true`; stack `entry=39761 end=40577` của 65536 B.
 
 **Cổng (run cuối)**: `gate --fast` **PASS 703 test/96 suite** L1 **884 ms** (`kt71-gate.log`);
 L1 thuần **898/764/891 ms** (`kt71-l1-thuan.log`); clippy host + kernel 5 ảnh **`EXIT=0`**
 (`kt71-clippy-kernel.log`); QEMU matrix **12/12**; conformance **61/61 dòng + 5/5 ca**
-(`kt71-conformance.log`); ảnh `ktest` **242.840/262.144 = 92,6 %** (headroom **19.304 B**,
-`kt71-budget-ktest.log`); `size_of<Machine>` **188.872** ≤ pin 196.608; **soak 0/1000**
+(`kt71-conformance.log`); ảnh `ktest` **242840** trên trần **262144** (headroom tính từ hai số này,
+`kt71-budget-ktest.log`); `size_of<Machine>` **188872** ≤ pin 196608; **soak 0/1000**
 (`kt71-soak.log`, `BUILD_ID=02ed5a1810ba59ce`, sha `a0e187e8…`, git `f4005aed`); ảnh sản phẩm
 sha256 `a0e187e8…` **khác** KT-70 `ff99297c…` chỉ vì `.symtab` (thêm dep `vifast-fs`), còn
 **`.text` digest `02ed5a1810ba59ce text=49854` = KT-70** và section thực thi y hệt
@@ -3062,5 +3073,66 @@ sai "sha không đổi ⇒ không soak lại" (sha **đã** đổi và **đã** 
 
 **Nợ**: pager U-mode **ghi** trang + virtio-blk → KT-72; crash model tiền tố/tái sắp xếp có kiểm
 soát (không mô phỏng ghi rách sector); journal chỉ redo; **stack**: chỉ có luật "một `Fs`/pha" +
-dòng `# fs: stack`, **chưa** có assert/canary tự động (nợ có ngưỡng); ảnh `ktest` 92,6 % — thêm
+dòng `# fs: stack`, **chưa** có assert/canary tự động (nợ có ngưỡng); ảnh `ktest` **242840** trên trần **262144** — thêm
 gì vào ảnh test phải đo lại, chạm trần thì **tách ảnh**, không nới.
+
+## KT-72 — K6: virtio-blk **thật** trên QEMU (2026-11-16/17, Agent 2)
+
+**Vào**: HEAD `f2edba6a`; baseline `gate --fast` **PASS 703 test/96 suite** (`JOURNAL/kt72-baseline-gate.log`);
+cây `v2/` sạch (D2-105: một agent ghi `v2/`).
+
+**Đỏ trước (D2-05)**: host **không biên dịch** trên cây cũ (`E0432` ba module — `kt72-red-host.log`);
+QEMU đỏ **thật 2 lần** khi làm driver: (a) từ chối `next` lùi trong capability list ⇒ `err=CapLoop`;
+(b) so BAR **raw** (chưa che bit thuộc tính) ⇒ `BarUnassigned stage=readback`
+(`kt72-red-cap-loop.log`). **Mutation**: host đổi `avail_ring_off` lệch 2 byte ⇒ 2 test đỏ
+(`left: 130 / right: 132`, `kt72-mutation-host.log`); QEMU bỏ kiểm dải ⇒ `not ok 6 - vblk loi
+ngoai dai` (`refused=Io refused_no_request=0`, `kt72-mutation-qemu.log`).
+
+**Cài**: (1) crate mới `lib/vifast-virtio` (`no_std`, `forbid(unsafe_code)`, **15 test host**) —
+`bar_probe` đúng **độ rộng** 32/64 bit, capability list chống vòng, `VqLayout`/`SplitQueue`,
+`ReqHeader`, `decode_config`, feature/status; (2) `plat-riscv64/src/pci.rs` — ECAM `0x3000_0000`
+(map 2 MiB), **tự gán BAR** (firmware không enumerate), `PciFail{error,stage}`; (3)
+`plat-riscv64/src/virtio_blk.rs` — trang DMA 4 KiB `.bss` căn 4096, đàm phán
+`VIRTIO_F_VERSION_1` + `VIRTIO_BLK_F_FLUSH` (chỉ khi thiết bị có; `flush()` từ chối nếu chưa),
+queue 8 (`queue_max ≥ 3`, `used` offset theo `queue_size` thật), **fence trước notify**, poll
+`used` volatile, **kiểm `used->id`**, `read/write/flush` + `read_sector_force` cho ca âm; (4) feature `vblk = ["ktest"]` — **chỉ ảnh test** (ảnh
+sản phẩm không đổi `.text`; ảnh `ktest` không đổi mapping nên **TAP 35 không hồi quy** — xung đột
+VA **thật**: `ktest_obj.rs:31` map thử 4 KiB tại đúng `0x4000_0000` mà driver map cửa sổ PCIe
+2 MiB, nên driver phải ở ảnh riêng); (5) ảnh mới
+`ktest-vblk` (6 TAP + evidence `# vblk:`), `impl BlockDev` cho virtio (**không sửa FS**); (6)
+harness: nhãn thứ 5 + `-drive` 4 MiB **mới mỗi boot** + build tách `--features ktest,vblk`.
+
+**Bằng chứng đo** (`kt72-green-qemu-ktest.log`): TAP 1 `functions=2 … vendor=0x1af4 device=0x1001
+bar=4 kind=mem64 size=16384 assigned=0x40000000 readback=0x40000000 command=0x6` + `common=0x0
+notify=0x3000 device=0x2000 isr=0x1000 mul=4 … cap_ranges_ok=1 overlap_checked=1 other_bars=0
+reserved_ranges=5`; TAP 2 `capacity=8192 blk_size=512 size_max=0 seg_max=254 num_queues=1
+queue_max=256 queue_size=8 device_features=0x10130006e54 driver_features=0x100000200
+flush_feature=1 status=0xf` + `identity=1 version1=1`; TAP 3 `writes=16 reads=16 compared=8192
+(=reads(16)*512) mismatched=0`; TAP 4 `flushes=2 completions=2`; TAP 5 `formatted=1 wrote=69
+fsck_clean=1 found=0` → `remount read_len=69 content_match=1` → `lba0_zero=1 lba1_magic=VF04
+lba1_version=4 lba1_total_blocks=8192`; TAP 6 `refused=OutOfRange refused_no_request=1
+(=requests_after(131)-requests_before(131)) forced=Io … errors_before=0 errors_after=1
+errors_delta=1` (`id_mismatch`/`timeouts` **ngoài** `ok`, `const:id_timeout_proven=0`). **Host độc lập** (`kt72-host-fsck.log`):
+`vifast-fsutil fsck` exit 0, `ls /` thấy `kt72.txt`, `get /kt72.txt` trả đúng payload.
+
+**Cổng (run cuối)**: `gate --fast` **PASS 718 test/99 suite** L1 **900 ms** (`kt72-gate.log`,
+`kt72-gate-summary.log`); L1 thuần **897/885/1107 ms**; matrix **15/15** (`kt72-ktest-matrix.log`,
+12 boot cũ + 3 vblk); conformance **61/61 + 5/5**; clippy **6 ảnh `EXIT=0`**; soak **0/1000**;
+ảnh `ktest` **242840** không đổi, `ktest-vblk` **10976**, trần **262144**; ảnh sản phẩm build
+sạch `build=02ed5a1810ba59ce text=49854` (sha `2e9550bd…`) — **giống hệt** trước vá ⇒ **không
+soak lại** (soak cũ còn hiệu lực cho ảnh sản phẩm không đổi); `strings` ảnh sản phẩm = **0** lần
+`virtio|vblk`; verify D2-110A **fail=0**.
+
+**Vá DRIFT reviewer** (chi tiết `JOURNAL/kt72-journal.md` §10): CAO-1 đàm phán
+`VIRTIO_BLK_F_FLUSH` (`blk.rs:30-54`, `virtio_blk.rs:331-350`, `:637-644`, test host mới);
+CAO-2 kiểm chồng lấn trước khi ghi BAR (`pci.rs:120-320`, `PciError::BarConflict`, test host
+`chong_lan_bar_bi_bat`); medium: `set_desc -> bool` + `queue_max ≥ 3` + `used` theo `qsize`,
+verify D2-110A quét mọi số theo từng tài liệu, evidence có đầu vào/công thức
+(`requests_before/after`, `errors_before/after`, `const:*`); thấp: sửa bình luận `Cargo.toml`,
+raw boot log đỏ, `offset+length ≤ bar_size`, ca âm `blk_size != 512`.
+
+**Nợ**: poll chưa ngắt (queue depth 1); **flush** chứng minh ở mức thiết bị, bền qua reboot thuộc
+KT-75; `id_mismatch`/`timeouts` **chưa có ca âm** (D2-108B) — **TAP 6 không phải bằng chứng**;
+PCI một bus/một function, BAR gán cố định, kiểm chồng lấn **chưa đọc DT/`ranges`** (nợ KT-73);
+driver **chưa vào ảnh sản phẩm**; **coverage tích hợp không có** (driver + 70 TAP / U-mode /
+conformance); `ktest-vblk` chưa in `# conf image:`.

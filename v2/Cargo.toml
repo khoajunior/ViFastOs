@@ -17,6 +17,7 @@ members = [
     "lib/vifast-idl",
     "lib/vifast-ring",
     "lib/vifast-vfs",
+    "lib/vifast-virtio",
     "lib/vifast-fsutil",
     "tools/vifast-agentctl",
     "sim/vifast-sim",

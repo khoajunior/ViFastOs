@@ -76,6 +76,10 @@ pub mod mmu;
 pub mod obj;
 /// KT-70: trạng thái fault VM giao pager server U-mode (tách khỏi `user.rs`, luật R1).
 pub mod pager_fault;
+/// **KT-72** PCI ECAM + gán BAR (`virtio-blk`) — **chỉ ảnh test** (`feature = "ktest"`): ảnh
+/// sản phẩm chưa mở K6-driver nên giữ nguyên `.text` (KT-73 mở cho sản phẩm).
+#[cfg(feature = "vblk")]
+pub mod pci;
 pub mod plic;
 /// KT-56: probe trap **thật** cho `FaultKind` (chỉ ảnh test — `#[cfg(feature = "ktest")]`).
 #[cfg(feature = "ktest")]
@@ -92,6 +96,9 @@ pub mod user;
 /// KT-66: stack dispatch syscall per-hart + canary/nước thấp (tách khỏi `user` cho R1).
 #[cfg(feature = "user")]
 pub mod user_stack;
+/// **KT-72** driver virtio-blk thật (virtqueue + read/write/flush) — chỉ ảnh test.
+#[cfg(feature = "vblk")]
+pub mod virtio_blk;
 
 /// UART0 của QEMU `virt` (16550A) — dữ kiện nền tảng, D2-72 Q7.
 pub const UART0_BASE: usize = 0x1000_0000;

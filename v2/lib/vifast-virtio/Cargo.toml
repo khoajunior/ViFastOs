@@ -1,0 +1,11 @@
+# lib/vifast-virtio — KT-72 (K6): logic THUẦN của virtio-blk (split queue, PCI, blk config)
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "vifast-virtio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "KT-72: logic thuần cho virtio-blk (PCI cap/BAR, split queue, blk request) — no_std, không unsafe"
+
+[dependencies]

@@ -13,6 +13,8 @@ description = "Ảnh boot riscv64 K3 (KT-44): ảnh sản phẩm + ảnh ktest t
 default = []
 # D2-08: ảnh test tách bằng feature; đồng thời bật probe guard test-only ở crate arch.
 ktest = ["vifast-plat-riscv64/ktest"]
+# KT-72: ảnh virtio-blk (PCI ECAM + driver). Bật cùng `ktest`, chỉ cho bin `ktest-vblk`.
+vblk = ["vifast-plat-riscv64/vblk"]
 # KT-53: ảnh test U-mode (kèm ktest) — tách để ảnh chính/guard không link module U-mode.
 user = ["vifast-plat-riscv64/user"]
 
@@ -47,6 +49,13 @@ name = "vifast-kbin-ktest-proc"
 path = "src/ktest_proc.rs"
 required-features = ["ktest", "user"]
 
+# KT-72: ảnh **virtio-blk** riêng — cần `-drive`/`-device virtio-blk-pci`, nên tách khỏi 12 boot
+# matrix cũ (D2-109: ảnh `ktest` 92,6 % trần; task cho phép tách ảnh khi chạm trần).
+[[bin]]
+name = "vifast-kbin-ktest-vblk"
+path = "src/ktest_vblk.rs"
+required-features = ["ktest", "vblk"]
+
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }
 vifast-plat-riscv64 = { path = "../vifast-plat-riscv64" }
@@ -66,3 +75,5 @@ vifast-ring = { path = "../../lib/vifast-ring" }
 # KT-70: pager + page cache tầng 1 (dùng lại `vifast-fs::BlockDev`); bảng mã lỗi cho evidence.
 vifast-vfs = { path = "../../lib/vifast-vfs" }
 vifast-abi = { path = "../../lib/vifast-abi" }
+# KT-72: hằng số/mã lỗi virtio dùng trong ảnh test vblk (logic đã test host ở crate này).
+vifast-virtio = { path = "../../lib/vifast-virtio" }

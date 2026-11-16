@@ -97,3 +97,7 @@ dependencies = [
  "vifast-abi",
  "vifast-fs",
 ]
+
+[[package]]
+name = "vifast-virtio"
+version = "0.1.0"

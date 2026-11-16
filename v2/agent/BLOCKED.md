@@ -8,7 +8,9 @@ Quy tắc 2.5: kẹt **hai lần** cùng một ý ⇒ ghi vào đây, **đổi n
 | Task | Trạng thái | Nội dung chờ | Cần gì để mở |
 |---|---|---|---|
 | ~~KT-04d~~ | **APPROVED 2026-11-12 Agent 0** | Gói bản 2 + C1/C2; D2-35..39; `KT-05` mở | — |
-| KT-70 | **DONE phần cài + đo**, chờ reviewer | Pager U-mode + page cache `(file,page)` + 2 client; TAP 30..34 xanh, matrix 12/12, clippy 4/4, gate PASS; log `JOURNAL/kt70-journal.md` | Reviewer verdict → lead commit `[KT-70]` |
+| ~~KT-70~~ | **DONE + đã commit** `e50540b2` (D2-108) | Pager U-mode + page cache; TAP 30..34; matrix 12/12; gate 689/95 | — |
+| ~~KT-71~~ | **DONE + đã commit** `36f59041` (D2-109) | Journal/fsck/rename/truncate; TAP 65..69; matrix 12/12; gate 703/96 | — |
+| KT-72 | **DONE phần cài + đo (đã vá DRIFT)**, chờ reviewer verdict lại | virtio-blk thật **chỉ trong ảnh test `ktest-vblk`**: PCI ECAM + **kiểm chồng lấn rồi mới gán BAR** + split virtqueue + đàm phán **FLUSH** + `BlockDev` + FS trên đĩa; TAP 6; matrix 15/15; gate 718/99; soak 0/1000; verify D2-110A fail=0; log `JOURNAL/kt72-journal.md` §10, `docs/k6-virtio-blk.md` | Reviewer verdict (vòng 2) → lead commit `[KT-72]` |
 
 **O1 (Exit) — ĐÃ CHỐT, không còn là câu hỏi mở.** Nguồn: **QD §1 Q-A + D2-25** (câu chữ QD ghi gọn "chuyển `Inactive` rồi gửi fault"; bản chốt đầy đủ là D2-25 + thiết kế §4.4 — `docs/v2/ViFastOs-v2-thiet-ke.md:285` và `:469`): `Exit` là **syscall 14 `Exit(code)`**; kernel lưu `exit_code`, TCB thành **`BlockedOnSend { ep: fault_ep, call: false }`** mang `FaultKind::Exit{code}` — giao qua **hàng gửi của `fault_ep`, không có Reply**; procsrv `Recv` xong TCB **mới** thành `Inactive`; không có `fault_ep` thì `Inactive` ngay. `Resume`/`Configure` xoá `exit_code`. `wait` là RPC của procsrv; `kill` = procsrv `Tcb.Suspend(Abort)` rồi Revoke cap TCB. Dải syscall **16..31 reserved** (15 = DebugGetInfo, D2-29). Không mở lại O1; **không** chép nguyên văn QD:23 vào `abi.toml` khi làm KT-04a.
 
@@ -63,7 +65,7 @@ Danh sách trên đã dọn theo trạng thái thật ngày 2026-11-12: KT-03/KT
 
 - **Chốt**: **21** kịch bản = 20 theo QD §4 + ca **"Exit khi procsrv chưa Recv"** (D2-27, Agent 0). KT-04c/KT-04d dùng 21, không hỏi lại, không tự đổi.
 - Bối cảnh mâu thuẫn (giữ lại để tra cứu): **20** ở `docs/QUYET-DINH-sau-review.md:176` (QD §4) và `v2/agent/DECISIONS.md` Phần IV; **21** ở `v2/agent/QUEUE.md:104` + `docs/v2/ViFastOs-v2-thiet-ke.md:1068`; `review/PATCH-BRIEF.md` §1 ghi 20.
-- Đóng cùng ngày với **D2-28** (KT-02 chỉ port tối đa `vifast-fs`, `vifast-fsutil`, `vifast-elf`; `cargo build` xanh + mỗi tệp ≤ 1.500 dòng).
+- Đóng cùng ngày với **D2-28** (KT-02 chỉ port tối đa `vifast-fs`, `vifast-fsutil`, `vifast-elf`; `cargo build` xanh + mỗi tệp ≤ 1500 dòng).
 
 ### YC-01 — Nhờ Agent 0 lật trạng thái QUEUE (mở 2026-11-12, Agent 2)
 
@@ -125,7 +127,7 @@ Danh sách trên đã dọn theo trạng thái thật ngày 2026-11-12: KT-03/KT
 ### YC-06 — `vifast-fs` không thể tái hiện T26 ở host; xin Agent 0 chốt phạm vi (mở 2026-11-12, Agent 2)
 
 - **Đo được**: `commit()` của fs gọi `dev.flush()` **ngay trong đường ghi** (`v2/lib/vifast-fs/src/tx.rs:81`)
-  ⇒ sau mỗi `create`/`write` chỉ còn **một** khối bẩn (commit record LBA 29); 1.000 seed với kẻ thứ ba ghi
+  ⇒ sau mỗi `create`/`write` chỉ còn **một** khối bẩn (commit record LBA 29); 1000 seed với kẻ thứ ba ghi
   xen + xoá cache đều **không** tạo được lệch cache/đĩa. Crate cũng **không** có tầng VFS/`read_dir` (T26 v1
   nằm ở đó) và không có `smp`.
 - **Đã làm thay** (đèn host, không claim đóng T26): `v2/lib/vifast-fs/tests/t26_read_your_own_write.rs` —
@@ -307,3 +309,25 @@ dirty_now=0 writes=8 flushes=1 backend_ok=true reopen_ok=true`). Nhưng **pager 
 `Frame.Map` + shim (`read_volatile/write_volatile` trên Frame của chính nó, D2-101) cần
 **KT-72** vì phải có virtio-blk thật để flush ra thiết bị; KT-72 chỉ **thêm `impl BlockDev`**
 (không sửa `PagerCore`). Ghi ở `docs/k6-vfs-journal.md` §7 + `k3b-core.md` §19.
+
+**NỢ KT-72 (không chặn) — ghi rõ "chưa xong" theo phạm vi task**: KT-72 đã đạt cả 8 mục tiêu
+(PCI+virtio, virtqueue, `BlockDev`, FS **thật** trên đĩa, TAP `# vblk:`, red-before host + QEMU,
+không hồi quy, docs). Các phần **còn nợ có chủ**, không phải blocker:
+1. **Poll, chưa ngắt** virtio (MSI-X/INTx); queue depth thực tế 1 — đủ cho FS tuần tự, chưa tối ưu.
+2. **`flush`** mới chứng minh ở **mức thiết bị**: request `VIRTIO_BLK_T_FLUSH` được hoàn tất
+   (`flushes=2 completions=2`) + dữ liệu host đọc lại được; **bền qua reboot** thuộc **KT-75**
+   (`test-persist` 7 pha). Không tuyên bố hơn mức đo.
+3. **`id_mismatch`/`timeouts` chưa có ca âm** (D2-108B) ⇒ "chưa chứng minh" — đã **bỏ khỏi
+   điều kiện `ok`** của TAP 6 (`const:id_timeout_proven=0`) nên TAP 6 **không phải** bằng chứng;
+   `errors` có ca dương (ca ép `read_sector_force` + mutation bỏ kiểm dải ⇒ QEMU `not ok 6`).
+4. **PCI**: một bus/một function, BAR gán **cố định** đầu cửa sổ, map leaf 2 MiB — **kiểm chồng
+   lấn** đã có (BAR function khác + vùng nền tảng + trang đã map) nhưng **chưa đọc DT/`ranges`**;
+   chưa phải enumerator tổng quát (không cấp phát động/multiple bridges). Nợ thật cho KT-73.
+5. Driver **chưa vào ảnh sản phẩm** (feature `vblk = ["ktest"]`) → **KT-73** mở; vì vậy soak
+   KT-72 không đi qua virtio (`-drive` không làm hỏng soak — đúng yêu cầu task).
+6. Ảnh `ktest-vblk` chưa in `# conf image:` (digest D2-80) — thêm cùng lúc khi KT-73/75 cần neo ảnh.
+7. Ảnh đĩa 4 MiB do runner tạo; driver từ chối `blk_size != 512` (`decode_config` — **đã có ca
+   âm host test**) — chưa hỗ trợ sector 4 KiB (không cần cho `vifast-fs`).
+8. **Coverage tích hợp không có**: không boot nào chạy **driver + 70 TAP kernel**, **driver +
+   U-mode**, hay **driver + conformance** cùng lúc; tách ảnh giữ coverage **cũ**, không thêm tổ hợp.
+9. **Xung đột VA là thật** (`ktest_obj.rs:31` dùng `0x4000_0000`) — lý do tách ảnh, đã ghi docs.

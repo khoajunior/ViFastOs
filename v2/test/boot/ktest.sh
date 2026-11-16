@@ -3,7 +3,8 @@
 # KT-44..54 — runner boot các ảnh **TEST** riscv64 K3 (crate `vifast-kbin-riscv64`, feature `ktest`).
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng. Mỗi boot chỉ
-# kết thúc được một lần bằng PANIC có chủ đích ⇒ **bốn** ảnh test (KT-66 thêm `ktest-proc`):
+# kết thúc được một lần bằng PANIC có chủ đích ⇒ **năm** ảnh test (KT-66 thêm `ktest-proc`;
+# KT-72 thêm `ktest-vblk` — ảnh virtio-blk cần `-drive`):
 #   - `ktest`       : 56 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
 #                     + KT-47 (timer SBI) + KT-49 (SMP 15..19) + KT-50 (IPI 20..24) + KT-51 (TLB/ASID
 #                     25..29) + KT-52 (object layer 30..36) + KT-55 (conformance 5 `.scn` 37:
@@ -69,7 +70,7 @@ EXPECTED_FILE="$HERE/expected.txt"
 LOGDIR="${KT54_LOGDIR:-/tmp/k3-ktest}"
 TARGET="riscv64gc-unknown-none-elf"
 IMG_DIR="$V2_ROOT/kernel/target/$TARGET/release"
-LABELS="ktest ktest-guard ktest-user ktest-proc" # thứ tự in bảng + thứ tự boot trong một vòng
+LABELS="ktest ktest-guard ktest-user ktest-proc ktest-vblk" # thứ tự in bảng + thứ tự boot trong một vòng
 LABEL_COUNT=0                              # số ảnh (đếm từ LABELS; không hardcode 3/4)
 TIMEOUT_DS=200                        # 20 s/boot (D2-72 Q10), đơn vị 0,1 s
 QEMU_ICOUNT="-icount shift=6"         # D2-74 (shift CỐ ĐỊNH, không `auto`)
@@ -116,6 +117,7 @@ image_path() {
         ktest-guard) printf '%s/vifast-kbin-ktest-guard' "$IMG_DIR" ;;
         ktest-user) printf '%s/vifast-kbin-ktest-user' "$IMG_DIR" ;;
         ktest-proc) printf '%s/vifast-kbin-ktest-proc' "$IMG_DIR" ;;
+        ktest-vblk) printf '%s/vifast-kbin-ktest-vblk' "$IMG_DIR" ;;
         *) return 1 ;;
     esac
 }
@@ -350,6 +352,18 @@ faultkind wx from u
 EOF
 }
 
+# KT-72: ảnh **virtio-blk** (6 TAP) — thiết bị thật qua `-drive` (xem `boot_image`/`run_one`).
+manifest_vblk() {
+    cat <<'EOF'
+vblk pci
+vblk queue
+vblk ghi doc lai
+vblk flush
+vblk fs tren dia
+vblk loi ngoai dai
+EOF
+}
+
 # Tên TAP 37 của KT-55 phụ thuộc smp: `-smp 1` không chạy ca 24 (cần 2 hart thật).
 conf37_name() {
     if [ "${1:-1}" -ge 2 ]; then printf 'conformance 5/5'; else printf 'conformance 4/5 + 1 skipped'; fi
@@ -362,6 +376,7 @@ manifest_for() {
         ktest-guard) manifest_guard ;;
         ktest-user) manifest_user ;;
         ktest-proc) manifest_proc ;;
+        ktest-vblk) manifest_vblk ;;
         *) return 1 ;;
     esac | sed -e "s|__SMP__|$2|g" -e "s|__IPI20__|$(ipi_name "$2")|g" \
         -e "s|__CONF37__|$(conf37_name "$2")|g"
@@ -583,6 +598,23 @@ EOF
 ^Platform HART Count *: *__SMP__$
 EOF
             ;;
+        ktest-vblk) cat <<'EOF'
+^# vblk image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 tables=[0-9]+ used=[0-9]+ const:disk_bytes=4194304$
+^# vblk pci: functions=[0-9]+ bus=[0-9]+ dev=[0-9]+ func=[0-9]+ vendor=0x1af4 device=0x100[12] bar=[0-9]+ kind=mem(32|64) size=[0-9]+ assigned=0x[0-9a-f]+ readback=0x[0-9a-f]+ command=0x[0-9a-f]+$
+^# vblk cap: common=0x[0-9a-f]+ notify=0x[0-9a-f]+ device=0x[0-9a-f]+ isr=0x[0-9a-f]+ mul=[0-9]+ cap_bar=[0-9]+ ecam=0x[0-9a-f]+ ecam_identity=1 bar_identity=1 cap_ranges_ok=1 overlap_checked=1 other_bars=[0-9]+ reserved_ranges=[0-9]+$
+^# vblk dev: capacity=[1-9][0-9]* blk_size=512 size_max=[0-9]+ seg_max=[0-9]+ num_queues=[1-9][0-9]* queue_max=[0-9]+ queue_size=[3-9][0-9]* device_features=0x[0-9a-f]+ driver_features=0x100000200 flush_feature=1 status=0xf notify_off=[0-9]+ notify_addr=0x[0-9a-f]+ config_generation=[0-9]+$
+^# vblk dma: desc=0x[0-9a-f]+ avail=0x[0-9a-f]+ used=0x[0-9a-f]+ req=0x[0-9a-f]+ data=0x[0-9a-f]+ status_pa=0x[0-9a-f]+ identity=1 version1=1 status_readback=0xf$
+^# vblk io: const:sectors=8 const:passes=2 writes=16 reads=16 compared=8192 \(=reads\(16\)\*512\) mismatched=0 first_diff=[0-9]+ requests=[0-9]+ completions=[0-9]+ const:first_lba=6000$
+^# vblk flush: calls=2 flushes=[0-9]+ completions=2 device_status=0xf driver_ok=1 errors=[0-9]+ timeouts=0$
+^# vblk fs: phase=write formatted=1 wrote=69 fsck_clean=1 found=0 fixed=0 unfixed=0 const:payload_len=69$
+^# vblk fs: phase=remount read_len=69 content_match=1 fsck_clean=1 const:payload_len=69$
+^# vblk magic: lba0_read=1 lba0_zero=1 lba1_read=1 lba1_magic=VF04 lba1_version=4 lba1_total_blocks=8192$
+^# vblk loi: capacity=8192 refused=OutOfRange refused_no_request=1 \(=requests_after\([0-9]+\)-requests_before\([0-9]+\)\) forced=Io forced_requests=1 \(=requests_after\([0-9]+\)-requests_before\([0-9]+\)\) recovered=1 device_status=0xf id_mismatch=0 timeouts=0 const:id_timeout_proven=0 errors_before=[0-9]+ errors_after=[0-9]+ errors_delta=1 \(=after-before\) fs_err_refused=Invalid$
+^# vblk stats: requests=[0-9]+ reads=[0-9]+ writes=[0-9]+ flushes=[0-9]+ completions=[0-9]+ errors=[0-9]+ notifies=[0-9]+ id_mismatch=0 timeouts=0 capacity=8192$
+^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
+^Platform HART Count *: *__SMP__$
+EOF
+            ;;
         ktest-proc) cat <<'EOF'
 ^# user core: static=188872 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
 ^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
@@ -638,6 +670,7 @@ panic_allow_re() {
         ktest-guard) printf '%s' '^PANIC: guard page fault scause=0xf stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+$' ;;
         ktest-user) printf '%s' '^PANIC: KT-70 u-mode pha syscall, invocation, capalloc, IDL va ring va pager xong \(35 TAP, 0 fail\)$' ;;
         ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
+        ktest-vblk) printf '%s' '^PANIC: KT-72 vblk xong \(6 TAP, 0 fail\)$' ;;
         *) return 1 ;;
     esac
 }
@@ -889,6 +922,9 @@ validate_norm() {
             check_stack_lines "$log" "$smp"
             check_evidence "$log" "$label" "$smp"
             ;;
+        ktest-vblk)
+            check_evidence "$log" "$label" "$smp"
+            ;;
     esac
     [ -z "$MISSING" ] || return 1
     return 0
@@ -899,8 +935,11 @@ validate_norm() {
 # `boot_image <ảnh> <log> <smp>`: 0 = QEMU tự thoát; 124 = quá 20 s (đã kill đúng PID của script).
 boot_image() {
     local image="$1" out="$2" smp="$3" pid waited grace
+    shift 3
+    # KT-72: ảnh `ktest-vblk` cần `-drive`/`-device virtio-blk-pci` (tham số thêm); ảnh khác
+    # không có tham số thêm nên dòng QEMU giữ **nguyên** như 12 boot matrix cũ.
     "$QEMU" $QEMU_ICOUNT -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$image" -nographic \
-        -cpu rv64 -m 128M -smp "$smp" -no-reboot >"$out" 2>&1 &
+        -cpu rv64 -m 128M -smp "$smp" -no-reboot "$@" >"$out" 2>&1 &
     pid=$!
     waited=0
     while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT_DS" ]; do
@@ -932,12 +971,29 @@ record_row() {
 
 # `run_one <ảnh> <smp> <boot-i>`: boot + kiểm + ghi bảng; 0 = sạch.
 run_one() {
-    local label="$1" smp="$2" idx="$3" image="" log="" oks="" t0="" dt=""
+    local label="$1" smp="$2" idx="$3" image="" log="" oks="" t0="" dt="" disk=""
+    local -a qextra=()
     image="$(image_path "$label")"
     log="$(log_path "$label" "$smp" "$idx")"
     t0="$(now_s)"
     RUN_RESULT=""
-    if ! boot_image "$image" "$log" "$smp"; then
+    # KT-72: mỗi boot ảnh vblk nhận một ảnh đĩa raw **4 MiB** mới (8192 sector 512 B) qua
+    # `-drive`+`-device virtio-blk-pci`; xoá trước mỗi boot để kết quả tất định (không phụ thuộc
+    # lần chạy trước) và để test **format từ đầu** trên thiết bị thật.
+    if [ "$label" = "ktest-vblk" ]; then
+        disk="$LOGDIR/vblk-smp$smp-boot$idx.img"
+        rm -f "$disk"
+        if ! dd if=/dev/zero of="$disk" bs=1m count=4 2>/dev/null; then
+            echo "not ok - $label smp=$smp boot $idx: không tạo được ảnh đĩa 4 MiB $disk" >&2
+            fails=$((fails + 1))
+            RUN_RESULT=FAIL
+            record_row "$label" "$smp" "$idx" "-" FAIL "$disk"
+            return 1
+        fi
+        qextra=(-drive "file=$disk,format=raw,if=none,id=hd0" -device virtio-blk-pci,drive=hd0)
+    fi
+    # bash 3.2 + `set -u`: mảng rỗng `"${a[@]}"` bị coi là unbound ⇒ dùng dạng có điều kiện.
+    if ! boot_image "$image" "$log" "$smp" ${qextra[@]+"${qextra[@]}"}; then
         dt=$(($(now_s) - t0))
         total_boots=$((total_boots + 1))
         fails=$((fails + 1))
@@ -1206,6 +1262,15 @@ run_matrix() {
         --features ktest --target "$TARGET" --release >/tmp/k3-ktest-build.log 2>&1; then
         tail -20 /tmp/k3-ktest-build.log >&2
         die "build ảnh test FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build.log)"
+    fi
+    # KT-72: ảnh **vblk** bật thêm feature `vblk` (PCI ECAM + virtio-blk) — tách khỏi ảnh trên để
+    # `.text`/mapping của ảnh `ktest` không đổi (TAP 35 dùng VA 0x4000_0000).
+    echo "# build ảnh test vblk ($TARGET, release, --features ktest,vblk)"
+    if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
+        --bin vifast-kbin-ktest-vblk --features ktest,vblk \
+        --target "$TARGET" --release >/tmp/k3-ktest-build-vblk.log 2>&1; then
+        tail -20 /tmp/k3-ktest-build-vblk.log >&2
+        die "build ảnh test vblk FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-vblk.log)"
     fi
     # KT-53: ảnh user bật thêm feature `user` (module U-mode chỉ có trong ảnh này).
     echo "# build ảnh test user+proc ($TARGET, release, --features ktest,user)"
