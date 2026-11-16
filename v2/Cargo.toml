@@ -5,6 +5,7 @@ resolver = "2"
 exclude = ["kernel"]
 members = [
     "lib/vifast-abi",
+    "lib/vifast-alloc",
     "lib/vifast-model",
     "lib/vifast-objmem",
     "lib/vifast-pte",

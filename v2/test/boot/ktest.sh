@@ -30,7 +30,7 @@
 #   4. **đúng 1 dòng `PANIC`, đúng mẫu cho phép của ảnh** (ảnh chính: trap lồng; guard: guard page
 #      fault; user: u-mode fault) — PANIC khác mẫu hoặc PANIC thứ hai ⇒ đỏ;
 #   5. mỗi TAP N có **đúng một** dòng `ok N - <tên>` khớp tên trong manifest của runner;
-#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **91** mục, guard **5**, user **30**,
+#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **98** mục, guard **5**, user **30**,
 #      proc **28**); KT-66 thêm kiểm **stack syscall per-hart** (`check_stack_lines`: tập hart
 #      0..N-1, `base` phân biệt, `low` trong `[base, top]`, `canary=0`);
 #   8. **KT-55**: mỗi ca conformance in `# conf: scn=N name=… steps=K` và đúng **K** dòng
@@ -265,6 +265,11 @@ core slot arena
 core sched bind
 core fault resume
 core tlb flush
+mem alloc frame
+mem revoke frame
+mem out of memory
+mem bridge cap
+mem deny rights
 trap nested panic
 EOF
 }
@@ -454,6 +459,13 @@ __EVID24__
 ^# ipc: cap-message direction=call-reply caller_caps=2 reply_caps=2 caller_bound=1 caller_ready=1 rights=0xb reply_caller=0 check_ipc=1 check_reply_links=1$
 ^# ipc: revoke deleted=[0-9]+ caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready sender=Ready sender_err=Cancelled queue=0 queued=1 pending=0 sent=[0-9]+ dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1$
 ^# core: phase fails=0 static=188872 pin=196608 image_cap=262144$
+^# mem: init untyped=2 u0=[0-9]+ u1=[0-9]+ base0=0x82000000 base1=0x80000000 window=1073741824 cap0=1073741824 cap1=1073741824 physmap=1$
+^# mem: alloc cap0=[0-9]+ window=1073741824 base=0x82000000 used=2101248 free=[0-9]+ hole=0 live4=1 live2=1 live1g=0 pa4=0x82200000 pa2=0x82000000 s21=1 s12=1 real4=1 real2=1 live=2101248 stats=2101248 frames=2 allocs=2 check=1 obj=1$
+^# mem: revoke used0=2101248 used1=0 holes=0 frames=0 free=1073741824 realloc4=0x82000000 same=1 stats=0 check=1 obj=1$
+^# mem: oom window=1073741824 pa1g=0x80000000 second=NotEnoughMemory code=9 small=9 used=1073741824 used_after=1073741824 free=0 atomic=1 panic=0 check=1 obj=1$
+^# mem: bridge token=[0-9]+ core_obj=[0-9]+ obj_cap=[0-9]+ key=0x[0-9a-f]+ pa=0x82000000 bits=12 slot=[0-9]+ rights_ok=1 obj_ok=1 resolve=1 used_granted=4096 check_caps=1 check_ipc=1 check_objmem=1$
+^# mem: release released=1 used_after=0 free=1073741824 cap_after=0 caps_check=1 obj=1$
+^# mem: deny wrong=2 rights=3 invalid=1 used=0 allocs=[0-9]+ atomic=1 obj=1$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF

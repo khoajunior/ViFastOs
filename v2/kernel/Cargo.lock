@@ -7,6 +7,10 @@ name = "vifast-abi"
 version = "0.1.0"
 
 [[package]]
+name = "vifast-alloc"
+version = "0.1.0"
+
+[[package]]
 name = "vifast-core"
 version = "0.1.0"
 dependencies = [
@@ -32,6 +36,7 @@ dependencies = [
 name = "vifast-plat-common"
 version = "0.1.0"
 dependencies = [
+ "vifast-alloc",
  "vifast-core",
  "vifast-pte",
 ]

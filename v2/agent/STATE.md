@@ -2812,6 +2812,40 @@ ca âm **mất ghi im lặng** đã đỏ khi đảo kỳ vọng) + `v2/docs/kt-
 - Máy kiểm: `v2/test/abi/check_abi.py` (Python ≥3.11 `tomllib`), **gắn vào `v2/bin/v2 check`** — `check` nay có 6 bước.
 - Đã đóng: **YC-02** (D2-29: DebugGetInfo = syscall 15), **YC-03** (D2-30/D2-31: đánh số lại; `spec/` ở gốc repo).
 
+## KT-67 — memsrv + `vifast-alloc` + cầu nối D2-83 (K6 task đầu, 2026-11-16)
+
+**Trạng thái**: mã đóng băng, TAP/matrix xanh, gate + soak chạy cuối phiên; **memsrv U-mode =
+BLOCKED** (ABI chưa đủ — `agent/BLOCKED.md` §5, `docs/k6-memsrv.md` §6, 2 lựa chọn A/B).
+
+**Làm được**:
+
+- `v2/lib/vifast-alloc` (mới): `FrameArena` — `alloc(12/21/30)`, `free`, `check_accounting`,
+  `used/free/hole/live/…`; `no_std`, `forbid(unsafe_code)`, 0 dependency. **Một nguồn sự thật
+  byte**: `vifast-plat-common::obj` bỏ `pa_used`/`pa_holes` riêng, `Untyped` giữ `FrameArena`;
+  `check_objmem` uỷ quyền bất biến `Σ Frame sống + Σ hole == watermark`; `UNTYPED_PA_WINDOW` =
+  `vifast_alloc::WINDOW_BYTES`, `MAX_HOLES` re-export.
+- Cầu nối D2-83 **một chiều**: `vifast-core` object đại diện (`add_foreign_object`/`foreign_key`/
+  `kill_foreign_object`, tệp mới `core_foreign.rs`; `size_of::<Machine>()` **188.872 B** không
+  đổi, pin 196.608) + `vifast-plat-riscv64::mem_bridge` (`grant`/`release`/`resolve`/`budget`):
+  kiểm **cap client gửi** (`WrongObjectType{2}`/`InsufficientRights{3}`/`InvalidCapability{1}`),
+  cấp Frame ở object layer, cap Frame đi qua **KT-63** vào receive window (bỏ `RIGHT_GRANT`),
+  tra ngược `core obj → (obj cap, pa, size_bits)`, release trả byte về 0.
+- TAP QEMU `# mem:` **60..64** (ảnh `ktest` lên **65 TAP**; trap lồng 60→65):
+  alloc 2M+4K (ghi/đọc thật; `used=2101248`, `stats=2101248`, `live4/live2`), revoke→0 + cấp lại
+  đúng PA cũ, hết memory **mã 9** nguyên tử không panic, bridge cap + resolve + release,
+  deny mã **2/3/1** atomic. Matrix **12/12**; crate test **10/10**; obj host test **15/15**.
+- Budget: product **200.184**, ktest **209.920**, guard **2.680**, user **202.344**, proc
+  **206.536** B ≤ 262.144 (`JOURNAL/kt67-budget.log`).
+
+**Chưa xong**: memsrv U-mode (BLOCKED, 2 lựa chọn); Frame 1 GiB chỉ nhãn (D2-66);
+double-free cùng cỡ vẫn chốt ở object layer (như KT-52).
+
+**Cổng cuối (sau vá reviewer)**: `gate --fast` **PASS 661 test/87 suite**, L1 **1.282 ms**;
+matrix **12/12**; soak **0/1000** wall **238 s** (`BUILD_ID=a6dff9f704e6cd88`); crate test
+**12/12**; obj host **15/15**; budget 5 ảnh ≤ 262.144.
+**Log**: `JOURNAL/kt67-journal.md`, `kt67-ktest-matrix.log`, `kt67-red-before.log`,
+`kt67-alloc-host.log`, `kt67-obj-host.log`, `kt67-budget.log`, `kt67-gate.log`, `kt67-soak.log`.
+
 ## Lịch sử trạng thái (mới nhất ở trên)
 
 | Ngày | Task | Bước | HEAD | BUILD_ID | Cổng | Ghi chú |

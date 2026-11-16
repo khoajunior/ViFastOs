@@ -48,6 +48,7 @@
 //! chỉ `pa` là RAM thật); 1 GiB chỉ kiểm nhãn/căn lề/cửa sổ — ghi rõ trong
 //! `v2/docs/k3-riscv64.md` §15.
 
+use vifast_alloc::FrameArena;
 use vifast_pte::{FrameSize, PAGE_SIZE_BITS};
 
 use crate::mmu::{
@@ -61,7 +62,10 @@ mod vspace;
 use arena::{Hole, Untyped};
 
 /// Cửa sổ PA của một Untyped: **1 GiB** `[TK]` (D2-66) — `Frame.pa = pa_base + offset`.
-pub const UNTYPED_PA_WINDOW: u64 = 1 << 30;
+///
+/// KT-67: giá trị **không** còn là hằng thứ hai — lấy từ [`vifast_alloc::WINDOW_BYTES`], nơi
+/// allocator Frame duy nhất định nghĩa cửa sổ.
+pub const UNTYPED_PA_WINDOW: u64 = vifast_alloc::WINDOW_BYTES as u64;
 
 /// Byte dữ liệu của một PageTable/VSpace-root: **4096** (512 PTE × 8 B).
 pub const PAGE_TABLE_BYTES: u32 = 4096;
@@ -74,8 +78,9 @@ pub const MAX_CAPS: usize = 160;
 pub const MAX_UNTYPEDS: usize = 4;
 /// Số mapping VSpace cùng lúc.
 pub const MAX_MAPPINGS: usize = 64;
-/// Số hole mỗi không gian (arena/PA) của một Untyped.
-pub const MAX_HOLES: usize = 12;
+/// Số hole mỗi không gian (arena/PA) của một Untyped — **cùng** hằng với allocator Frame
+/// (KT-67: một nguồn, không khai lại).
+pub use vifast_alloc::MAX_HOLES;
 /// Số yêu cầu flush (`sfence.vma`) đang chờ.
 pub const MAX_FLUSHES: usize = 16;
 
@@ -366,6 +371,36 @@ pub struct UntypedStats {
     pub objects: usize,
 }
 
+/// Ảnh chụp **cửa sổ PA** của một Untyped (KT-67) — view của allocator Frame dùng chung
+/// ([`vifast_alloc::FrameArena`]) cho cầu nối D2-83 và memsrv.
+///
+/// Không phải allocator thứ hai: mọi trường đọc thẳng từ trạng thái mà `check_objmem` soát.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FrameBudget {
+    /// Đáy cửa sổ PA (nhãn).
+    pub base: u64,
+    /// Cỡ cửa sổ (byte).
+    pub capacity: u64,
+    /// Watermark (byte đã chạm).
+    pub used: u64,
+    /// Tổng byte hole.
+    pub hole_bytes: u64,
+    /// Byte cấp lại được (`capacity - Σ Frame sống`).
+    pub free_bytes: u64,
+    /// Số hole.
+    pub holes: u8,
+    /// Frame 4 KiB đang sống.
+    pub live_4k: u16,
+    /// Frame 2 MiB đang sống.
+    pub live_2m: u16,
+    /// Frame 1 GiB đang sống.
+    pub live_1g: u16,
+    /// Số lần cấp thành công.
+    pub allocs: u32,
+    /// Số lần trả thành công.
+    pub frees: u32,
+}
+
 /// Kết quả đi PTE phần mềm trên root của một VSpace.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WalkInfo {
@@ -641,10 +676,7 @@ impl<M: PhysMem> Machine<M> {
             bump: 0,
             holes: [Hole { off: 0, len: 0 }; MAX_HOLES],
             n_holes: 0,
-            pa_base,
-            pa_used: 0,
-            pa_holes: [Hole { off: 0, len: 0 }; MAX_HOLES],
-            n_pa_holes: 0,
+            pa: FrameArena::new(pa_base, UNTYPED_PA_WINDOW as u32),
         };
         self.n_untypeds += 1;
         let id = self.take_id();
@@ -735,7 +767,7 @@ impl<M: PhysMem> Machine<M> {
         let obj_idx = self.free_object_slot()?;
         let cap_idx = self.free_cap_slot()?;
         let off = self.untypeds[u_idx as usize].pa_alloc(size.size_bytes())?;
-        let pa = self.untypeds[u_idx as usize].pa_base + off as u64;
+        let pa = self.untypeds[u_idx as usize].pa_base() + u64::from(off);
         if self.frame_overlap(pa, size.size_bytes(), OBJ_NONE) {
             let _ = self.untypeds[u_idx as usize].pa_free(off, size.size_bytes());
             return Err(ObjError::AlreadyMapped);
@@ -931,9 +963,7 @@ impl<M: PhysMem> Machine<M> {
         u.bump = 0;
         u.n_holes = 0;
         u.holes = [Hole { off: 0, len: 0 }; MAX_HOLES];
-        u.pa_used = 0;
-        u.n_pa_holes = 0;
-        u.pa_holes = [Hole { off: 0, len: 0 }; MAX_HOLES];
+        u.reset_pa();
         Ok(())
     }
 
@@ -1175,7 +1205,7 @@ impl<M: PhysMem> Machine<M> {
             if !obj.live || obj.kind != ObjKind::Frame || i as u16 == skip {
                 continue;
             }
-            let other_pa = self.untypeds[obj.untyped as usize].pa_base + obj.pa_off as u64;
+            let other_pa = self.untypeds[obj.untyped as usize].pa_base() + u64::from(obj.pa_off);
             let other_size = 1u64 << obj.size_bits;
             if pa < other_pa + other_size && other_pa < pa + size {
                 return true;
@@ -1205,10 +1235,6 @@ fn align_up_u32(value: u32, align: u32) -> Option<u32> {
         return None;
     }
     value.checked_add(align - 1).map(|v| v & !(align - 1))
-}
-
-fn align_up_u64(value: u64, align: u64) -> u64 {
-    (value + align - 1) & !(align - 1)
 }
 
 fn zero_block<M: PhysMem>(mem: &mut M, pa: u64, bytes: usize) -> bool {

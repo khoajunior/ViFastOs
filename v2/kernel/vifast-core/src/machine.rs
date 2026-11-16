@@ -1218,7 +1218,7 @@ impl Machine {
     // ------------------------------------------------------------- nội bộ
 
     #[allow(clippy::too_many_arguments)]
-    fn push_meta(
+    pub(crate) fn push_meta(
         &mut self,
         ty: ObjType,
         untyped: Option<usize>,

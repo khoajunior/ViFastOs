@@ -53,6 +53,7 @@ mod check;
 mod check_ipc;
 mod core_capxfer;
 mod core_finalise;
+mod core_foreign;
 mod core_ipc;
 mod core_sched;
 mod core_sync;

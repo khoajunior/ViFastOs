@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-67 (K6, D2-95): allocator Frame trên Untyped — **một** nguồn sự thật byte với object layer
+# (`vifast-plat-common::obj`), không phải allocator thứ hai chạy song song.
+[package]
+name = "vifast-alloc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "vifast_alloc"
+path = "src/lib.rs"
+
+# Không dependency ngoài (D2-21). Test tích hợp dùng `std` của crate test (D2-42).
+[dependencies]

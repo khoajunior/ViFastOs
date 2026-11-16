@@ -104,7 +104,13 @@
 //! 55. `ok 55 - core revoke finalise` — `Revoke` cây Untyped khi có caller/waiter/hàng: caller
 //!     `Ready + Cancelled`, Recv/Notification waiter thức (`Ready + Cancelled`), hàng rỗng,
 //!     `ipc_dropped` cộng đủ; evidence `# ipc: revoke …`.
-//! 56. `ok 56 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
+//! 56..59. `ok 56..59` — KT-64: slot CNode từ arena, `SchedContext.Bind`, `tcb_resume_with_regs`,
+//!    `TlbFlush` thật (xem `ktest_core64`).
+//! 60..64. `ok 60..64` — **KT-67** (K6): `vifast-alloc` cấp Frame 2 MiB + 4 KiB (ghi/đọc thật,
+//!    đối chiếu byte hai phía), `Revoke` về 0 + cấp lại đúng PA cũ, hết memory trả mã 9 không
+//!    panic, **cầu nối D2-83** (cap Frame của object layer được đại diện trong core, chuyển qua
+//!    KT-63 vào receive window, tra ngược ra PA), từ chối đúng mã 1/2/3; evidence `# mem: …`.
+//! 65. `ok 65 - trap nested panic` — trap **lồng** vẫn fatal (P2b); boot kết thúc bằng `PANIC:
 //!    nested trap …` + `DebugHalt(1)`, không treo/không resume.
 //!
 //! Guard page fault **thật** (store `scause=15` fatal) nằm ở ảnh riêng `vifast-kbin-ktest-guard`
@@ -117,6 +123,8 @@ mod ktest_core;
 mod ktest_core64;
 mod ktest_fault;
 mod ktest_ipi;
+// KT-67 (K6): memsrv/allocator Frame (vifast-alloc + cầu nối D2-83) — TAP 60..64.
+mod ktest_mem;
 mod ktest_obj;
 mod ktest_smp;
 mod ktest_tlb;
@@ -174,7 +182,7 @@ const SBI_ERR_NOT_SUPPORTED: u64 = u64::MAX - 1;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..60\n");
+    PLATFORM.put_str("TAP version 13\n1..65\n");
     // KT-45: vector direct-mode trước mọi test trap.
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
@@ -952,6 +960,8 @@ pub extern "C" fn rust_main() -> ! {
     // ---------------- 43..55) core `no_std` trên **nhân thật** (KT-61/63): CNode/TCB/sched/
     // IPC + chuyển cap + finalise IPC khi Revoke
     fails += ktest_core::core_phase();
+    // --------------------- 60..64) memsrv/allocator Frame + cầu nối D2-83 (KT-67, K6)
+    fails += ktest_mem::mem_phase();
 
     {
         let mut w = PlatformWriter(&PLATFORM);
@@ -970,10 +980,10 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ------------------------------------------------ 56) trap LỒNG (fatal, có chủ đích)
-    // In `ok 56` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
+    // ------------------------------------------------ 65) trap LỒNG (fatal, có chủ đích)
+    // In `ok 65` TRƯỚC khi kích hoạt: boot này kết thúc bằng `PANIC: nested trap …` + SBI SRST,
     // không có `# ktest halt`. ktest.sh đòi đúng dòng PANIC này và **không** có PANIC nào khác.
-    PLATFORM.put_str("ok 60 - trap nested panic\n");
+    PLATFORM.put_str("ok 65 - trap nested panic\n");
     {
         let mut w = PlatformWriter(&PLATFORM);
         let _ = writeln!(

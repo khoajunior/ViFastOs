@@ -223,3 +223,28 @@ Không có câu hỏi mở nào khác tại thời điểm này. Khi phát sinh:
 ## 4. Dòng ViScript **không** bị chặn bởi mục 1–2
 
 `ST-01`, `ST-02b`, `ST-10` đang `READY` và độc lập với KT-04d/KT-03. Khi `v2/agent/QUEUE.md` hết task `READY` thì lấy task ViScript (D2-20); ngoại lệ duy nhất được chạy song song là `ST-02a` (chỉ là tài liệu).
+
+## 5. KT-67 — memsrv **U-mode** BLOCKED (ABI hiện tại không đủ), 2026-11-16
+
+Trạng thái: phần **`vifast-alloc` + cầu nối D2-83 + TAP QEMU (60..64) đã xong**; phần **chương
+trình `memsrv` chạy U-mode với vòng `NBRecv` riêng** bị chặn — **không** thêm syscall/sửa `spec/`
+theo ràng buộc task.
+
+| Chặn bởi | Dẫn chứng | Cần gì để mở |
+|---|---|---|
+| U-mode **không** gửi được cap trong message: shim ABI chỉ có `ecall` 7 thanh ghi, `NBSend` = label + 4 MR | `v2/kernel/vifast-plat-user/lib.rs:28` (`syscall7`), `:16` (`SYS_NB_SEND`); `Message.caps` chỉ kernel dựng (`v2/kernel/vifast-core/src/core_capxfer.rs`) | **D2 mới** mở rộng `NBSend`/`NBRecv` có khe cap (sửa `spec/abi.toml`), hoặc chọn phương án (A) dưới |
+| U-mode **không** có invocation tạo `Frame`: dispatch chỉ syscall `0..15`; `Retype` VM trong core trả `NotSupported` (biên D2-83) | `v2/kernel/vifast-core/src/syscall.rs:279` (`dispatch`), `v2/kernel/vifast-core/src/machine.rs:828` (`if !ty.is_core()`), `v2/kernel/vifast-plat-common/src/obj/mod.rs:714` (`Machine::retype` — chỉ kernel) | giữ nguyên: Frame do kernel/object layer cấp hộ; memsrv = policy (phương án A) |
+
+**Hai lựa chọn** (chi tiết + phân tích: `v2/docs/k6-memsrv.md` §6):
+
+- **(A) đề xuất** — memsrv `NBRecv` request rồi gửi yêu cầu cấp; kernel
+  (`vifast-plat-riscv64::mem_bridge::grant` + `prepare_caps`) cấp Frame và cài cap vào receive
+  window của client. Không sửa `spec/`; nhược điểm: quyền của cap client do kernel kiểm hộ.
+- **(B)** — mở ABI một lần (D2 mới + sửa `spec/` + sim/parity): memsrv tự cấp/trả cap.
+
+**ĐÃ CHỐT (D2-96, lead 2026-11-16)**: chọn **(A)** — KT-67 = allocator thật + memory bridge
+**kernel-mediated**; `memsrv` U-mode = **policy façade** (chưa cài). Invocation hẹp
+`Untyped.Retype` (để memsrv giữ cap `Untyped` và tự retype) tách sang **KT-67a** (D2 mới vì mở
+`spec/[method_signature]`), **không** nhét vào KT-67.
+
+Không còn câu hỏi mở cho KT-67; **không** tự mở `spec/`.

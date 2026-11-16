@@ -65,6 +65,8 @@ use vifast_plat_common::{Platform, PlatformWriter};
 
 pub mod core_bridge;
 pub mod ipi;
+// KT-67: cầu nối D2-83 (core giữ cap ↔ object layer giữ Frame/PA) cho memsrv.
+pub mod mem_bridge;
 pub mod mmu;
 pub mod obj;
 pub mod plic;

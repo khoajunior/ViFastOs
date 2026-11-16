@@ -4,9 +4,9 @@
 //! Tách khỏi `obj/mod.rs` để giữ R1 ≤ 1.500 dòng/tệp; toàn bộ ngữ nghĩa object layer ở
 //! `vifast-plat-common::obj`.
 
-use super::{
-    align_up_u32, align_up_u64, ObjError, MAX_HOLES, OBJ_NONE, PAGE_TABLE_BYTES, UNTYPED_PA_WINDOW,
-};
+use vifast_alloc::{Frame as PaFrame, FrameArena};
+
+use super::{align_up_u32, ObjError, MAX_HOLES, OBJ_NONE, PAGE_TABLE_BYTES};
 
 // ---------------------------------------------------------------------------------------------
 // Dữ liệu tĩnh (Copy, không cấp phát)
@@ -27,10 +27,9 @@ pub(crate) struct Untyped {
     pub(crate) bump: u32,
     pub(crate) holes: [Hole; MAX_HOLES],
     pub(crate) n_holes: u8,
-    pub(crate) pa_base: u64,
-    pub(crate) pa_used: u64,
-    pub(crate) pa_holes: [Hole; MAX_HOLES],
-    pub(crate) n_pa_holes: u8,
+    /// Cửa sổ PA (Frame) — **cùng** allocator với `vifast_alloc` (KT-67): object layer không
+    /// giữ `pa_used`/`pa_holes` riêng nữa (một nguồn sự thật byte).
+    pub(crate) pa: FrameArena,
 }
 
 impl Untyped {
@@ -42,10 +41,7 @@ impl Untyped {
         bump: 0,
         holes: [Hole { off: 0, len: 0 }; MAX_HOLES],
         n_holes: 0,
-        pa_base: 0,
-        pa_used: 0,
-        pa_holes: [Hole { off: 0, len: 0 }; MAX_HOLES],
-        n_pa_holes: 0,
+        pa: FrameArena::EMPTY,
     };
 
     fn insert(list: &mut [Hole; MAX_HOLES], n: &mut u8, hole: Hole) -> bool {
@@ -210,86 +206,65 @@ impl Untyped {
         let _ = Self::remove(&mut self.holes, &mut self.n_holes, index);
     }
 
-    /// Cấp PA nhãn `size` byte trong cửa sổ; **không** đệm căn lề ngầm (K2 KT-36 dùng
-    /// `Alignment`) — muốn trộn cỡ thì cấp **giảm dần**.
+    /// Đáy cửa sổ PA (nhãn, D2-66) — `Frame.pa = pa_base() + offset`.
+    pub(crate) fn pa_base(&self) -> u64 {
+        self.pa.base()
+    }
+
+    /// Cấp PA nhãn `size` byte trong cửa sổ qua [`FrameArena`] (KT-67): **không** đệm căn lề
+    /// ngầm (K2 KT-36 `Alignment`) — muốn trộn cỡ thì cấp **giảm dần**.
     pub(crate) fn pa_alloc(&mut self, size: u64) -> Result<u32, ObjError> {
-        if !size.is_power_of_two() || size > UNTYPED_PA_WINDOW {
-            return Err(ObjError::InvalidArgument);
+        let bits = pa_size_bits(size).ok_or(ObjError::InvalidArgument)?;
+        match self.pa.alloc(bits) {
+            Ok(frame) => Ok(frame.off),
+            Err(error) => Err(map_alloc_error(error)),
         }
-        let mut i = 0usize;
-        while i < self.n_pa_holes as usize {
-            let hole = self.pa_holes[i];
-            let start = align_up_u32(hole.off, size as u32).ok_or(ObjError::Corrupt)?;
-            let end = hole.off as u64 + hole.len as u64;
-            if (self.pa_base + start as u64) & (size - 1) == 0 && start as u64 + size <= end {
-                self.remove_pa_hole_at(i);
-                if start > hole.off {
-                    Self::insert(
-                        &mut self.pa_holes,
-                        &mut self.n_pa_holes,
-                        Hole {
-                            off: hole.off,
-                            len: start - hole.off,
-                        },
-                    );
-                }
-                let right = start as u64 + size;
-                if right < end {
-                    Self::insert(
-                        &mut self.pa_holes,
-                        &mut self.n_pa_holes,
-                        Hole {
-                            off: right as u32,
-                            len: (end - right) as u32,
-                        },
-                    );
-                }
-                return Ok(start);
-            }
-            i += 1;
-        }
-        let base = self
-            .pa_base
-            .checked_add(self.pa_used)
-            .ok_or(ObjError::Corrupt)?;
-        let want = align_up_u64(base, size)
-            .checked_sub(self.pa_base)
-            .ok_or(ObjError::Corrupt)?;
-        if want != self.pa_used {
-            return Err(ObjError::Alignment);
-        }
-        let end = want.checked_add(size).ok_or(ObjError::Corrupt)?;
-        if end > UNTYPED_PA_WINDOW {
-            return Err(ObjError::NotEnoughMemory);
-        }
-        self.pa_used = end;
-        Ok(want as u32)
     }
 
-    /// Trả PA nhãn (cửa sổ).
+    /// Trả PA nhãn (cửa sổ) — `false` khi Frame chưa từng cấp / bảng hole đầy.
     pub(crate) fn pa_free(&mut self, off: u32, size: u64) -> bool {
-        if off as u64 + size > self.pa_used {
+        let Some(bits) = pa_size_bits(size) else {
             return false;
-        }
-        if !Self::insert(
-            &mut self.pa_holes,
-            &mut self.n_pa_holes,
-            Hole {
+        };
+        self.pa
+            .free(PaFrame {
                 off,
-                len: size as u32,
-            },
-        ) {
-            return false;
-        }
-        Self::merge_holes(&mut self.pa_holes, &mut self.n_pa_holes);
-        // Watermark PA là `pa_used` (u64) — rewind trên một bản u32 rồi ghi lại.
-        let mut used = self.pa_used as u32;
-        Self::rewind_holes(&mut self.pa_holes, &mut self.n_pa_holes, &mut used);
-        self.pa_used = used as u64;
-        true
+                size_bits: bits,
+            })
+            .is_ok()
     }
 
-    fn remove_pa_hole_at(&mut self, index: usize) {
-        let _ = Self::remove(&mut self.pa_holes, &mut self.n_pa_holes, index);
+    /// Bất biến kế toán cửa sổ PA: caller (object layer) **liệt kê** `(off, len)` của mọi Frame
+    /// đang sống từ bảng object của nó rồi uỷ quyền [`FrameArena::check_accounting`] — allocator
+    /// **không** giữ bản sao danh sách Frame, nên phép kiểm không phải tautology.
+    pub(crate) fn pa_check(&self, live: &[(u32, u32)]) -> bool {
+        self.pa.check_accounting(live).is_ok()
+    }
+
+    /// Về rỗng (Revoke Untyped): byte arena + watermark PA + hole + đếm Frame.
+    pub(crate) fn reset_pa(&mut self) {
+        self.pa.reset();
+    }
+}
+
+/// `size_bits` của một cỡ PA byte (`4096 → 12`, `2 MiB → 21`, `1 GiB → 30`) — **cùng bộ** cỡ
+/// Frame của `vifast_pte`/`vifast_alloc`; cỡ khác ⇒ `None` (caller trả `InvalidArgument`).
+pub(crate) fn pa_size_bits(size: u64) -> Option<u8> {
+    match size {
+        4096 => Some(12),
+        2_097_152 => Some(21),
+        1_073_741_824 => Some(30),
+        _ => None,
+    }
+}
+
+/// Ánh xạ lỗi allocator → lỗi object layer (một bảng, không thêm bảng mã thứ hai).
+pub(crate) fn map_alloc_error(error: vifast_alloc::AllocError) -> ObjError {
+    use vifast_alloc::AllocError as E;
+    match error {
+        E::InvalidSize => ObjError::InvalidArgument,
+        E::NotEnoughMemory => ObjError::NotEnoughMemory,
+        E::Alignment => ObjError::Alignment,
+        E::NotAllocated | E::NoHoles | E::Corrupt => ObjError::Corrupt,
     }
 }

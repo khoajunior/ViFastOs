@@ -18,7 +18,11 @@ impl<M: PhysMem> Machine<M> {
         let mut frame_x = [0u16; MAX_OBJECTS];
         let mut frame_dev = [0u16; MAX_OBJECTS];
         // 1) Bất biến byte + PA của từng Untyped.
+        //    Span Frame sống để allocator đối chiếu — liệt kê từ **bảng object** ở dưới.
+        let mut spans = [(0u32, 0u32); MAX_OBJECTS];
+        let mut n_spans;
         for u_idx in 0..self.n_untypeds as usize {
+            n_spans = 0usize;
             let u = &self.untypeds[u_idx];
             if !u.live {
                 return Err(ObjError::Corrupt);
@@ -46,15 +50,14 @@ impl<M: PhysMem> Machine<M> {
                 hole_sum += h.len as u64;
             }
             let mut live_sum = 0u64;
-            let mut pa_sum = 0u64;
             for (i, obj) in self.objects.iter().enumerate() {
                 if !obj.live || obj.untyped as usize != u_idx || obj.kind == ObjKind::Untyped {
                     continue;
                 }
                 if obj.kind == ObjKind::Frame {
                     let size = 1u64 << obj.size_bits;
-                    let pa = u.pa_base + obj.pa_off as u64;
-                    if pa & (size - 1) != 0 || obj.pa_off as u64 + size > UNTYPED_PA_WINDOW {
+                    let pa = u.pa_base() + u64::from(obj.pa_off);
+                    if pa & (size - 1) != 0 || u64::from(obj.pa_off) + size > UNTYPED_PA_WINDOW {
                         return Err(ObjError::Corrupt);
                     }
                     // Không chồng Frame sống khác (toàn cục).
@@ -62,14 +65,19 @@ impl<M: PhysMem> Machine<M> {
                         if j <= i || !other.live || other.kind != ObjKind::Frame {
                             continue;
                         }
-                        let opa =
-                            self.untypeds[other.untyped as usize].pa_base + other.pa_off as u64;
+                        let opa = self.untypeds[other.untyped as usize].pa_base()
+                            + u64::from(other.pa_off);
                         let osize = 1u64 << other.size_bits;
                         if pa < opa + osize && opa < pa + size {
                             return Err(ObjError::AlreadyMapped);
                         }
                     }
-                    pa_sum += size;
+                    if n_spans < spans.len() {
+                        spans[n_spans] = (obj.pa_off, size as u32);
+                        n_spans += 1;
+                    } else {
+                        return Err(ObjError::Corrupt);
+                    }
                 } else if obj.kind == ObjKind::VSpace {
                     // Metadata VSpace nằm trong bảng tĩnh `.bss` (root PT là object riêng đã
                     // được tính ở nhánh dưới) — VSpace **không** tiêu byte arena.
@@ -115,32 +123,9 @@ impl<M: PhysMem> Machine<M> {
             if live_sum + hole_sum != u.bump as u64 {
                 return Err(ObjError::Corrupt);
             }
-            // PA: hole không chồng/không vượt watermark.
-            let mut pa_hole_sum = 0u64;
-            let mut pprev = 0u64;
-            for i in 0..u.n_pa_holes as usize {
-                let h = u.pa_holes[i];
-                if h.len == 0 || h.off as u64 + h.len as u64 > u.pa_used {
-                    return Err(ObjError::Corrupt);
-                }
-                if (h.off as u64) < pprev {
-                    return Err(ObjError::Corrupt);
-                }
-                pprev = h.off as u64 + h.len as u64;
-                pa_hole_sum += h.len as u64;
-                for obj in self.objects.iter() {
-                    if !obj.live || obj.kind != ObjKind::Frame || obj.untyped as usize != u_idx {
-                        continue;
-                    }
-                    let size = 1u64 << obj.size_bits;
-                    if (obj.pa_off as u64) < h.off as u64 + h.len as u64
-                        && (h.off as u64) < obj.pa_off as u64 + size
-                    {
-                        return Err(ObjError::Corrupt);
-                    }
-                }
-            }
-            if pa_sum + pa_hole_sum != u.pa_used {
+            // PA: allocator Frame (KT-67) kiểm **danh sách Frame sống liệt kê ở trên** +
+            // hole + watermark — không tautology, không bản sao danh sách trong allocator.
+            if !u.pa_check(&spans[..n_spans]) {
                 return Err(ObjError::Corrupt);
             }
             stats.bytes_cap += u.capacity as usize;
@@ -192,8 +177,8 @@ impl<M: PhysMem> Machine<M> {
                 return Err(ObjError::Corrupt);
             }
             let size = 1u64 << fr.size_bits;
-            let expected = self.untypeds[fr.untyped as usize].pa_base
-                + fr.pa_off as u64
+            let expected = self.untypeds[fr.untyped as usize].pa_base()
+                + u64::from(fr.pa_off)
                 + (map.va & (size - 1));
             if walk.phys != expected || !flags.matches_pte(walk.raw) {
                 return Err(ObjError::Corrupt);
@@ -334,7 +319,7 @@ impl<M: PhysMem> Machine<M> {
     /// PA nhãn của Frame.
     pub fn frame_pa(&self, cap: CapId) -> Result<u64, ObjError> {
         let (_, fr) = self.frame_cap_full(cap)?;
-        Ok(self.untypeds[fr.untyped as usize].pa_base + fr.pa_off as u64)
+        Ok(self.untypeds[fr.untyped as usize].pa_base() + u64::from(fr.pa_off))
     }
 
     /// `size_bits` của Frame (12/21/30).
@@ -387,12 +372,16 @@ impl<M: PhysMem> Machine<M> {
         let mut used = 0usize;
         let mut frames = 0usize;
         let mut objects = 0usize;
+        // `pa_used` = **Σ cỡ Frame đang sống** suy từ bảng object — đường **độc lập** với
+        // watermark của allocator (nhờ vậy TAP so được hai nguồn, không tautology).
+        let mut pa_live = 0u64;
         for obj in &self.objects {
             if !obj.live || obj.untyped != u_idx || obj.kind == ObjKind::Untyped {
                 continue;
             }
             if obj.kind == ObjKind::Frame {
                 frames += 1;
+                pa_live += 1u64 << obj.size_bits;
             } else {
                 used += obj.len as usize;
                 objects += 1;
@@ -404,9 +393,30 @@ impl<M: PhysMem> Machine<M> {
             free: (u.capacity as usize).saturating_sub(used),
             holes: u.n_holes as usize,
             watermark: u.bump as usize,
-            pa_used: u.pa_used,
+            pa_used: pa_live,
             frames,
             objects,
+        })
+    }
+
+    /// **KT-67** — ảnh chụp cửa sổ PA của Untyped (cầu nối D2-83/memsrv): mọi trường đọc
+    /// **thẳng** từ [`vifast_alloc::FrameArena`] mà object layer giữ, không phải allocator thứ
+    /// hai — nhờ vậy `check_objmem`, TAP và memsrv không thể lệch số.
+    pub fn frame_budget(&self, cap: CapId) -> Result<FrameBudget, ObjError> {
+        let (u_idx, _) = self.untyped_cap(cap)?;
+        let arena = &self.untypeds[u_idx as usize].pa;
+        Ok(FrameBudget {
+            base: arena.base(),
+            capacity: u64::from(arena.capacity()),
+            used: u64::from(arena.used_bytes()),
+            hole_bytes: u64::from(arena.hole_bytes()),
+            free_bytes: u64::from(arena.free_bytes()),
+            holes: arena.hole_count(),
+            live_4k: arena.live_frames(12),
+            live_2m: arena.live_frames(21),
+            live_1g: arena.live_frames(30),
+            allocs: arena.alloc_count(),
+            frees: arena.free_count(),
         })
     }
 

@@ -165,7 +165,8 @@ impl<M: PhysMem> Machine<M> {
             match self.pte_load(table, leaf_index) {
                 Some(raw) if raw & PTE_VALID != 0 => fail = true,
                 Some(_) => {
-                    let frame_pa = self.untypeds[fr.untyped as usize].pa_base + fr.pa_off as u64;
+                    let frame_pa =
+                        self.untypeds[fr.untyped as usize].pa_base() + u64::from(fr.pa_off);
                     let pte = ((frame_pa >> 12) << PTE_PPN_SHIFT) | flags.bits();
                     if !self.pte_store(table, leaf_index, pte) {
                         fail = true;

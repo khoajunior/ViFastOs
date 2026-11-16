@@ -37,7 +37,12 @@
 #   - số TAP ghi ở đây phải **bằng** số TAP runner có tên trong manifest (`ktest.sh`
 #     `manifest_for`) ⇒ thêm/bớt TAP phải sửa cả kernel, manifest và dòng này trong cùng commit.
 # Cách đọc + ý nghĩa từng dòng evidence: `v2/docs/k3-riscv64.md` §17.
-ktest 60 60
+# **KT-67** (K6, D2-95): ảnh chính thêm **5 TAP memsrv/allocator Frame** (60..64: alloc 2 MiB +
+# 4 KiB có ghi/đọc thật + đối chiếu byte hai phía · revoke về 0 + cấp lại đúng PA cũ · hết memory
+# trả mã 9, không panic · cầu nối D2-83: cap Frame của object layer được đại diện trong core và
+# chuyển qua KT-63 vào receive window · từ chối đúng mã 1/2/3, nguyên tử) ⇒ trap lồng dời sang
+# **65** (tổng 65 TAP). Số TAP khớp manifest `ktest.sh` + kernel.
+ktest 65 65
 ktest-guard 3 3
 
 # KT-53 → **KT-62/H** — ảnh test **user** (bin riêng): U-mode + `init` ELF + **16 syscall đi vào
