@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-96`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-97`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-96: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-97: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -161,3 +161,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-95** **K6 roadmap** (10 task ≤ 3 h, theo thiết kế §10.1 dòng K6): **KT-67** memsrv U-mode + `vifast-alloc` (Frame cấp qua IPC, cầu nối D2-83: core giữ cap, obj layer sở hữu VM); **KT-68** capalloc (cấp/thu hồi cap theo cây); **KT-69** IDL + ring chia sẻ; **KT-70** VFS pager + page cache (nhiều client); **KT-71** VFS journal + rename/truncate/double-indirect + fsck; **KT-72** virtio-blk thật (QEMU); **KT-73** virtio-console + UART IRQ→user; **KT-74** `SetTls` + exec chain; **KT-75** `test-persist` 7 pha trên virtio-blk; **KT-76** cổng K6 (`K6-DOD` “tương đương v1” đo được + soak 0/1000 + L1 400k). **Luật**: mỗi task phải có TAP trên QEMU (không host-only), không nới ngưỡng, và tiêu chí “tương đương v1” phải trích từ danh sách đo được của thiết kế §10.1 (Vietnam: VFS journal/fsck/rename/truncate/double-indirect; pager nhiều client; exec chain; test-persist 7 pha) — **không** tự định nghĩa lại cho dễ đạt.
 
 - **D2-96** KT-67 — **memsrv tạm thời là POLICY-ONLY, kernel-mediated** (chốt A): ABI hiện tại (16 syscall) **không** chở cap trong message từ U-mode và U-mode **chưa** có invocation, nên một memsrv U-mode tự cấp Frame là **bất khả** mà không mở ABI. Quyết định: (a) KT-67 giữ **allocator thật** (`vifast-alloc`, một nguồn sự thật byte, obj layer dùng lại) + **memory bridge** kernel-mediated (`grant/release/resolve/budget`, cap Frame đi qua receive window của KT-63); memsrv U-mode khi đó chỉ là **policy façade**, và phải ghi rõ là façade — **cấm** gọi nó là “memsrv đầy đủ”; (b) mở **KT-67a** để cài **invocation hẹp** (`Untyped.Retype` + `CNode.Insert` nếu cần) trong `spec/abi.toml` `[method_signature]`, sau đó memsrv giữ **cap Untyped trực tiếp** và tự retype — đường seL4, không kernel-mediated; (c) KT-67a cần **D2 mới** để mở ABI (D2-04/D2-22), gồm rủi ro và ngân sách; (d) mọi tuyên bố “memsrv cấp Frame” trước KT-67a phải ghi “qua kernel”.
+
+- **D2-97** **Invocation ĐÃ nằm trong ABI — KHÔNG cần mở `spec/`**: `spec/abi.toml` `[syscall].0` đã ghi rõ “Endpoint: IPC; **object khác: invocation (method = label)**, trả ngay”, và `[method_signature]` đã có 27 method (`Untyped.Retype`, `Tcb.*`, `CNode.*`, `SchedContext.*`, `SchedControl.Configure`…). Vì vậy **D2-96(b)/(c) được sửa**: KT-67a **không** mở `spec/`, chỉ **cài đặt** đường invocation cho syscall 0 trên object không phải Endpoint, theo danh sách **trắng hẹp** tăng dần: đợt 1 `Untyped.Retype` + `CNode.Insert`; đợt 2 `VSpace.Map`/`Unmap` để client U-mode **thật sự map được Frame** (đóng điểm “client chưa dùng được Frame” của KT-67). Method ngoài danh sách ⇒ `NotSupported` (giữ D2-53 Q11 cho phần chưa cài), **không** trả `Ok` giả. Không thêm syscall mới, không đổi 16 số hiệu, không đổi `MessageInfo` 35-bit.

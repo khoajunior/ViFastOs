@@ -172,8 +172,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-64a | **K3.5** đồng bộ sim theo D2-89: finalise có waiter ⇒ `Cancelled`+`Ready` | KT-64 | 2,5 h | DONE | 519d2e55; sim anti-hang D2-89/90; `.scn` 27; parity 18/18 + 4/4; TAP 55 sender trên QEMU; gate 647 |
 | KT-65 | **K3.5** procsrv (U-mode, Rust) + shell tối thiểu | KT-64a | 3 h | DONE | c607d0a9; 3 ELF U-mode that (procsrv/shell/con); wait=42, kill=Suspend(Abort), ps snapshot tu Machine; TAP 24; gate 649 |
 | KT-66 | **K3.5** cổng: TAP + soak + L1 400k + `K35-DOD` | KT-65 | 3 h | DONE | 97903b15+324d1da9; tach anh ktest-proc; stack per-hart canary fail-closed; L1 400k; soak 0/1000; conf 61/61; gate 649 |
-| KT-67 | **K6** memsrv U-mode + `vifast-alloc`: Frame thật cấp qua IPC | KT-66 | 3 h | READY | Frame từ Untyped → client; cầu nối D2-83 (VM ở obj layer); TAP |
-| KT-67a | **K6** invocation hẹp cho U-mode (`Untyped.Retype`) để memsrv thật | KT-67 | 3 h | BLOCKED | mở `spec/[method_signature]` theo D2 mới; memsrv giữ cap Untyped; bỏ kernel-mediated |
+| KT-67 | **K6** memsrv U-mode + `vifast-alloc`: Frame thật cấp qua IPC | KT-66 | 3 h | DONE | e59f301d; vifast-alloc 4K/2M/1G mot nguon byte; memory bridge D2-83; TAP 60..64; gate 661/87; soak 0/1000; memsrv = facade (D2-96) |
+| KT-67a | **K6** invocation hẹp cho U-mode (`Untyped.Retype`) để memsrv thật | KT-67 | 3 h | READY | D2-97: invocation DA co trong ABI, chi cai dat; dot 1 Untyped.Retype + CNode.Insert, dot 2 VSpace.Map/Unmap; memsrv giu cap Untyped |
 | KT-68 | **K6** capalloc: cấp/thu hồi capability theo cây | KT-67a | 3 h | BLOCKED | revoke cây đúng; không rò; TAP |
 | KT-69 | **K6** IDL + ring buffer chia sẻ (shared Frame) | KT-68 | 3 h | BLOCKED | IDL sinh stub từ spec; ring 1 producer/1 consumer; TAP |
 | KT-70 | **K6** VFS tầng 1: pager + page cache | KT-69 | 3 h | BLOCKED | nhiều client; fault→pager; TAP |
@@ -201,7 +201,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 READY** (memsrv + alloc).
+2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a READY** (invocation để memsrv thật + client map được Frame).
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
