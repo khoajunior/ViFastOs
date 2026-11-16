@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-106`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-107`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-106: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-107: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -181,3 +181,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-105** **Hai luật cho cây dùng chung** (rút từ KT-68b/KT-69 chạy chồng lên nhau, 2026-11-16): (a) **Chỉ MỘT agent được ghi `v2/` tại một thời điểm** cho tới K6 xong — agent sau **chỉ** được spawn khi agent trước đã báo “đóng băng” **và** đã commit; nếu phần việc mới không đụng `v2/` (docs, ViScript) thì được chạy song song. Lý do: KT-69 thêm `v2/lib/vifast-idl` giữa lúc KT-68b đang chờ commit ⇒ `v2 check` FAIL trên cây chung và một lệnh `git commit -- v2` sẽ nuốt code dở của task khác. (b) Khi cây chung đang bẩn bởi task khác, **xác minh HEAD bằng worktree sạch**: `git worktree add /tmp/wt HEAD && (cd /tmp/wt && ./v2/bin/v2 check) && git worktree remove --force /tmp/wt` — **không** dùng `v2 check` trên cây bẩn để kết luận commit hỏng/không hỏng. Luật (b) áp **mọi** lần commit có nhiều task trên cây.
 
 - **D2-106** **Giá trị SUY RA (derived) trong evidence**: một số bằng chứng là **phép tính từ số đo**, không phải bộ đếm — ví dụ `wrap = head / size` (head = số publish một chiều, size = số slot) chứng minh ring đã quay vòng ≥5 lần. Luật: (a) **được** dùng giá trị suy ra khi nó là **hệ quả toán học** của đại lượng **đo được** (không phải hằng giả); (b) evidence phải ghi **rõ công thức** (`wrap=head/size=5 const:size=8`), không chỉ ghi `wrap=5`; (c) các đầu vào của phép tính phải xuất hiện **cùng dòng** hoặc cùng khối evidence; (d) nên có **chứng cứ độc lập thứ hai** cho cùng kết luận (ví dụ slot 0 bị ghi đè lần thứ 5); (e) nếu không nêu được công thức ⇒ **phải** thay bằng bộ đếm thật. Áp cho mọi dòng evidence, không riêng ring.
+
+- **D2-107** **KT-69 DONE — IDL + ring chia sẻ** (K6): `vifast-idl` (IDL tối thiểu `ring.vidl`, generator `gen_idl.py` sinh stub `no_std` **không `unsafe`**, method id sinh **tuần tự từ file IDL** — **không** vào `spec/abi.toml`, `spec/` diff **rỗng**) + `vifast-ring` (**SPSC** trên một Frame 4 KiB: ghi slot → `store_rel(head)`; consumer `acquire(head)` → đọc → `store_rel(tail)`; **đầy ⇒ 9**, **rỗng ⇒ 14**, counter một chiều, `slot = counter & mask`, **không `unsafe`**). Hai tiến trình U-mode riêng: server map Frame → `attach` **mang cap** → client nhận qua receive window → map **cùng PA** — kernel kiểm bằng **walk cả hai VSpace** + `frame_pa` từ object layer + đọc **physmap** (`s_pa=c_pa=pa=0x8202a000`), không tin lời khai của chương trình. 40 message / `wrap=head/size=5` (công thức + `slot0=32` độc lập, D2-106), `sum 820=820` từ **hai** bộ đếm riêng. TAP `ktest-user` **29**, matrix **12/12**, conformance **61/61 + 5/5**, gate **675/92**, soak **1000/1000** (`5c8ce032…`), clippy 4/4 `EXIT=0`, `size_of` **188.872** không đổi, disassembly 2 ELF **0 lệnh đặc quyền**. **Bài học**: luật mới (D2-102/106) áp **ngay** cho task đang review nếu bản vá **cơ học** — đã áp cho `empty_code`/`wrap`/`installed` thay vì miễn trừ.

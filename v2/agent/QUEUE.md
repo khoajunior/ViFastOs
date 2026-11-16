@@ -176,8 +176,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-67a | **K6** invocation hẹp cho U-mode (`Untyped.Retype`) để memsrv thật | KT-67 | 3 h | DONE | f56b0255; Retype 1.0 + Frame.Map/Unmap 11.0/11.1 (D2-99); memsrv U-mode tu retype; client map that; M1/M2 vá quyen; gate 661/87; soak 0/1000 |
 | KT-67b | **K6** header IPC buffer U-mode + receive window ⇒ chuyển cap giữa 2 tiến trình | KT-67a | 3 h | DONE | b8f61c99; header IPC buffer + window; cap giua 2 tien trinh that (2 ELF/2 cspace); spec mo 1 lan +15-3; TAP 19; gate 661/87 |
 | KT-68 | **K6** capalloc: cấp/thu hồi capability theo cây | KT-67b | 3 h | DONE | 76b6e22e; capalloc cay MDB (id sinh tu spec); TAP 24; gate 661/87; soak 0/1000; run.sh --boot vá |
-| KT-69 | **K6** IDL + ring buffer chia sẻ (shared Frame) | KT-68 | 3 h | READY | IDL sinh stub từ spec; ring 1 producer/1 consumer; TAP |
-| KT-70 | **K6** VFS tầng 1: pager + page cache | KT-69 | 3 h | BLOCKED | nhiều client; fault→pager; TAP |
+| KT-69 | **K6** IDL + ring buffer chia sẻ (shared Frame) | KT-68 | 3 h | DONE | 3aac2ed5; vifast-idl (sinh stub) + vifast-ring SPSC; 2 tien trinh cung PA; TAP 29; gate 675/92; soak 1000/1000 |
+| KT-70 | **K6** VFS tầng 1: pager + page cache | KT-69 | 3 h | READY | nhiều client; fault→pager; TAP |
 | KT-71 | **K6** VFS tầng 2: journal + rename/truncate/double-indirect + fsck | KT-70 | 3 h | BLOCKED | crash-consistency 7 pha; fsck sửa được; TAP |
 | KT-72 | **K6** virtio-blk thật (QEMU) | KT-71 | 3 h | BLOCKED | đọc/ghi sector qua virtqueue; TAP |
 | KT-73 | **K6** virtio-console + UART IRQ → user | KT-72 | 3 h | BLOCKED | shell đọc bàn phím thật; TAP |
@@ -202,7 +202,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a DONE** (invocation, gate 661/87); **KT-67b DONE** (cap giữa 2 tiến trình thật, gate 661/87); **KT-68 DONE** (capalloc, gate 661/87); **KT-69 READY** (IDL + ring chia sẻ).
+2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a DONE** (invocation, gate 661/87); **KT-67b DONE** (cap giữa 2 tiến trình thật, gate 661/87); **KT-68 DONE** (capalloc, gate 661/87); **KT-69 DONE** (IDL + ring, gate 675/92); **KT-70 READY** (VFS pager + page cache).
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
