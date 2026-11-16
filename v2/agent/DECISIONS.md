@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-107`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-108`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-107: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-108: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -183,3 +183,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-106** **Giá trị SUY RA (derived) trong evidence**: một số bằng chứng là **phép tính từ số đo**, không phải bộ đếm — ví dụ `wrap = head / size` (head = số publish một chiều, size = số slot) chứng minh ring đã quay vòng ≥5 lần. Luật: (a) **được** dùng giá trị suy ra khi nó là **hệ quả toán học** của đại lượng **đo được** (không phải hằng giả); (b) evidence phải ghi **rõ công thức** (`wrap=head/size=5 const:size=8`), không chỉ ghi `wrap=5`; (c) các đầu vào của phép tính phải xuất hiện **cùng dòng** hoặc cùng khối evidence; (d) nên có **chứng cứ độc lập thứ hai** cho cùng kết luận (ví dụ slot 0 bị ghi đè lần thứ 5); (e) nếu không nêu được công thức ⇒ **phải** thay bằng bộ đếm thật. Áp cho mọi dòng evidence, không riêng ring.
 
 - **D2-107** **KT-69 DONE — IDL + ring chia sẻ** (K6): `vifast-idl` (IDL tối thiểu `ring.vidl`, generator `gen_idl.py` sinh stub `no_std` **không `unsafe`**, method id sinh **tuần tự từ file IDL** — **không** vào `spec/abi.toml`, `spec/` diff **rỗng**) + `vifast-ring` (**SPSC** trên một Frame 4 KiB: ghi slot → `store_rel(head)`; consumer `acquire(head)` → đọc → `store_rel(tail)`; **đầy ⇒ 9**, **rỗng ⇒ 14**, counter một chiều, `slot = counter & mask`, **không `unsafe`**). Hai tiến trình U-mode riêng: server map Frame → `attach` **mang cap** → client nhận qua receive window → map **cùng PA** — kernel kiểm bằng **walk cả hai VSpace** + `frame_pa` từ object layer + đọc **physmap** (`s_pa=c_pa=pa=0x8202a000`), không tin lời khai của chương trình. 40 message / `wrap=head/size=5` (công thức + `slot0=32` độc lập, D2-106), `sum 820=820` từ **hai** bộ đếm riêng. TAP `ktest-user` **29**, matrix **12/12**, conformance **61/61 + 5/5**, gate **675/92**, soak **1000/1000** (`5c8ce032…`), clippy 4/4 `EXIT=0`, `size_of` **188.872** không đổi, disassembly 2 ELF **0 lệnh đặc quyền**. **Bài học**: luật mới (D2-102/106) áp **ngay** cho task đang review nếu bản vá **cơ học** — đã áp cho `empty_code`/`wrap`/`installed` thay vì miễn trừ.
+
+- **D2-108** **KT-70 DONE — VFS tầng 1 (pager + page cache)** + **hai luật mới**: (A) **Hash ảnh phải lấy từ build SẠCH không feature**: build `--features ktest,user` ghi đè **cùng** đường `release/` ⇒ hash đọc sau đó là **hash giả** (KT-70 đã gặp `badfc5e9…`); quy trình đúng: build sạch → `shasum` → ghi log kèm `BUILD_EXIT`. (B) **Bộ đếm an ninh luôn bằng 0 mà không có ca âm thì KHÔNG chứng minh gì** (`kernel_data_bad=0` của KT-70 là ví dụ — agent tự phát hiện); mỗi bộ đếm loại này phải có **ca âm chủ động** hoặc bị ghi là “chưa chứng minh”. Nội dung KT-70: `vifast-vfs` (`PagerCore` + `PageCache` LRU, `BlockDev` trait với backend RAM — virtio ở KT-72), IDL cho pager, fault→pager; **2 client chia sẻ cùng Frame vật lý** (`p2_a==p2_b==0x82034000`, không phải cùng entry); hit **không** gọi backend (chứng minh bằng **cấu trúc**: `Begin::Hit` không có đường tới `load`); `AlreadyMapped` kiểm **trước** mọi ghi PTE; eviction không mất dữ liệu (cache **chỉ đọc**, chưa có dirty/write-back ⇒ nợ KT-71); TAP `ktest-user` **35**, matrix **12/12**, conformance **61/61 + 5/5**, gate **689/95**, soak **0/1000** (sha `ff99297c…` **không đổi** vì KT-70 chỉ ảnh test), clippy 4/4 `EXIT=0`, `size_of` **188.872**. **Kỳ vọng của tôi sai**: aux cap sai loại trả `WrongObjectType` (2), **không phải** `InvalidCapability` (1) — agent giữ **mã đo thật**, đúng D2-102.
