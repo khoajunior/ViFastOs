@@ -174,7 +174,8 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-66 | **K3.5** cổng: TAP + soak + L1 400k + `K35-DOD` | KT-65 | 3 h | DONE | 97903b15+324d1da9; tach anh ktest-proc; stack per-hart canary fail-closed; L1 400k; soak 0/1000; conf 61/61; gate 649 |
 | KT-67 | **K6** memsrv U-mode + `vifast-alloc`: Frame thật cấp qua IPC | KT-66 | 3 h | DONE | e59f301d; vifast-alloc 4K/2M/1G mot nguon byte; memory bridge D2-83; TAP 60..64; gate 661/87; soak 0/1000; memsrv = facade (D2-96) |
 | KT-67a | **K6** invocation hẹp cho U-mode (`Untyped.Retype`) để memsrv thật | KT-67 | 3 h | READY | D2-97: invocation DA co trong ABI, chi cai dat; dot 1 Untyped.Retype + CNode.Insert, dot 2 VSpace.Map/Unmap; memsrv giu cap Untyped |
-| KT-68 | **K6** capalloc: cấp/thu hồi capability theo cây | KT-67a | 3 h | BLOCKED | revoke cây đúng; không rò; TAP |
+| KT-67b | **K6** header IPC buffer U-mode + receive window ⇒ chuyển cap giữa 2 tiến trình | KT-67a | 3 h | BLOCKED | D2-98: ABI đã có window (spec:58); memsrv→client khác tiến trình; TAP |
+| KT-68 | **K6** capalloc: cấp/thu hồi capability theo cây | KT-67b | 3 h | BLOCKED | revoke cây đúng; không rò; TAP |
 | KT-69 | **K6** IDL + ring buffer chia sẻ (shared Frame) | KT-68 | 3 h | BLOCKED | IDL sinh stub từ spec; ring 1 producer/1 consumer; TAP |
 | KT-70 | **K6** VFS tầng 1: pager + page cache | KT-69 | 3 h | BLOCKED | nhiều client; fault→pager; TAP |
 | KT-71 | **K6** VFS tầng 2: journal + rename/truncate/double-indirect + fsck | KT-70 | 3 h | BLOCKED | crash-consistency 7 pha; fsck sửa được; TAP |

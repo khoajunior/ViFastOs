@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-97`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-98`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-97: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-98: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -163,3 +163,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-96** KT-67 — **memsrv tạm thời là POLICY-ONLY, kernel-mediated** (chốt A): ABI hiện tại (16 syscall) **không** chở cap trong message từ U-mode và U-mode **chưa** có invocation, nên một memsrv U-mode tự cấp Frame là **bất khả** mà không mở ABI. Quyết định: (a) KT-67 giữ **allocator thật** (`vifast-alloc`, một nguồn sự thật byte, obj layer dùng lại) + **memory bridge** kernel-mediated (`grant/release/resolve/budget`, cap Frame đi qua receive window của KT-63); memsrv U-mode khi đó chỉ là **policy façade**, và phải ghi rõ là façade — **cấm** gọi nó là “memsrv đầy đủ”; (b) mở **KT-67a** để cài **invocation hẹp** (`Untyped.Retype` + `CNode.Insert` nếu cần) trong `spec/abi.toml` `[method_signature]`, sau đó memsrv giữ **cap Untyped trực tiếp** và tự retype — đường seL4, không kernel-mediated; (c) KT-67a cần **D2 mới** để mở ABI (D2-04/D2-22), gồm rủi ro và ngân sách; (d) mọi tuyên bố “memsrv cấp Frame” trước KT-67a phải ghi “qua kernel”.
 
 - **D2-97** **Invocation ĐÃ nằm trong ABI — KHÔNG cần mở `spec/`**: `spec/abi.toml` `[syscall].0` đã ghi rõ “Endpoint: IPC; **object khác: invocation (method = label)**, trả ngay”, và `[method_signature]` đã có 27 method (`Untyped.Retype`, `Tcb.*`, `CNode.*`, `SchedContext.*`, `SchedControl.Configure`…). Vì vậy **D2-96(b)/(c) được sửa**: KT-67a **không** mở `spec/`, chỉ **cài đặt** đường invocation cho syscall 0 trên object không phải Endpoint, theo danh sách **trắng hẹp** tăng dần: đợt 1 `Untyped.Retype` + `CNode.Insert`; đợt 2 `VSpace.Map`/`Unmap` để client U-mode **thật sự map được Frame** (đóng điểm “client chưa dùng được Frame” của KT-67). Method ngoài danh sách ⇒ `NotSupported` (giữ D2-53 Q11 cho phần chưa cài), **không** trả `Ok` giả. Không thêm syscall mới, không đổi 16 số hiệu, không đổi `MessageInfo` 35-bit.
+
+- **D2-98** Đính chính D2-97 + mở **KT-67b**: (a) `spec/abi.toml` có **13** `[method_signature."X"]` (không phải 27 — con số 27 đếm cả khoá con `state.*`, sai); (b) **`Frame` id 11 = Map/Unmap/GetAddress/MapIo/UnmapIo** và **`Untyped` id 1.0 = Retype** theo đúng spec — nên KT-67a cài `Untyped.Retype`=1.0, `Frame.Map`=11.0, `Frame.Unmap`=11.1 là **đúng số spec**, không thêm id; `VSpace` id 9 chỉ có `GetAsid`, `method id 1 để TRỐNG` (D2-32) nên `VSpace.Map` **không tồn tại** — dùng `Frame.Map` (đúng như agent đã làm); (c) **chuyển cap qua U-mode KHÔNG cần mở spec**: `spec/abi.toml:58` đã ghi `ipc_buffer = "Frame bind qua Tcb.Configure; header chứa receive window (CPTR, ≤4 cap)"` ⇒ receive window **đã nằm trong IPC buffer header**, tức ABI đã có; phần thiếu là **shim U-mode chưa đọc/ghi header đó** và `build_message` chưa lấy window từ nó. Vì vậy **KT-67b**: cài header IPC buffer + receive window trong shim (và `MessageInfo.caps`), để **memsrv cấp Frame cho client khác tiến trình** — đóng BLOCKED cuối của KT-67a **không** cần D2 mở ABI. `CNode.Insert`: spec CNode không có id trống cho Insert ⇒ **giữ** `NotSupported`, dùng `CNode.Copy/Mint/Move/Delete/Revoke` (có id) khi cần.
