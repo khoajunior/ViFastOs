@@ -1,8 +1,9 @@
 # K3.5 — procsrv U-mode + shell tối thiểu (KT-65)
 
-Trạng thái: **DONE (đề xuất)** — chờ reviewer + Agent 0 lật QUEUE. Tài liệu này mô tả **kiến trúc
-và giao thức**; mọi số đo (TAP, gate, budget, soak) nằm trong `v2/agent/STATE.md` +
-`v2/agent/JOURNAL/kt65-*`, không chép tay vào đây (QD §9 Q12).
+Trạng thái: **KT-65 DONE; KT-66 (cổng K3.5) bổ sung §9/§10** — chờ reviewer + Agent 0 lật QUEUE.
+Tài liệu này mô tả **kiến trúc, giao thức và thiết kế cổng**; mọi số đo (TAP, gate, budget, soak,
+L1) nằm trong `v2/agent/reports/K35-DOD.md` + `v2/agent/STATE.md` + `v2/agent/JOURNAL/kt66-*`,
+không chép tay vào đây (QD §9 Q12).
 
 Liên quan: QD §1 **Q-A** (fault `Exit` + `wait`), D2-25/D2-56a (`FaultKind::Exit`), D2-79 (syscall
 14), D2-83 (core sở hữu TCB), D2-84/85 (pin `size_of::<Machine>()` + trần ảnh), D2-86..92,
@@ -35,7 +36,9 @@ KT-65 là tầng 4 của K3.5: **lần đầu kernel chạy chương trình U-mo
 | scheduler/rig kernel | `v2/kernel/vifast-kbin-riscv64/src/proc_demo.rs` | `build_rig` :156, `service` :267, `run` :408 |
 | đa nhiệm U-mode (arch) | `v2/kernel/vifast-plat-riscv64/src/user.rs` | `run_task` :347, `on_u_exception` :846 |
 | stack riêng dispatch syscall | cùng tệp | mục KT-65 :761, `dispatch_on_private_stack` :809 |
-| ghép ảnh test | `v2/kernel/vifast-kbin-riscv64/src/ktest_user.rs` | gọi demo :471, `fault_phase` :484 |
+| ghép ảnh test (syscall/core) | `v2/kernel/vifast-kbin-riscv64/src/ktest_user.rs` | TAP 1..14, kết thúc sạch |
+| **ảnh demo riêng** (KT-66) | `v2/kernel/vifast-kbin-riscv64/src/ktest_proc.rs` | `rust_main`, `fault_phase` (TAP 1..10) |
+| stack syscall **per-hart** (KT-66) | `v2/kernel/vifast-plat-riscv64/src/user.rs` | mục KT-66, `init_syscall_stacks`, `print_stack_evidence` |
 
 Vì sao có `vifast-plat-user`: `core::arch::asm!` là `unsafe`, mà luật **R5** (D2-17) chỉ cho
 `unsafe` trong danh sách đóng — `kernel/vifast-plat-*` nằm trong danh sách; **D2-93** xác nhận
@@ -148,26 +151,117 @@ ghi nợ**, không phải bằng chứng đường trả về đã đúng — xe
 5. **Đường trả về `rust_main` sau nhiều lượt `user_enter`** chưa được chứng minh; demo tránh nó
    bằng continuation. Nợ: điều tra `ra=0` (nghi vấn khung gọi/stack) và bỏ continuation.
 6. **Headroom ảnh test mỏng** (239.216/262.144 B): 3 ELF + capture + stack dispatch 32 KiB.
-   **Quyết định cho KT-66** (Agent 0, chưa triển khai trong KT-65): tách ảnh demo thành ảnh thứ
-   tư `vifast-kbin-ktest-proc` chạy script riêng, matrix giữ 9/9; **không** hạ stack bằng cách
-   đoán. Xem `JOURNAL/kt65-procsrv.md` §7.
+   **ĐÃ GIẢI Ở KT-66** — tách ảnh demo thành ảnh thứ tư `vifast-kbin-ktest-proc` (§9); số headroom
+   trả về đo trong `K35-DOD.md` §7, không chép tay ở đây.
 7. Chưa có `ReplyRecv`/`Call` trong giao thức; chỉ `NBSend`/`NBRecv`/`Yield`.
 8. **Bằng chứng low-water trap stack** đã gỡ khỏi cây cuối (instrumentation); muốn giữ thường
-   trực cần **canary thật** — đưa vào KT-66 cùng stack per-hart/arena.
+   trực cần **canary thật** — **ĐÃ LÀM Ở KT-66**: canary + nước thấp cho **stack syscall per-hart**
+   (§9.4); low-water của trap stack 16 KiB vẫn là instrumentation khi điều tra, không thường trực.
 9. Chưa có kiểm song song nhiều procsrv/shell; ảnh demo là một bộ ba cố định.
 
-## 9. Cách chạy và đo
+## 9. KT-66 — tách ảnh demo + stack syscall per-hart (canary)
+
+### 9.1 Ảnh thứ tư `vifast-kbin-ktest-proc`
+
+- Bin **mới** `src/ktest_proc.rs` (`[[bin]] vifast-kbin-ktest-proc`, required-features
+  `ktest,user`) — **cùng** crate/feature với ảnh user, linker script dùng chung.
+- Ảnh giữ **đúng mười ca cũ 15..24** của `ktest-user`, **đánh số lại 1..10** vì TAP của một ảnh
+  phải liên tục `1..N`; tên TAP giữ nguyên. Ánh xạ là **thiết kế** (không phải số đo):
+
+  | Cũ | Mới | Ca |
+  |---:|---:|---|
+  | 15 | 1 | procsrv/shell/con load u-mode |
+  | 16 | 2 | procsrv recv fault exit |
+  | 17 | 3 | shell help echo |
+  | 18 | 4 | shell ps tu core |
+  | 19 | 5 | shell wait ma thoat |
+  | 20 | 6 | procsrv kill treo tcb |
+  | 21 | 7 | shell exit va procsrv finalise |
+  | 22 | 8 | u-mode kernel read fault |
+  | 23 | 9 | faultkind exit |
+  | 24 | 10 | faultkind wx from u |
+
+- `ktest-user` còn **1..14** và kết thúc boot **sạch** bằng `PANIC: KT-66 u-mode pha syscall xong
+  (14 TAP, 0 fail)` + `DebugHalt` (vẫn đúng **một** dòng PANIC theo mẫu runner — không phải fault).
+- Ảnh demo chạy **cùng** mười ca đó với **script riêng**: `ktest_proc.rs` dựng rig tối thiểu cho
+  `init`, chạy `init` **một lượt** (nguồn `exit_kind_ok` + `LoadedInit` cho fault phase), rồi
+  `proc_demo::run` (TAP 1..7) và continuation `fault_phase` (TAP 8..10, PANIC `u-mode fault`).
+- Matrix đầy đủ vì vậy là **4 ảnh × smp 1/2/4 = 12 boot** (trước KT-66: 3 × 3 = 9); runner kiểm
+  **mọi slot** (`LABEL_COUNT`, `want_rows`), không bỏ ảnh nào. `expected.txt` thêm dòng
+  `ktest-proc 10 10`, `ktest-user 14 14`; manifest/evidence/panic-pattern của runner đổi **cùng
+  lúc** với kernel (luật KT-54).
+
+### 9.2 Vì sao tách
+
+Ảnh `ktest-user` trước KT-66 phải mang: `init` ELF + **3 ELF demo** (procsrv/shell/con) +
+`proc_demo` + stack dispatch 32 KiB trong `.bss` ⇒ sát trần `262.144 B`. Tách theo trách nhiệm:
+ảnh **syscall/core** (14 TAP, `init` + `Machine`) và ảnh **demo** (10 TAP, U-mode đa nhiệm).
+Số headroom trả về và trần ảnh đo ở `K35-DOD.md` §7 (D2-72 Q5), không chép tay ở đây.
+
+### 9.3 Stack dispatch syscall **per-hart**
+
+- Thay `static SYSCALL_STACK` 32 KiB (KT-65, **một** stack dùng chung) bằng **một block 32 KiB
+  cho mỗi hart online**, nằm trong **vùng NOLOAD per-hart** (`__hart_area_base`), record mới:
+  `guard 4 KiB | kernel stack 64 KiB | trap stack 16 KiB | **syscall stack 32 KiB**`
+  ⇒ `HART_STRIDE = 0x1_D000`, `HART_AREA_BYTES = 0xE_8000` (8 hart). Hằng số nằm ở
+  `vifast_plat_common::smp` + `linker.ld` + macro `trap_entry` (dịch/cộng, không cần M) và được
+  `mmu::init` **kiểm khớp linker** (panic nếu lệch).
+- **Vì sao không lấy Frame từ arena:** `Frame` của object layer nằm trong cửa sổ PA
+  `0x8200_0000`, chỉ chạm được qua physmap/nửa cao; `copy_kernel_low_root` **không** chép root
+  index ≥ 256 vào root VSpace user, mà trap từ U-mode chạy với `satp` = root user ⇒ dispatch trên
+  stack ở arena **store page fault thật** (`stval=0xffffffc082007ff8`). Vùng NOLOAD per-hart thì
+  identity-mapped **thấp** (root index 2, có trong root user) nên dùng được đúng chỗ. Đây là
+  **phát hiện đo được** (PANIC `stval=0xffffffc082007ff8` trong phiên; log thô bị ghi đè khi
+  chuyển sang NOLOAD — bằng chứng kiến trúc `# mmu layout: … none_physmap=1`), ghi ở
+  `K35-DOD.md` §9 và `JOURNAL/kt66-nhat-ky.md`.
+- Chỉ `static` còn lại: bảng mô tả `base/top/canary_bad` (`[u64; MAX_HARTS]`, ~200 B) + scratch
+  dispatch một lượt; **không** còn 32 KiB trong `.data+.bss`. NOLOAD báo **riêng** ở `budget.sh`
+  (D2-72 Q5) — `syscall_stack=`, `hart_stacks=`, `noload_hart=`.
+
+### 9.4 Canary + nước thấp (`low`)
+
+- Mỗi block: hai word canary ở **đáy** (`STACK_CANARY` + `!STACK_CANARY`) và **sơn** `0xAA` toàn
+  block 32 KiB lúc cấp. `low` = word đầu tiên khác mẫu sơn từ đáy lên ⇒ nước thấp **thật** của
+  lần chạy; chưa dùng ⇒ `low = top`.
+- Canary kiểm **sau mỗi lượt dispatch** và một lần nữa khi in evidence; tràn/underflow ghi đè
+  canary ⇒ in `# stack: canary=1 hart=K` rồi **PANIC + halt ngay** (fail-closed — không chạy tiếp
+  trên trạng thái hỏng; vá reviewer KT-66 M1), và evidence `canary=0` của runner đỏ.
+- Bằng chứng (một dòng tổng + một dòng mỗi hart online; thay cho `:761` của KT-65):
+  `# stack: noload=1 block=32768 harts=N distinct=1 canary=0 base=0x…`
+  `# stack hart=K base=0x… top=0x… low=0x… used=… canary=…`
+  `distinct=1` ⇔ **mọi cặp** hart có `base` khác nhau (smp 2/4 **không** dùng chung stack);
+  runner kiểm cả **tập** hart 0..N-1 + `low ∈ [base, top]` + `top-base ≥ 32 KiB` bằng
+  `check_stack_lines` (không chỉ đếm). Harness **fail-closed**: parse portable (bash `16#…`, không
+  `strtonum`), thiếu dòng/hex hỏng ⇒ **ĐỎ**; tự kiểm bằng `ktest.sh --selftest-stack` (5 ca).
+- **Phạm vi đo:** smp 2/4 **đã cấp** block riêng cho từng hart (`distinct=1`), nhưng scheduler demo
+  chỉ chạy hart 0 nên **hart 1..3 chưa từng dispatch** (`used=0`) — nối IPI multi-hart là nợ #6
+  (`K35-DOD.md` §12.2), không phải "đã chạy song song".
+
+### 9.5 Phạm vi đỏ-trước của KT-66
+
+Ba log đỏ-trước (mục D9 trong `K35-DOD.md`): **ảnh tách** (log 24 TAP cũ vs `expected.txt` mới 14
+⇒ plan/ok-count đỏ), **stack dùng chung** (mọi hart trỏ block hart 0 ⇒ `distinct=0`, runner đỏ ở
+`stack-distinct`), **canary** (ghi đè canary ⇒ `canary=1`, evidence đỏ). Không retry (D2-07).
+
+## 10. Cách chạy và đo cổng K3.5
 
 ```bash
-# một boot mỗi ảnh (ktest, ktest-guard, ktest-user) ở smp=1 — có TAP/evidence KT-65
+# một boot mỗi ảnh (ktest, ktest-guard, ktest-user, ktest-proc) ở smp=1
 bash v2/test/boot/ktest.sh 1 1
-# matrix đầy đủ (3 ảnh × smp 1/2/4)
+# matrix đầy đủ (4 ảnh × smp 1/2/4 = 12 boot)
 bash v2/test/boot/ktest.sh 1 matrix
-# ngân sách ảnh
-bash v2/test/boot/budget.sh v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user ktest-user
-# soak (không chạy song song build/gate)
+# ngân sách **mỗi** ảnh (gồm ảnh demo) + NOLOAD báo riêng
+bash v2/test/boot/budget.sh v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-proc ktest-proc
+# conformance sim ↔ QEMU (dùng log matrix ở trên)
+KT55_LOGDIR=/tmp/k3-kt66-matrix bash v2/test/conformance/run.sh --compare --smp 2
+# soak ảnh sản phẩm (KHÔNG icount; không chạy song song build/gate)
 bash v2/test/boot/soak.sh 1000 3
+# L1 cổng (100k seed × smp 1/2/4/8) — chạy **một mình**, xem K35-DOD §6 về cách chia tiến trình
+VIFAST_SEEDS=100000 VIFAST_SMP=N cargo test --manifest-path v2/Cargo.toml -p vifast-sim driver_smp -- --nocapture
+# cổng bắt buộc cuối task
+./v2/bin/v2 check && ./v2/bin/v2 gate --fast
 ```
 
-TAP/evidence của KT-65 nằm trong `v2/test/boot/ktest.sh` (manifest + regex `^…$`) và
-`expected.txt` (`ktest-user 24 24`); log mẫu và số đo ở `v2/agent/JOURNAL/kt65-*` + STATE.
+TAP/evidence của KT-65/KT-66 nằm trong `v2/test/boot/ktest.sh` (manifest + regex `^…$`) và
+`expected.txt` (`ktest 60`, `ktest-guard 3`, `ktest-user 14`, `ktest-proc 10`); số đo cổng ở
+`v2/agent/reports/K35-DOD.md`, log thô ở `v2/agent/JOURNAL/kt66-*` + `STATE.md`.

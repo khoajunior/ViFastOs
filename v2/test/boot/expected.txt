@@ -32,15 +32,25 @@
 # Luật runner kiểm khi nạp tệp (sai ⇒ ĐỎ, không bỏ qua):
 #   - mỗi dòng dữ liệu đúng 3 trường, trường 2/3 là số nguyên >= 1, và **kế hoạch = số `ok`**
 #     (runner không có khái niệm "TAP đỏ được phép": mọi `not ok` là FAIL);
-#   - **không** nhãn lặp, **không** nhãn lạ (gõ nhầm tên ảnh ⇒ đỏ), và **đủ** ba nhãn
-#     `ktest ktest-guard ktest-user` mà runner biết;
+#   - **không** nhãn lặp, **không** nhãn lạ (gõ nhầm tên ảnh ⇒ đỏ), và **đủ** bốn nhãn
+#     `ktest ktest-guard ktest-user ktest-proc` mà runner biết;
 #   - số TAP ghi ở đây phải **bằng** số TAP runner có tên trong manifest (`ktest.sh`
 #     `manifest_for`) ⇒ thêm/bớt TAP phải sửa cả kernel, manifest và dòng này trong cùng commit.
 # Cách đọc + ý nghĩa từng dòng evidence: `v2/docs/k3-riscv64.md` §17.
 ktest 60 60
 ktest-guard 3 3
 
-# KT-53 → **KT-62**, KT-65: ảnh test **user** (bin riêng) — U-mode + `init` ELF + **16 syscall đi vào
-# `Machine` thật** (14 TAP cũ + 7 TAP procsrv/shell KT-65 + 3 TAP fault/wx = 24), boot kết
-# thúc bằng `PANIC: u-mode fault …` có chủ đích (U-mode thực thi trang RW NX ⇒ page fault 12).
-ktest-user 24 24
+# KT-53 → **KT-62/H** — ảnh test **user** (bin riêng): U-mode + `init` ELF + **16 syscall đi vào
+# `Machine` thật** = 14 TAP (1..14). KT-66 **tách ảnh demo** sang `ktest-proc` (bên dưới) để ảnh
+# này trả headroom; boot kết thúc bằng `PANIC: KT-66 u-mode pha syscall xong (14 TAP, 0 fail)`.
+ktest-user 14 14
+
+# **KT-66** — ảnh demo thứ tư `vifast-kbin-ktest-proc` (bin riêng, cùng feature `ktest,user`):
+# đúng mười ca cũ **15..24** của `ktest-user`, đánh số lại **1..10** (TAP một ảnh phải liên tục
+# 1..N). Ánh xạ: 15→1 load procsrv/shell/con · 16→2 procsrv recv fault exit · 17→3 shell help/echo
+# · 18→4 shell ps từ core · 19→5 shell wait · 20→6 procsrv kill · 21→7 shell exit/finalise ·
+# 22→8 u-mode kernel read fault · 23→9 faultkind exit · 24→10 faultkind wx from u.
+# Boot kết thúc bằng `PANIC: u-mode fault scause=0xc …` có chủ đích (U-mode thực thi trang RW NX).
+# Matrix đầy đủ vì vậy là **4 ảnh × smp 1/2/4 = 12 boot** (trước KT-66: 9 boot); runner kiểm
+# **mọi slot** (không bỏ ảnh nào) — xem `ktest.sh` `want_rows`.
+ktest-proc 10 10

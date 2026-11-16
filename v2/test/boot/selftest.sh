@@ -287,6 +287,18 @@ else
     echo "ok $total - (bỏ qua 2 ca lặp per-hart: smp=$SMP < 2, log không có hart 1)"
 fi
 
+# --- ca (i): check_stack_lines kiểm THẬT low/block (KT-66 reviewer M3) --
+# Ca "low ngoài [base,top] ⇒ ĐỎ" + "block nhỏ ⇒ ĐỎ" + "thiếu dòng ⇒ ĐỎ" + "hex hỏng ⇒ ĐỎ" +
+# "log đúng ⇒ xanh" chạy trên log **tổng hợp** (không cần QEMU), trong `ktest.sh --selftest-stack`.
+total=$((total + 1))
+if bash "$KTEST" --selftest-stack >"$WORK/stack-selftest.log" 2>&1; then
+    echo "ok $total - check_stack_lines: 5/5 ca (low ngoài, block nhỏ, thiếu dòng, hex hỏng đều ĐỎ)"
+else
+    echo "not ok $total - check_stack_lines selftest ĐỎ (xem $WORK/stack-selftest.log)"
+    cat "$WORK/stack-selftest.log"
+    fail=$((fail + 1))
+fi
+
 # --- ca cuối: expected.txt trả lại **nguyên vẹn** (sha256 + cmp) ------
 total=$((total + 1))
 SHA_AFTER="$(sha_of "$EXPECTED")"

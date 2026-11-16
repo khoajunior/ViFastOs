@@ -130,9 +130,14 @@ MB="$(printf '%s\n' "$SIZES" | sum_data_bss)"
 STACK="$(printf '%s\n' "$SIZES" | awk '$1==".stack" {s+=$2} END {print s+0}')"
 GUARD="$(printf '%s\n' "$SIZES" | awk '$1==".stack_guard" {s+=$2} END {print s+0}')"
 TRAP_STACK="$(printf '%s\n' "$SIZES" | awk '$1==".trap_stack" {s+=$2} END {print s+0}')"
+# KT-66: stack dispatch syscall per-hart (32 KiB) là NOLOAD ⇒ **báo riêng**, không cộng trần
+# `.data+.bss` (D2-72 Q5); `.hart_stacks` là 7 record còn lại của vùng NOLOAD per-hart.
+SYSCALL_STACK="$(printf '%s\n' "$SIZES" | awk '$1==".syscall_stack" {s+=$2} END {print s+0}')"
+HART_STACKS="$(printf '%s\n' "$SIZES" | awk '$1==".hart_stacks" {s+=$2} END {print s+0}')"
+NOLOAD_HART=$((STACK + GUARD + TRAP_STACK + SYSCALL_STACK + HART_STACKS))
 IMG_BYTES="$(wc -c <"$IMAGE" | tr -d ' ')"
 
-echo "# image=$LABEL path=$IMAGE file=$IMG_BYTES data+bss=$MB budget=$BUDGET_BYTES stack=$STACK guard=$GUARD trap_stack=$TRAP_STACK"
+echo "# image=$LABEL path=$IMAGE file=$IMG_BYTES data+bss=$MB budget=$BUDGET_BYTES stack=$STACK guard=$GUARD trap_stack=$TRAP_STACK syscall_stack=$SYSCALL_STACK hart_stacks=$HART_STACKS noload_hart=$NOLOAD_HART"
 echo "# sections-seen: $(printf '%s\n' "$SIZES" | list_seen)"
 echo "# data+bss-sections: $(printf '%s\n' "$SIZES" | list_data_bss)"
 if [ "$MB" -gt "$BUDGET_BYTES" ]; then

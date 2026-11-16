@@ -79,6 +79,9 @@ pub mod tlb;
 /// nên không link module này (giữ nguyên 37+3 TAP cũ, procsrv/shell là K3.5).
 #[cfg(feature = "user")]
 pub mod user;
+/// KT-66: stack dispatch syscall per-hart + canary/nước thấp (tách khỏi `user` cho R1).
+#[cfg(feature = "user")]
+pub mod user_stack;
 
 /// UART0 của QEMU `virt` (16550A) — dữ kiện nền tảng, D2-72 Q7.
 pub const UART0_BASE: usize = 0x1000_0000;
@@ -107,11 +110,14 @@ global_asm!(
     ".globl _start",
     "_start:",
     "mv tp, a0", // hartid (a0) — OpenSBI truyền; `a1` là DTB (KT-45 trở đi mới dùng)
-    // KT-49: stack/sscratch tính từ **record per-hart** (không dùng __stack_top toàn cục): record
-    // của hart h ở `__hart_area_base + h*HART_STRIDE`, gồm guard | stack | trap stack. Dùng phép
-    // dịch/cộng (không cần M extension): h*0x15000 = h<<16 + h<<14 + h<<12.
+    // KT-49/KT-66: stack/sscratch tính từ **record per-hart** (không dùng __stack_top toàn cục):
+    // record của hart h ở `__hart_area_base + h*HART_STRIDE`, gồm guard | stack | trap stack |
+    // syscall stack. Dùng phép dịch/cộng (không cần M extension): h*0x1D000 =
+    // h<<16 + h<<15 + h<<14 + h<<12 (KT-66: trước là 0x15000 = h<<16 + h<<14 + h<<12).
     "la t0, __hart_area_base",
     "slli t2, a0, 16",
+    "slli t3, a0, 15",
+    "add t2, t2, t3",
     "slli t3, a0, 14",
     "add t2, t2, t3",
     "slli t3, a0, 12",
@@ -119,7 +125,7 @@ global_asm!(
     "add t0, t0, t2",
     "li t1, 0x11000", // guard 4 KiB + stack 64 KiB
     "add sp, t0, t1", // đỉnh stack của hart này
-    "li t1, 0x15000", // + trap stack 16 KiB
+    "li t1, 0x15000", // + trap stack 16 KiB (offset KHÔNG đổi; sau nó là syscall stack)
     "add t0, t0, t1",
     "csrw sscratch, t0", // đỉnh trap stack của hart này
     // KT-45 P4: zero `.bss` tường minh (không dựa vào "QEMU/RAM tình cờ bằng 0"). Vòng zero chỉ
@@ -147,6 +153,8 @@ global_asm!(
     "mv tp, a0",
     "la t0, __hart_area_base",
     "slli t2, a0, 16",
+    "slli t3, a0, 15",
+    "add t2, t2, t3",
     "slli t3, a0, 14",
     "add t2, t2, t3",
     "slli t3, a0, 12",

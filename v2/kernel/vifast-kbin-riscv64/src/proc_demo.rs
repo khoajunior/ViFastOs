@@ -461,7 +461,7 @@ fn tcb_name(state: TcbState) -> &'static str {
     }
 }
 
-/// Chạy pha demo, in TAP 15..21 rồi giao quyền cho `cont` (`-> !`). Ảnh test kết thúc bằng
+/// Chạy pha demo, in TAP 1..7 rồi giao quyền cho `cont` (`-> !`). Ảnh test kết thúc bằng
 /// continuation (TAP 22..24 + PANIC fatal của KT-56) nên **không quay lại khung gọi** — tránh
 /// đường trả về của khung `rust_main` sau nhiều lượt `user_enter` (đã thấy `ra=0` khi trả về).
 pub fn run(
@@ -482,12 +482,7 @@ pub fn run(
         Ok(loaded) => loaded,
         Err(e) => {
             let mut w = PlatformWriter(platform);
-            let _ = writeln!(
-                w,
-                "not ok 15 - procsrv/shell/con load: {} {:?}",
-                e.name(),
-                e
-            );
+            let _ = writeln!(w, "not ok 1 - procsrv/shell/con load: {} {:?}", e.name(), e);
             platform.put_str("# ktest halt\n");
             platform.halt(1);
         }
@@ -498,7 +493,7 @@ pub fn run(
             let mut w = PlatformWriter(platform);
             let _ = writeln!(
                 w,
-                "not ok 15 - procsrv/shell/con load: shell {} {:?}",
+                "not ok 1 - procsrv/shell/con load: shell {} {:?}",
                 e.name(),
                 e
             );
@@ -512,7 +507,7 @@ pub fn run(
             let mut w = PlatformWriter(platform);
             let _ = writeln!(
                 w,
-                "not ok 15 - procsrv/shell/con load: child {} {:?}",
+                "not ok 1 - procsrv/shell/con load: child {} {:?}",
                 e.name(),
                 e
             );
@@ -667,18 +662,18 @@ pub fn run(
     user::enable_multitask(false);
     user::capture_end();
 
-    // ---------------------------------------------------------------- TAP 15..21
+    // ---------------------------------------------------------------- TAP 1..7
     let mut ok_all = true;
     let mut w = PlatformWriter(platform);
     // 15 — nạp + chạy U-mode thật cả ba chương trình.
     let ok15 =
         load_ok && tasks[T_PROCSRV].started && tasks[T_SHELL].started && tasks[T_CHILD].started;
     if ok15 {
-        let _ = writeln!(w, "ok 15 - procsrv/shell/con load u-mode");
+        let _ = writeln!(w, "ok 1 - procsrv/shell/con load u-mode");
     } else {
         let _ = writeln!(
             w,
-            "not ok 15 - procsrv/shell/con load u-mode: load/start sai"
+            "not ok 1 - procsrv/shell/con load u-mode: load/start sai"
         );
         ok_all = false;
     }
@@ -699,18 +694,18 @@ pub fn run(
         );
     }
     if ok16 {
-        let _ = writeln!(w, "ok 16 - procsrv recv fault exit");
+        let _ = writeln!(w, "ok 2 - procsrv recv fault exit");
     } else {
-        let _ = writeln!(w, "not ok 16 - procsrv recv fault exit: core/chuoi sai");
+        let _ = writeln!(w, "not ok 2 - procsrv recv fault exit: core/chuoi sai");
         ok_all = false;
     }
     // 17 — help + echo do shell U-mode in.
     let ok17 = user::captured_contains(SLOT_SHELL, b"# shell: help cmds=6")
         && user::captured_contains(SLOT_SHELL, b"# shell: echo shell-that");
     if ok17 {
-        let _ = writeln!(w, "ok 17 - shell help echo");
+        let _ = writeln!(w, "ok 3 - shell help echo");
     } else {
-        let _ = writeln!(w, "not ok 17 - shell help echo: thieu output U-mode");
+        let _ = writeln!(w, "not ok 3 - shell help echo: thieu output U-mode");
         ok_all = false;
     }
     // 18 — ps từ core: snapshot kernel lúc `PS_REQ` phải khớp **từng dòng** shell in.
@@ -754,9 +749,9 @@ pub fn run(
         );
     }
     if ok18 {
-        let _ = writeln!(w, "ok 18 - shell ps tu core");
+        let _ = writeln!(w, "ok 4 - shell ps tu core");
     } else {
-        let _ = writeln!(w, "not ok 18 - shell ps tu core: snapshot/chuoi sai");
+        let _ = writeln!(w, "not ok 4 - shell ps tu core: snapshot/chuoi sai");
         ok_all = false;
     }
     // 19 — wait: giao thức procsrv trả mã thoát của con.
@@ -774,9 +769,9 @@ pub fn run(
         );
     }
     if ok19 {
-        let _ = writeln!(w, "ok 19 - shell wait ma thoat");
+        let _ = writeln!(w, "ok 5 - shell wait ma thoat");
     } else {
-        let _ = writeln!(w, "not ok 19 - shell wait ma thoat: giao thuc sai");
+        let _ = writeln!(w, "not ok 5 - shell wait ma thoat: giao thuc sai");
         ok_all = false;
     }
     // 20 — kill: procsrv quyết định, core treo TCB victim thật (`suspended=1`).
@@ -798,9 +793,9 @@ pub fn run(
         );
     }
     if ok20 {
-        let _ = writeln!(w, "ok 20 - procsrv kill treo tcb");
+        let _ = writeln!(w, "ok 6 - procsrv kill treo tcb");
     } else {
-        let _ = writeln!(w, "not ok 20 - procsrv kill treo tcb: suspended sai");
+        let _ = writeln!(w, "not ok 6 - procsrv kill treo tcb: suspended sai");
         ok_all = false;
     }
     // 21 — shell Exit: core chuyển Inactive sau khi procsrv Recv (D2-25).
@@ -822,11 +817,11 @@ pub fn run(
         );
     }
     if ok21 {
-        let _ = writeln!(w, "ok 21 - shell exit va procsrv finalise");
+        let _ = writeln!(w, "ok 7 - shell exit va procsrv finalise");
     } else {
         let _ = writeln!(
             w,
-            "not ok 21 - shell exit va procsrv finalise: state/chuoi sai"
+            "not ok 7 - shell exit va procsrv finalise: state/chuoi sai"
         );
         ok_all = false;
     }

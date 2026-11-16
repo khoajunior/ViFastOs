@@ -1,0 +1,15 @@
+# image=product path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64 file=188184 data+bss=200120 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=49592 .rodata=14296 .data=7760 .bss=192360 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7760 .bss=192360 
+# image=ktest path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest file=574032 data+bss=209856 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=177564 .rodata=54208 .data=7912 .bss=201944 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7912 .bss=201944 
+# image=ktest-guard path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-guard file=54048 data+bss=2680 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=11356 .rodata=2896 .bss=2680 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .bss=2680 
+# image=ktest-user path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-user file=335520 data+bss=202280 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=90842 .rodata=36152 .data=7704 .bss=194576 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7704 .bss=194576 
+# image=ktest-proc path=v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-proc file=375512 data+bss=206472 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# sections-seen: .text=91004 .rodata=67336 .data=7704 .bss=198768 .stack_guard=4096 .stack=65536 .trap_stack=16384 .syscall_stack=32768 .hart_stacks=831488 .riscv.attributes=116 
+# data+bss-sections: .data=7704 .bss=198768 

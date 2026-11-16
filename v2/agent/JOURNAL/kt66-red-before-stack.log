@@ -1,0 +1,9 @@
+# KT-66 red-before — stack syscall **dùng chung** giữa các hart (bản tạm: mọi hart trỏ block của hart 0)
+# kỳ vọng của runner: `# stack: … harts=2 distinct=1 canary=0`; bản này in distinct=0 ⇒ ĐỎ
+# thời điểm: 2026-11-16T00:14:28Z — ảnh vifast-kbin-ktest-user, -smp 2, log QEMU /tmp/kt66-red-stack-user-smp2.log
+awk: calling undefined function strtonum
+ input record number 1, file 
+ source line number 9
+#   thiếu evidence#27: ^# stack: noload=1 block=[0-9]+ harts=2 distinct=1 canary=0 base=0x[0-9a-f]+$
+not ok - check-log ktest-user smp=2: thiếu stack-distinct=1/2 ev27, log /tmp/kt66-red-stack-user-smp2.log
+EXIT=1

@@ -1,0 +1,9 @@
+# KT-66 red-before — canary: ghi đè canary hart 0 (giả lập tràn stack) ⇒ phép kiểm phải bắt
+# kỳ vọng runner: `# stack: … canary=0 …`; bản này in canary=1 ⇒ ĐỎ
+# thời điểm: 2026-11-16T00:18:54Z — ảnh vifast-kbin-ktest-proc, -smp 1, log QEMU /tmp/kt66-red-canary-proc-smp1.log
+awk: calling undefined function strtonum
+ input record number 1, file 
+ source line number 9
+#   thiếu evidence#26: ^# stack: noload=1 block=[0-9]+ harts=1 distinct=1 canary=0 base=0x[0-9a-f]+$
+not ok - check-log ktest-proc smp=1: thiếu ev26, log /tmp/kt66-red-canary-proc-smp1.log
+EXIT=1

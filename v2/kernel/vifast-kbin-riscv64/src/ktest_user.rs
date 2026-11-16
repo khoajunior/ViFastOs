@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Ảnh **test U-mode** riscv64 (KT-53) — bin riêng, feature `ktest`, nạp qua OpenSBI.
 //!
-//! Vì sao ảnh riêng: mỗi boot chỉ kết thúc được **một** lần bằng PANIC có chủ đích. Ảnh
-//! `vifast-kbin-ktest` đã dùng lần kết thúc đó cho trap lồng (KT-45 P2b), ảnh guard dùng cho
-//! store fault (KT-46) — ảnh này dùng cho **fault U-mode** (`scause=13` khi U-mode đọc địa chỉ
-//! kernel), nên các TAP U-mode chạy trọn trong một boot rồi kết thúc bằng `PANIC: u-mode fault`.
+//! **KT-66: ảnh này là ảnh syscall/core (14 TAP)** — phần **demo** procsrv/shell/con + 3 TAP
+//! fault/wx đã tách sang ảnh thứ tư `vifast-kbin-ktest-proc` (`src/ktest_proc.rs`) để ảnh này
+//! trả headroom ảnh (~40 KiB) và mỗi ảnh giữ đúng **một** trách nhiệm. Boot kết thúc bằng
+//! `panic!` **có chủ đích** ⇒ đúng một dòng `PANIC: KT-66 u-mode pha syscall xong (14 TAP, 0
+//! fail)`; **không** còn fault U-mode trong ảnh này.
 //!
-//! **KT-62 (K3.5 tầng 1): 7 → 17 TAP** — thêm 10 TAP `syscall → Machine` (5 `DebugGetInfo`,
-//! 6 `Yield`, 7 bảng 16 syscall, 8 sai cap, 9 vòng IPC, 10 nhóm NB, 11 WaitAddr/WakeAddr,
-//! 12 ClockRead, 13 Yield đổi TCB, 14 `Exit` không Reply) và dời 3 TAP cũ (fault/wx) sang
-//! **15..17**. `init` U-mode gọi `DebugGetInfo` (15), `Yield` (8), `Exit` (14) qua **core thật**;
-//! mỗi syscall in `# sys: nr=… err=… tcb=… state=…` trong trap handler (`src=core`).
-//!
-//! TAP (17 test):
+//! TAP (14 test):
 //!
 //! 1. `ok 1 - init u-mode` — nạp `init` ELF bằng `vifast-elf` (parse + map `PT_LOAD` theo quyền,
 //!    **W^X**: `.text` `U|R|X`, `.rodata` `U|R|NX`, `.data` `U|R|W|NX`), stack user 8 trang +
@@ -21,10 +16,9 @@
 //! 2. `ok 2 - syscall debug_put_str` — 2 lần `DebugPutStr` (12) in **đúng byte user**
 //!    (`U: init hello from u-mode` / `U: bad syscall err=19 ok`), 51 byte.
 //! 3. `ok 3 - syscall exit` — `Exit(42)` (14) QUA CORE: tác vụ sang `Exited`, lưu
-//!    `exit_code=42`, **không** quay lại U-mode (entries=1); đường về S-mode qua
-//!    `user_exit_resume`.
-//! 4. `ok 4 - syscall la ma loi` — 5 `ecall` ngoài dải ABI (EID SBI `0x53525354`, 99, 16, 17,
-//!    31) ⇒ `RangeError` (19, D2-79), **không panic**; `init` kiểm `a0==19` rồi mới `Exit(42)`.
+//!    `exit_code=42`, **không** quay lại U-mode (entries=1).
+//! 4. `ok 4 - syscall la ma loi` — 5 `ecall` ngoài dải ABI ⇒ `RangeError` (19, D2-79),
+//!    **không panic**; `init` kiểm `a0==19` rồi mới `Exit(42)`.
 //! 5. `ok 5 - syscall debug_get_info` — `DebugGetInfo` (15) qua core: `a1=abi_version`,
 //!    `a3=min_compat`, `a4=features`, `a5=num_harts` (D2-29/D2-35); `init` kiểm rồi mới `Exit`.
 //! 6. `ok 6 - syscall yield` — `Yield` (8) qua core: một TCB ⇒ round-trip
@@ -43,16 +37,9 @@
 //! 14. `ok 14 - syscall exit khong reply` — `Exit` của `init` vào `fault_ep`: TCB
 //!     `BlockedOnSend{call:false, fault=Exit{42}}`, hàng có **fault** (không message), **không**
 //!     Reply (D2-25).
-//! 15. `ok 15 - u-mode kernel read fault` — **KT-56**: U-mode đọc `0x80200000` (leaf kernel
-//!     `U=0`) ⇒ load page fault **thật** `scause=13`, `stval=0x80200000`; handler phân loại
-//!     `FaultKind::Vm{access=Read, reason=Permission}` rồi (cờ test một lần) về S-mode.
-//! 16. `ok 16 - faultkind exit` — `Exit(42)` (syscall 14) được ghi thành `FaultKind::Exit{42}`
-//!     (D2-25/D2-56a).
-//! 17. `ok 17 - faultkind wx from u` — in `ok 17` **trước**, rồi U-mode **thực thi** trang
-//!     `.data` RW NX của chính `init` ⇒ instruction page fault `scause=12`, PTE `U|R|W`,
-//!     `X=0` ⇒ `FaultKind::Vm{access=Execute, reason=Wx}`; handler ghi `# u-mode fault:` rồi
-//!     `PANIC: u-mode fault …` + `DebugHalt(1)` (chính sách fatal của K3). Runner đòi đúng
-//!     dòng PANIC này và **chỉ** dòng này.
+//!
+//! TAP 15..24 cũ (demo + fault/wx) nằm ở **ảnh `ktest-proc`**, đánh số 1..10 — ánh xạ ghi ở
+//! `v2/test/boot/expected.txt` + `v2/docs/k35-procsrv.md` §10.
 //!
 //! Chương trình `init` do `build.rs` biên dịch từ `init/init_user.rs` (+ `.S`) thành ELF64 tại
 //! `0x4000_0000` rồi nhúng qua `include_bytes!` — không loader động, không reloc, không cần
@@ -64,14 +51,13 @@ use core::fmt::Write;
 
 use vifast_core::syscall::{SyscallEnv, SyscallOutcome, REPLY_NONE};
 use vifast_core::{FaultKind as CoreFaultKind, Machine, ObjId, ObjType, SlotRef, TcbState};
-use vifast_plat_common::fault::{FaultAccess, FaultKind, VmFaultReason, FAULT_STATS};
+use vifast_plat_common::fault::{FaultKind, FAULT_STATS};
 use vifast_plat_common::user::TaskState;
 use vifast_plat_common::{PanicHandler, Platform, PlatformWriter};
 use vifast_plat_riscv64::core_bridge;
 use vifast_plat_riscv64::mmu;
-use vifast_plat_riscv64::user::{self, LoadedInit, USER_BASE, USER_STACK_GUARD_BOTTOM};
+use vifast_plat_riscv64::user::{self, USER_BASE, USER_STACK_GUARD_BOTTOM};
 
-mod proc_demo;
 use vifast_plat_riscv64::{read_trap_vector, trap_vector, Riscv64Virt};
 
 static PLATFORM: Riscv64Virt = Riscv64Virt;
@@ -86,7 +72,7 @@ const MARKER_BYTES: u64 = 51;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..24\n");
+    PLATFORM.put_str("TAP version 13\n1..14\n");
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
     // Bảng trang + arena/guard trước (mmu::init bật satp); ASID lease rồi object layer.
@@ -95,6 +81,13 @@ pub extern "C" fn rust_main() -> ! {
     let obj = vifast_plat_riscv64::obj::init();
     // KT-62: core `no_std` **thật** của ảnh (static trong `.bss`, D2-84) + TCB `init` trên nó.
     let core = core_bridge::init(obj.arena_end, core_bridge::CORE_ARENA_BYTES);
+    // KT-66: stack syscall **per-hart** cấp từ arena (một Frame 2 MiB) **trước** `load_init` để
+    // Frame 4 KiB của ELF lấy sau; ảnh này không còn `SYSCALL_STACK` 32 KiB trong `.bss`.
+    if !user::init_syscall_stacks() {
+        PLATFORM.put_str("not ok 1 - init u-mode: khong cap duoc stack per-hart\n");
+        PLATFORM.put_str("# ktest halt\n");
+        PLATFORM.halt(1)
+    }
     let (sys, init_tcb, init_ep) = core_bridge::with_machine(|m| {
         let rig = build_sys_rig(m, core.untyped);
         let (tcb, ep) = build_init_task(m, &rig);
@@ -463,131 +456,17 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
-    // ---------------- TAP 15..21 (KT-65): procsrv + shell + con chạy U-mode thật --------------
-    // Ba ELF Rust riêng (`procsrv.elf`/`shell.elf`/`child.elf`) nạp vào 3 VSpace; kernel làm
-    // scheduler tuần tự, chuyển tiếp fault Exit, UART→message và `ps` từ `Machine`. Sau TAP 21,
-    // continuation `fault_phase` chạy TAP 22..24 (KT-56) và kết thúc boot bằng PANIC fatal —
-    // **không** quay lại khung `rust_main` (xem `docs/k35-procsrv.md` §6).
-    proc_demo::run(
-        &PLATFORM,
-        obj.untyped0,
-        core.untyped,
-        loaded,
-        exit_kind_ok,
-        fault_phase,
-    );
-}
-
-/// **Continuation không trả về** sau pha demo KT-65: TAP 22..24 (fault U-mode KT-56) rồi
-/// `PANIC: u-mode fault …` (chính sách fatal của K3). Tách hàm để `proc_demo::run` gọi thẳng
-/// thay vì trả về qua khung gọi sâu (đã quan sát `ra=0` khi trả về sau nhiều lượt `user_enter`).
-fn fault_phase(loaded: LoadedInit, exit_kind_ok: bool) -> ! {
-    let mut fails = 0usize;
-    // ------------------------- 22) U-mode đọc địa chỉ kernel — trap THẬT, phân loại FaultKind
-    // KT-56: lượt này **được phép fault** (`enter_expect_fault`) để kiểm phân loại rồi về S-mode;
-    // chính sách mặc định của K3 (fault ⇒ log + halt) giữ nguyên cho lượt 7.
-    {
-        let mut w = PlatformWriter(&PLATFORM);
-        let _ = writeln!(
-            w,
-            "# u-mode read: hart={} addr=0x80200000 expect=scause=0xd stval=0x80200000 recover=1",
-            PLATFORM.hart_id()
-        );
-    }
-    let fault_snap = match user::enter_expect_fault(&loaded, 1) {
-        // Không được tới đây: đọc địa chỉ kernel mà không fault nghĩa là leaf kernel bị `U=1`.
-        Ok(snap) => snap,
-        Err(error) => {
-            let mut w = PlatformWriter(&PLATFORM);
-            let _ = writeln!(
-                w,
-                "not ok 22 - u-mode kernel read fault: enter loi kind={} ({:?})",
-                error.name(),
-                error
-            );
-            PLATFORM.put_str("# ktest halt\n");
-            PLATFORM.halt(1)
-        }
-    };
-    let want5 = FaultKind::Vm {
-        vspace: u64::from(loaded.asid),
-        va: 0x8020_0000,
-        access: FaultAccess::Read,
-        reason: VmFaultReason::Permission,
-    };
-    let ok5 = fault_snap.state == TaskState::Faulted
-        && fault_snap.fault_scause == 0xd
-        && fault_snap.fault_stval == 0x8020_0000
-        && FAULT_STATS.last() == Some(want5);
-    {
-        let mut w = PlatformWriter(&PLATFORM);
-        let _ = write!(
-            w,
-            "# faultkind: case=u-kernel-read scause=0x{:x} stval=0x{:x} recover=1 kind=",
-            fault_snap.fault_scause, fault_snap.fault_stval
-        );
-        match FAULT_STATS.last() {
-            Some(kind) => {
-                let _ = write!(w, "{kind}");
-            }
-            None => {
-                let _ = write!(w, "none");
-            }
-        }
-        let _ = writeln!(w, " ok={}", u8::from(ok5));
-    }
-    if ok5 {
-        PLATFORM.put_str("ok 22 - u-mode kernel read fault\n");
-    } else {
-        PLATFORM.put_str("not ok 22 - u-mode kernel read fault: FaultKind/scause sai\n");
-        fails += 1;
-    }
-
-    // ------------------- 23) `Exit` mang `FaultKind::Exit` (D2-25/D2-56a) — qua syscall 14 thật
-    if exit_kind_ok {
-        PLATFORM.put_str("ok 23 - faultkind exit\n");
-    } else {
-        PLATFORM.put_str("not ok 23 - faultkind exit: khong ghi Exit{{42}}\n");
-        fails += 1;
-    }
-
-    if fails > 0 {
-        PLATFORM.put_str("# ktest halt\n");
-        PLATFORM.halt(1)
-    }
-
-    // ------------------- 24) W^X **từ U-mode**: thực thi trang `.data` (RW NX) ⇒ fault thật
-    // In `ok 17` TRƯỚC khi kích hoạt: boot kết thúc bằng `PANIC: u-mode fault scause=0xc …` +
-    // SBI SRST (chính sách K3: log + halt), không có `# ktest halt`. Runner đòi đúng dòng PANIC
-    // này và đúng `faultkind=…reason=Wx` trong dòng `# u-mode fault:`.
-    PLATFORM.put_str("ok 24 - faultkind wx from u\n");
-    {
-        let mut w = PlatformWriter(&PLATFORM);
-        let _ = writeln!(
-            w,
-            "# u-mode wx: hart={} exec=data_page expect=scause=0xc reason=Wx fatal=1",
-            PLATFORM.hart_id()
-        );
-    }
-    match user::enter(&loaded, 2) {
-        // Không được tới đây: thực thi trang RW NX mà không fault nghĩa là W^X bị phá.
-        Ok(_) => {
-            PLATFORM.put_str("not ok 24 - faultkind wx from u: khong fault\n");
-            PLATFORM.put_str("# ktest halt\n");
-            PLATFORM.halt(1)
-        }
-        Err(error) => {
-            let mut w = PlatformWriter(&PLATFORM);
-            let _ = writeln!(
-                w,
-                "not ok 24 - faultkind wx from u: enter loi kind={} ({:?})",
-                error.name(),
-                error
-            );
-            PLATFORM.put_str("# ktest halt\n");
-            PLATFORM.halt(1)
-        }
-    }
+    // ---------------- kết thúc sạch (KT-66): ảnh user chỉ còn 14 TAP syscall/core -------------
+    // Demo procsrv/shell/con + fault phase KT-56 đã **tách** sang ảnh `vifast-kbin-ktest-proc`
+    // (`src/ktest_proc.rs`) để ảnh này trả headroom: không còn `proc_demo`, 3 ELF demo và
+    // 32 KiB stack syscall tĩnh trong `.bss` của ảnh này.
+    user::print_stack_evidence();
+    PLATFORM.put_str("# ktest-user: taps=14 ok=1\n");
+    // PANIC **có chủ đích** (không phải fault): kết thúc boot sạch với đúng **một** dòng PANIC
+    // theo mẫu của runner (`expected.txt`: `ktest-user 14 14`). In thẳng + `halt` (không qua
+    // `panic!`) để log không có dòng `PANIC at …` thứ hai.
+    PLATFORM.put_str("PANIC: KT-66 u-mode pha syscall xong (14 TAP, 0 fail)\n");
+    PLATFORM.halt(1)
 }
 
 // =============================================================================================

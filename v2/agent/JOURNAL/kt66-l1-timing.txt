@@ -1,0 +1,5 @@
+# KT-66 — mốc thời gian L1 400k (4 tiến trình song song, mỗi cấu hình một tiến trình)
+start_utc=2026-11-15T23:56:49Z
+end_utc=2026-11-16T00:30:19Z
+wall_s=2010 (33.5 phút)
+# 4 log: v2/agent/JOURNAL/kt66-l1-smp{1,2,4,8}.log — mỗi log có '# L1 OK: smp N, 100000 seed × 64 op' + '# L1 OK: 100000 lượt' + EXIT=0

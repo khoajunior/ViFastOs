@@ -37,14 +37,24 @@ pub const HART_STACK_BYTES: u64 = 0x10000;
 /// Trap stack của một hart (16 KiB) `[TK]` — NOLOAD; `trap_entry` đổi `sp` sang đỉnh vùng này
 /// qua `sscratch` của hart đang chạy, trapframe 288 B nằm trọn trong vùng.
 pub const HART_TRAP_STACK_BYTES: u64 = 0x4000;
-/// Bước giữa hai record hart: `guard + stack + trap stack` = 0x1_5000 (84 KiB) `[TK]`.
-pub const HART_STRIDE: u64 = HART_GUARD_BYTES + HART_STACK_BYTES + HART_TRAP_STACK_BYTES;
-/// Tổng vùng NOLOAD theo hart: `MAX_HARTS × HART_STRIDE` = 0xA_8000 (672 KiB) `[TK]`.
+/// **KT-66**: stack **dispatch syscall** của một hart (32 KiB) `[TK]` — NOLOAD, **riêng từng
+/// hart**; `mv sp` sang đỉnh vùng này cho khung IPC/`Message` 64 MR (KT-65 đo 16 KiB trap stack
+/// không đủ). Không đặt trong `.data+.bss` (D2-72 Q5 báo NOLOAD riêng) và **không** ở arena/PA
+/// thuộc physmap: khi `satp` = root user, nửa cao (physmap/high alias) **không** được chép vào
+/// root user (`copy_kernel_low_root` chỉ chép root index 0..255), nên stack phải nằm trong vùng
+/// identity map thấp — đúng vùng NOLOAD per-hart.
+pub const HART_SYSCALL_STACK_BYTES: u64 = 0x8000;
+/// Bước giữa hai record hart: `guard + stack + trap stack + syscall stack` = 0x1_D000 (116 KiB).
+pub const HART_STRIDE: u64 =
+    HART_GUARD_BYTES + HART_STACK_BYTES + HART_TRAP_STACK_BYTES + HART_SYSCALL_STACK_BYTES;
+/// Tổng vùng NOLOAD theo hart: `MAX_HARTS × HART_STRIDE` = 0xE_8000 (928 KiB) `[TK]`.
 pub const HART_AREA_BYTES: u64 = HART_STRIDE * MAX_HARTS as u64;
 /// Offset đáy stack của hart trong record (ngay trên guard).
 pub const HART_STACK_OFFSET: u64 = HART_GUARD_BYTES;
 /// Offset đáy trap stack của hart trong record (ngay trên stack).
 pub const HART_TRAP_STACK_OFFSET: u64 = HART_GUARD_BYTES + HART_STACK_BYTES;
+/// Offset đáy **syscall stack** của hart trong record (ngay trên trap stack) — KT-66.
+pub const HART_SYSCALL_STACK_OFFSET: u64 = HART_TRAP_STACK_OFFSET + HART_TRAP_STACK_BYTES;
 
 /// `true` ⇔ `hart` là hart id hợp lệ của K3 (`< MAX_HARTS`).
 pub const fn valid_hart(hart: usize) -> bool {
@@ -89,6 +99,16 @@ pub const fn trap_bottom_offset(hart: usize) -> u64 {
 /// Offset **đỉnh trap stack** của `hart` (`sscratch` ban đầu).
 pub const fn trap_top_offset(hart: usize) -> u64 {
     hart_record_offset(hart) + HART_TRAP_STACK_OFFSET + HART_TRAP_STACK_BYTES
+}
+
+/// Offset **đáy** syscall stack của hart (KT-66).
+pub const fn syscall_bottom_offset(hart: usize) -> u64 {
+    hart_record_offset(hart) + HART_SYSCALL_STACK_OFFSET
+}
+
+/// Offset **đỉnh** syscall stack của hart (sp khởi đầu).
+pub const fn syscall_top_offset(hart: usize) -> u64 {
+    hart_record_offset(hart) + HART_SYSCALL_STACK_OFFSET + HART_SYSCALL_STACK_BYTES
 }
 
 /// `true` ⇔ `offset` (tính từ đầu vùng NOLOAD) rơi vào **record** của một hart
@@ -354,14 +374,18 @@ const _: () = {
     assert!(HART_GUARD_BYTES == 0x1000);
     assert!(HART_STACK_BYTES == 0x10000);
     assert!(HART_TRAP_STACK_BYTES == 0x4000);
-    assert!(HART_STRIDE == 0x15000);
+    // KT-66: thêm syscall stack per-hart 32 KiB ⇒ stride 0x1_5000 → 0x1_D000.
+    assert!(HART_SYSCALL_STACK_BYTES == 0x8000);
+    assert!(HART_STRIDE == 0x1D000);
     assert!(HART_STRIDE.is_multiple_of(0x1000)); // mọi record bắt đầu ở biên trang
-    assert!(HART_AREA_BYTES == 0xA8000);
+    assert!(HART_AREA_BYTES == 0xE8000);
     assert!(HART_AREA_BYTES <= 2 * 1024 * 1024); // vùng NOLOAD nằm trong 2 MiB sau ALIGN(2M)
     assert!(stack_bottom_offset(0) == HART_GUARD_BYTES);
     assert!(stack_top_offset(0) == 0x11000);
     assert!(trap_top_offset(0) == 0x15000);
-    assert!(trap_top_offset(MAX_HARTS - 1) == HART_AREA_BYTES);
+    assert!(syscall_bottom_offset(0) == 0x15000);
+    assert!(syscall_top_offset(0) == 0x1D000);
+    assert!(syscall_top_offset(MAX_HARTS - 1) == HART_AREA_BYTES);
     assert!(guard_offset(1) == HART_STRIDE);
     assert!(is_guard_offset(0));
     assert!(is_guard_offset(HART_GUARD_BYTES - 1));

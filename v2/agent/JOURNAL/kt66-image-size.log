@@ -1,0 +1,7 @@
+# KT-66 — BUILD_ID (FNV-1a 64 trên .text) + sha256 + kích thước tệp từng ảnh (D2-80 neo .text)
+# thời điểm: 2026-11-16T01:12:18Z — build CUỐI sau vá reviewer (M1 canary fail-closed, D4 distinct mọi cặp, M3 harness)
+# image=vifast-kbin-riscv64 file=188184 build=ce9a8c7cff7c68a3 text=49592 sha256=eb365a1323e209f96bafcf690a11a976b38990ee325d4736a7dd6ad46cab734c
+# image=vifast-kbin-ktest file=574032 build=9cc6c8f295cab617 text=177564 sha256=4411b8ff4db4cad43b5ca03ef1a8a1054e7019f13bd32a5d39f1495fc0f5f824
+# image=vifast-kbin-ktest-guard file=54048 build=f5afbe3cdb70f901 text=11356 sha256=cb14adb6bfcce10bfb1c15a7914a882d9c84bbf65b9591246134b15574700ece
+# image=vifast-kbin-ktest-user file=335520 build=fbc03a81ae5485b0 text=90842 sha256=ebe9fd4b6fca14909a2c9a3fe9fc2a48972a4eeaa979aa0d18d35df3203888df
+# image=vifast-kbin-ktest-proc file=375512 build=333c35bb2dbc208a text=91004 sha256=4ae2f310160697a5cc2382d2ca18bf0e80489dab96f6fe68a378941a17c16ce6

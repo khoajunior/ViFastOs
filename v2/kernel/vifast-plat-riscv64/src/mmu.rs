@@ -54,8 +54,9 @@ use vifast_plat_common::mmu::{
 };
 use vifast_plat_common::plic::PLIC_LOW_WINDOW_BYTES;
 use vifast_plat_common::smp::{
-    guard_offset as smp_guard_offset, stack_bottom_offset, stack_top_offset, trap_bottom_offset,
-    trap_top_offset, HART_AREA_BYTES, HART_GUARD_BYTES, HART_STRIDE, MAX_HARTS,
+    guard_offset as smp_guard_offset, stack_bottom_offset, stack_top_offset, syscall_bottom_offset,
+    syscall_top_offset, trap_bottom_offset, trap_top_offset, HART_AREA_BYTES, HART_GUARD_BYTES,
+    HART_STRIDE, MAX_HARTS,
 };
 #[cfg(feature = "ktest")]
 use vifast_plat_common::trap::EXC_LOAD_PAGE_FAULT;
@@ -145,6 +146,8 @@ extern "C" {
     static __stack_top: u8;
     static __trap_stack_bottom: u8;
     static __trap_stack_top: u8;
+    static __syscall_stack_bottom: u8;
+    static __syscall_stack_top: u8;
 }
 
 /// Địa chỉ của một linker symbol.
@@ -165,6 +168,8 @@ struct Layout {
     stack_end: u64,
     trap_stack_start: u64,
     trap_stack_end: u64,
+    syscall_stack_start: u64,
+    syscall_stack_end: u64,
 }
 
 impl Layout {
@@ -178,6 +183,8 @@ impl Layout {
         let stack_end = unsafe { sym(&__stack_top) };
         let trap_stack_start = unsafe { sym(&__trap_stack_bottom) };
         let trap_stack_end = unsafe { sym(&__trap_stack_top) };
+        let syscall_stack_start = unsafe { sym(&__syscall_stack_bottom) };
+        let syscall_stack_end = unsafe { sym(&__syscall_stack_top) };
         let arena_start = align_up(kernel_end, PAGE_BYTES);
         Self {
             hart_area_base,
@@ -190,6 +197,8 @@ impl Layout {
             stack_end,
             trap_stack_start,
             trap_stack_end,
+            syscall_stack_start,
+            syscall_stack_end,
         }
     }
 }
@@ -293,6 +302,8 @@ pub fn init() -> MmuReport {
         || layout.stack_end != layout.hart_area_base + stack_top_offset(0)
         || layout.trap_stack_start != layout.hart_area_base + trap_bottom_offset(0)
         || layout.trap_stack_end != layout.hart_area_base + trap_top_offset(0)
+        || layout.syscall_stack_start != layout.hart_area_base + syscall_bottom_offset(0)
+        || layout.syscall_stack_end != layout.hart_area_base + syscall_top_offset(0)
         || layout.kernel_end != layout.hart_area_base + HART_AREA_BYTES
     {
         panic!("mmu: bo cuc per-hart trong linker.ld khong khop plat-common::smp");
@@ -688,6 +699,21 @@ pub fn stack_top_of(hart: usize) -> u64 {
 /// Đỉnh trap stack của `hart` (`sscratch` ban đầu) — bằng chứng per-hart.
 pub fn trap_top_of(hart: usize) -> u64 {
     hart_area_base() + trap_top_offset(hart.min(MAX_HARTS - 1))
+}
+
+/// **KT-66**: syscall stack `[bottom, top)` của `hart` — NOLOAD per-hart, identity-mapped thấp
+/// (dùng được khi `satp` = root user, khác physmap/nửa cao).
+pub fn syscall_stack_range_of(hart: usize) -> (u64, u64) {
+    let base = hart_area_base();
+    (
+        base + syscall_bottom_offset(hart.min(MAX_HARTS - 1)),
+        base + syscall_top_offset(hart.min(MAX_HARTS - 1)),
+    )
+}
+
+/// Đỉnh syscall stack của `hart` (`sp` khởi đầu khi dispatch).
+pub fn syscall_top_of(hart: usize) -> u64 {
+    hart_area_base() + syscall_top_offset(hart.min(MAX_HARTS - 1))
 }
 
 /// Arena page table `[start, end)`.

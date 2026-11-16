@@ -1,0 +1,7 @@
+# KT-66 red-before — ảnh tách: log 24 TAP CŨ của ktest-user kiểm bằng expected.txt MỚI (14)
+# thời điểm: 2026-11-16T00:03:12Z
+# lệnh: bash v2/test/boot/ktest.sh --check-log ktest-user /tmp/kt66-base/ktest-user-smp1-1.log 1
+#   thiếu evidence#27: ^# stack: arena=1 pa=0x[0-9a-f]+ frame=[0-9]+ block=[0-9]+ harts=1 distinct=1 canary=0$
+#   thiếu evidence#28: ^# ktest-user: taps=14 ok=1$
+not ok - check-log ktest-user smp=1: thiếu plan-1..14=0 ok-count=24/14 tap-day-1..14 panic-khac=1 stack-hart-lines stack-distinct=0/1 ev27 ev28, log /tmp/kt66-base/ktest-user-smp1-1.log
+EXIT=1

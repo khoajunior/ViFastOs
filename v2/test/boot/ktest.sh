@@ -3,7 +3,7 @@
 # KT-44..54 — runner boot các ảnh **TEST** riscv64 K3 (crate `vifast-kbin-riscv64`, feature `ktest`).
 #
 # D2-08: ảnh test KHÔNG nằm trong ảnh sản phẩm — cùng crate nhưng bin + feature riêng. Mỗi boot chỉ
-# kết thúc được một lần bằng PANIC có chủ đích ⇒ **ba** ảnh test:
+# kết thúc được một lần bằng PANIC có chủ đích ⇒ **bốn** ảnh test (KT-66 thêm `ktest-proc`):
 #   - `ktest`       : 56 TAP — KT-45 (image + trap) + KT-46 (mmu/walk/guard) + KT-48 (PLIC/UART IRQ)
 #                     + KT-47 (timer SBI) + KT-49 (SMP 15..19) + KT-50 (IPI 20..24) + KT-51 (TLB/ASID
 #                     25..29) + KT-52 (object layer 30..36) + KT-55 (conformance 5 `.scn` 37:
@@ -13,10 +13,13 @@
 #                     trap lồng fatal (56).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
-#   - `ktest-user`  : 24 TAP (KT-62 + KT-65) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
+#   - `ktest-user`  : 14 TAP (KT-62) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
 #                     `Machine` thật (DebugGetInfo 15, Yield 8, Exit 14 + 5 lần ngoài dải ⇒ 19), TAP
 #                     kernel-level cho bảng 16 syscall/cap sai/IPC/NB/WaitAddr/Clock/Yield (7..13),
-#                     `Exit` không Reply (14), rồi 3 TAP fault/wx (15..17, PANIC `u-mode fault`).
+#                     `Exit` không Reply (14); kết thúc sạch bằng PANIC có chủ đích.
+#   - `ktest-proc`  : 10 TAP (KT-65, **tách ảnh KT-66**) — đúng mười ca cũ 15..24 của ảnh user:
+#                     procsrv/shell/con U-mode (1..7) + 3 TAP fault/wx (8..10, PANIC `u-mode fault`).
+#                     `ktest-user` trả ~40 KiB headroom nhờ bỏ `proc_demo` + 3 ELF demo khỏi ảnh đó.
 #
 # **KT-54 — nguồn sự thật duy nhất là `v2/test/boot/expected.txt`** (mỗi ảnh một dòng
 # `<ảnh> <kế hoạch TAP> <số dòng ok>`): runner **đọc số từ tệp**, không hardcode; `expected.txt` lệch
@@ -27,7 +30,9 @@
 #   4. **đúng 1 dòng `PANIC`, đúng mẫu cho phép của ảnh** (ảnh chính: trap lồng; guard: guard page
 #      fault; user: u-mode fault) — PANIC khác mẫu hoặc PANIC thứ hai ⇒ đỏ;
 #   5. mỗi TAP N có **đúng một** dòng `ok N - <tên>` khớp tên trong manifest của runner;
-#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **68** mục, guard **5**, user **33** mục từ KT-62);
+#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **91** mục, guard **5**, user **30**,
+#      proc **28**); KT-66 thêm kiểm **stack syscall per-hart** (`check_stack_lines`: tập hart
+#      0..N-1, `base` phân biệt, `low` trong `[base, top]`, `canary=0`);
 #   8. **KT-55**: mỗi ca conformance in `# conf: scn=N name=… steps=K` và đúng **K** dòng
 #      `# trace: N …` đúng định dạng; ca 24 (2 hart) in `skipped=smp1` trên `-smp 1`;
 #   7. `Platform HART Count` của OpenSBI khớp `-smp` (số hart là **máy ảo** nói, không chỉ kernel tự khai).
@@ -40,7 +45,7 @@
 #
 # Dùng:
 #   bash v2/test/boot/ktest.sh [NBOOT] [SMP|matrix]     # mặc định 1 boot, 1 hart; `matrix` = 1 2 4
-#     vd: bash v2/test/boot/ktest.sh 50 matrix          # 50 boot × 3 ảnh × smp 1/2/4 = 450 boot
+#     vd: bash v2/test/boot/ktest.sh 50 matrix          # 50 boot × 4 ảnh × smp 1/2/4 = 600 boot
 #   bash v2/test/boot/ktest.sh --check-log <ảnh> <log> [SMP]   # kiểm MỘT log đã có (không build/boot)
 #   bash v2/test/boot/ktest.sh --log-path <ảnh> <SMP> [i]      # in đường dẫn log của runner
 #   bash v2/test/boot/ktest.sh --print-expected               # in bảng expected.txt đã đọc
@@ -60,7 +65,8 @@ EXPECTED_FILE="$HERE/expected.txt"
 LOGDIR="${KT54_LOGDIR:-/tmp/k3-ktest}"
 TARGET="riscv64gc-unknown-none-elf"
 IMG_DIR="$V2_ROOT/kernel/target/$TARGET/release"
-LABELS="ktest ktest-guard ktest-user" # thứ tự in bảng + thứ tự boot trong một vòng
+LABELS="ktest ktest-guard ktest-user ktest-proc" # thứ tự in bảng + thứ tự boot trong một vòng
+LABEL_COUNT=0                              # số ảnh (đếm từ LABELS; không hardcode 3/4)
 TIMEOUT_DS=200                        # 20 s/boot (D2-72 Q10), đơn vị 0,1 s
 QEMU_ICOUNT="-icount shift=6"         # D2-74 (shift CỐ ĐỊNH, không `auto`)
 QEMU_MIN_MAJOR=9                      # sàn D2-72 Q2: QEMU >= 9.2
@@ -105,6 +111,7 @@ image_path() {
         ktest) printf '%s/vifast-kbin-ktest' "$IMG_DIR" ;;
         ktest-guard) printf '%s/vifast-kbin-ktest-guard' "$IMG_DIR" ;;
         ktest-user) printf '%s/vifast-kbin-ktest-user' "$IMG_DIR" ;;
+        ktest-proc) printf '%s/vifast-kbin-ktest-proc' "$IMG_DIR" ;;
         *) return 1 ;;
     esac
 }
@@ -129,6 +136,7 @@ expected_field() {
 load_expected() {
     local out="" l=""
     EXPECT_ERR=""
+    LABEL_COUNT="$(printf '%s\n' $LABELS | wc -l | tr -d ' ')"
     [ -f "$EXPECTED_FILE" ] || {
         EXPECT_ERR="không thấy $EXPECTED_FILE"
         return 1
@@ -285,6 +293,15 @@ syscall waitaddr wakeaddr
 syscall clock read
 syscall yield doi tcb
 syscall exit khong reply
+EOF
+}
+
+# KT-66: ảnh demo **tách** khỏi `ktest-user` (`proc_demo` + 3 ELF U-mode + fault phase KT-56).
+# Mười TAP dưới đây = đúng mười ca cũ 15..24 của `ktest-user`, **đánh số lại 1..10** trong ảnh
+# mới (TAP của một ảnh phải liên tục 1..N); ánh xạ cũ→mới 15→1 … 24→10 ghi ở `expected.txt`
+# + `docs/k35-procsrv.md` §10. Tên TAP giữ nguyên.
+manifest_proc() {
+    cat <<'EOF'
 procsrv/shell/con load u-mode
 procsrv recv fault exit
 shell help echo
@@ -309,6 +326,7 @@ manifest_for() {
         ktest) manifest_main ;;
         ktest-guard) manifest_guard ;;
         ktest-user) manifest_user ;;
+        ktest-proc) manifest_proc ;;
         *) return 1 ;;
     esac | sed -e "s|__SMP__|$2|g" -e "s|__IPI20__|$(ipi_name "$2")|g" \
         -e "s|__CONF37__|$(conf37_name "$2")|g"
@@ -369,7 +387,7 @@ evidence_for() {
 ^# timer irq: interrupts=[0-9]+ scause=0x8000000000000005 code=5 exceptions=[0-9]+ exceptions_before=[0-9]+ sie_stie=1$
 ^# timer sie: trap_spie_on=[0-9]+ handler_sie_off=[0-9]+ ticks=[0-9]+ sie_stie=1 sret_sie=1$
 ^# timer disable: sie_stie=0 sstatus_sie=0$
-^# smp: boot=[0-9]+ harts=__SMP__ .* timeout=0 .* dtb_magic=1 .* stride=0x15000 area=0xa8000$
+^# smp: boot=[0-9]+ harts=__SMP__ .* timeout=0 .* dtb_magic=1 .* stride=0x1d000 area=0xe8000$
 ^# harts alive: n=__SMP__ mask=0x__MASK__ alive=0x__MASK__ tickets=1 arrived=0x__MASK__ timeout=0$
 ^# per-hart stack/guard: stack_ok=0x__MASK__ guard_ok=0x__MASK__ distinct=1 owner_ok=true$
 ^# per-hart timer: ok=0x__MASK__ total_ticks=[1-9][0-9]* arrived=0x__MASK__ timeout=0$
@@ -475,6 +493,18 @@ EOF
 ^# sys: kernel phase invariants=1 caps=[0-9]+ objects=[0-9]+$
 ^# user exit: code=42 state=Exited exits=1$
 ^# user exitkind: code=42 kind=Exit\{42\} ok=1$
+^# stack: noload=1 block=[0-9]+ harts=__SMP__ distinct=1 canary=0 base=0x[0-9a-f]+$
+^# ktest-user: taps=14 ok=1$
+^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
+^Platform HART Count *: *__SMP__$
+EOF
+            ;;
+        ktest-proc) cat <<'EOF'
+^# user core: static=188872 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
+^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
+^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=10 exits=1 exit=42$
+^# user exit: code=42 state=Exited exits=1$
+^# user exitkind: code=42 kind=Exit\{42\} ok=1$
 ^# proc: load procsrv=\[0x[0-9a-f]+,0x[0-9a-f]+\) asid=[0-9]+ segs=[0-9]+ stack=[0-9]+ ok=1 shell=\[0x[0-9a-f]+,0x[0-9a-f]+\) asid=[0-9]+ segs=[0-9]+ stack=[0-9]+ ok=1 child=\[0x[0-9a-f]+,0x[0-9a-f]+\) asid=[0-9]+ segs=[0-9]+ stack=[0-9]+ ok=1
 ^# proc: exit recv code=42 state=Inactive faults=[0-9]+ captured=1$
 ^# proc: recv exit pid=[0-9]+ code=42$
@@ -495,6 +525,7 @@ EOF
 ^# u-mode fault: scause=0xd stval=0x80200000 sepc=0x[0-9a-f]+ from_u=1 kernel_addr=1 recover=1 faultkind=Vm\{vspace=[0-9]+, va=0x80200000, access=Read, reason=Permission\}$
 ^# u-mode wx: hart=[0-9]+ exec=data_page expect=scause=0xc reason=Wx fatal=1$
 ^# u-mode fault: scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ from_u=1 kernel_addr=0 recover=0 faultkind=Vm\{vspace=[0-9]+, va=0x[0-9a-f]+, access=Execute, reason=Wx\}$
+^# stack: noload=1 block=[0-9]+ harts=__SMP__ distinct=1 canary=0 base=0x[0-9a-f]+$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -521,7 +552,8 @@ panic_allow_re() {
     case "$1" in
         ktest) printf '%s' '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$' ;;
         ktest-guard) printf '%s' '^PANIC: guard page fault scause=0xf stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+$' ;;
-        ktest-user) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
+        ktest-user) printf '%s' '^PANIC: KT-66 u-mode pha syscall xong \(14 TAP, 0 fail\)$' ;;
+        ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         *) return 1 ;;
     esac
 }
@@ -587,6 +619,51 @@ check_hart_lines() {
     got_ids="$(grep -E '^# plic hart=[0-9]+ .* ok=1$' "$log" |
         sed -n 's/^# plic hart=\([0-9][0-9]*\) .*/\1/p' | sort -n | tr '\n' ' ')"
     [ "$got_ids" = "$want_ids" ] || MISSING="$MISSING plic-hart-lines"
+}
+
+# KT-66: **stack syscall per-hart** — mỗi hart online phải có đúng một dòng
+# `# stack hart=K base=… top=… low=… used=… canary=0`, `base` **phân biệt** (không dùng chung
+# stack cho smp 2/4), và `low` nằm trong `[base, top]`. Kiểm cả **tập** hart 0..N-1 (không chỉ đếm).
+check_stack_lines() {
+    local log="$1" smp="$2" h="" want_ids="" got_ids="" rows="" n="" b="" t="" l="" bb="" tt="" ll=""
+    h=0
+    while [ "$h" -lt "$smp" ]; do
+        want_ids="$want_ids$h "
+        h=$((h + 1))
+    done
+    got_ids="$(grep -E '^# stack hart=[0-9]+ ' "$log" |
+        sed -n 's/^# stack hart=\([0-9][0-9]*\) .*/\1/p' | sort -n | uniq | tr '\n' ' ')"
+    [ "$got_ids" = "$want_ids" ] || MISSING="$MISSING stack-hart-lines"
+    local bases="" nb=""
+    bases="$(grep -E '^# stack hart=[0-9]+ ' "$log" |
+        sed -n 's/^# stack hart=[0-9][0-9]* base=\(0x[0-9a-f][0-9a-f]*\) .*/\1/p')"
+    nb="$(printf '%s\n' "$bases" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')"
+    [ "${nb:-0}" -eq "$smp" ] || MISSING="$MISSING stack-distinct=${nb:-0}/$smp"
+    # `low` phải nằm trong [base, top] và `top-base >= 32768`.
+    # **Portable + fail-closed (reviewer KT-66 M3):** KHÔNG dùng `strtonum` (BSD awk không có ⇒
+    # awk lỗi, stdout rỗng, biến `bad` rỗng ⇒ PASS giả). Parse bằng `sed` rồi tính bằng bash
+    # `16#…`; nếu không parse đúng **đủ `smp` dòng** hoặc hex sai ⇒ thêm MISSING (ĐỎ).
+    rows="$(grep -E '^# stack hart=[0-9]+ ' "$log" |
+        sed -n 's/^# stack hart=\([0-9][0-9]*\) base=\(0x[0-9a-f]*\) top=\(0x[0-9a-f]*\) low=\(0x[0-9a-f]*\) .*/\1 \2 \3 \4/p')"
+    n="$(printf '%s\n' "$rows" | sed '/^$/d' | wc -l | tr -d ' ')"
+    [ "${n:-0}" -eq "$smp" ] || MISSING="$MISSING stack-rows=${n:-0}/$smp"
+    while read -r h b t l; do
+        [ -z "${h:-}" ] && continue
+        case "$b$t$l" in
+            *[!0-9a-fx]*) MISSING="$MISSING stack-hex=h$h" && continue ;;
+        esac
+        bb=$((16#${b#0x}))
+        tt=$((16#${t#0x}))
+        ll=$((16#${l#0x}))
+        if [ "$ll" -lt "$bb" ] || [ "$ll" -gt "$tt" ]; then
+            MISSING="$MISSING stack-low=h$h"
+        fi
+        if [ $((tt - bb)) -lt 32768 ]; then
+            MISSING="$MISSING stack-block=h$h"
+        fi
+    done <<EOF
+$rows
+EOF
 }
 
 # KT-55: `# conf:` tự khai số bước trace của từng ca ⇒ số dòng `# trace: <scn> ` phải **bằng**
@@ -721,6 +798,11 @@ validate_norm() {
             check_evidence "$log" "$label" "$smp" "$bh"
             ;;
         ktest-user)
+            check_stack_lines "$log" "$smp"
+            check_evidence "$log" "$label" "$smp"
+            ;;
+        ktest-proc)
+            check_stack_lines "$log" "$smp"
             check_evidence "$log" "$label" "$smp"
             ;;
     esac
@@ -816,6 +898,64 @@ print_summary() {
     echo "# ======================================================================="
 }
 
+# `--selftest-stack`: kiểm **chính** `check_stack_lines` bằng log tổng hợp (không cần QEMU) —
+# bắt đúng low ngoài [base,top], block < 32 KiB, thiếu dòng/hart, hex hỏng; log đúng phải xanh.
+# Ca "low ngoài" là ca reviewer KT-66 M3 yêu cầu (và chứng minh không còn PASS giả khi awk lỗi).
+do_selftest_stack() {
+    local dir="" ok=0 fail=0 total=0
+    dir="$(mktemp -d "${TMPDIR:-/tmp}/kt66-stack.XXXXXX")" || die "không tạo được thư mục tạm"
+    printf '%s\n' \
+        '# stack hart=0 base=0x80415000 top=0x8041d000 low=0x8041c178 used=3720 canary=0' \
+        '# stack hart=1 base=0x80432000 top=0x8043a000 low=0x8043a000 used=0 canary=0' \
+        >"$dir/good.log"
+    printf '%s\n' \
+        '# stack hart=0 base=0x80415000 top=0x8041d000 low=0x8040f000 used=3720 canary=0' \
+        '# stack hart=1 base=0x80432000 top=0x8043a000 low=0x8043a000 used=0 canary=0' \
+        >"$dir/low-ngoai.log"
+    printf '%s\n' \
+        '# stack hart=0 base=0x80415000 top=0x80416000 low=0x80415000 used=3720 canary=0' \
+        '# stack hart=1 base=0x80432000 top=0x8043a000 low=0x8043a000 used=0 canary=0' \
+        >"$dir/block-nho.log"
+    printf '%s\n' \
+        '# stack hart=0 base=0x80415000 top=0x8041d000 low=0x8041c178 used=3720 canary=0' \
+        >"$dir/thieu-hart.log"
+    printf '%s\n' \
+        '# stack hart=0 base=0xzz top=0x8041d000 low=0x8041c178 used=3720 canary=0' \
+        '# stack hart=1 base=0x80432000 top=0x8043a000 low=0x8043a000 used=0 canary=0' \
+        >"$dir/hex-hong.log"
+    _st_case() {
+        local name="$1" smp="$2" want="$3" f="$4"
+        MISSING=""
+        check_stack_lines "$f" "$smp"
+        total=$((total + 1))
+        if [ -z "$want" ]; then
+            if [ -z "$MISSING" ]; then
+                ok=$((ok + 1))
+                echo "ok $total - $name"
+            else
+                fail=$((fail + 1))
+                echo "not ok $total - $name (MISSING=$MISSING, cần xanh)"
+            fi
+        else
+            if printf '%s' "$MISSING" | grep -q -- "$want"; then
+                ok=$((ok + 1))
+                echo "ok $total - $name"
+            else
+                fail=$((fail + 1))
+                echo "not ok $total - $name (MISSING=$MISSING, cần khớp $want)"
+            fi
+        fi
+    }
+    _st_case "log đúng 2 hart (base khác, low trong [base,top], block 32 KiB)" 2 "" "$dir/good.log"
+    _st_case "low NGOÀI [base,top] ⇒ ĐỎ (ca M3)" 2 "stack-low" "$dir/low-ngoai.log"
+    _st_case "block < 32768 ⇒ ĐỎ" 2 "stack-block" "$dir/block-nho.log"
+    _st_case "thiếu dòng hart 1 ⇒ ĐỎ" 2 "stack-rows" "$dir/thieu-hart.log"
+    _st_case "hex hỏng ⇒ ĐỎ (fail-closed: không parse đủ dòng)" 2 "stack-rows" "$dir/hex-hong.log"
+    rm -rf "$dir"
+    echo "# selftest-stack: $ok/$total ca đúng như kỳ vọng"
+    [ "$fail" -eq 0 ]
+}
+
 # ------------------------------------------------------------------ chế độ
 
 parse_args() {
@@ -834,6 +974,7 @@ parse_args() {
             LOGP_I="${4:-1}"
             ;;
         --print-expected) MODE=print-expected ;;
+        --selftest-stack) MODE=selftest-stack ;;
         --print-evidence)
             MODE=print-evidence
             PRINT_LABEL="${2:-}"
@@ -983,9 +1124,9 @@ run_matrix() {
         die "build ảnh test FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build.log)"
     fi
     # KT-53: ảnh user bật thêm feature `user` (module U-mode chỉ có trong ảnh này).
-    echo "# build ảnh test user ($TARGET, release, --features ktest,user)"
+    echo "# build ảnh test user+proc ($TARGET, release, --features ktest,user)"
     if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
-        --bin vifast-kbin-ktest-user --features ktest,user \
+        --bin vifast-kbin-ktest-user --bin vifast-kbin-ktest-proc --features ktest,user \
         --target "$TARGET" --release >/tmp/k3-ktest-build-user.log 2>&1; then
         tail -20 /tmp/k3-ktest-build-user.log >&2
         die "build ảnh test user FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-user.log)"
@@ -1035,9 +1176,9 @@ run_matrix() {
 
     # Không được phép "xanh vì không chạy gì": **mọi slot** (ảnh, smp, boot) phải có dòng trong
     # bảng — slot boot thật hoặc SKIP (chỉ sinh khi ảnh trước trong cùng vòng TIMEOUT).
-    local want_rows=$((N_BOOT * SMP_COUNT * 3))
+    local want_rows=$((N_BOOT * SMP_COUNT * LABEL_COUNT))
     [ "$ROWS" -eq "$want_rows" ] ||
-        die "chạy THIẾU slot: $ROWS/$want_rows (NBOOT=$N_BOOT × smp=$SMP_COUNT × 3 ảnh) — không coi là PASS"
+        die "chạy THIẾU slot: $ROWS/$want_rows (NBOOT=$N_BOOT × smp=$SMP_COUNT × $LABEL_COUNT ảnh) — không coi là PASS"
     [ "$total_boots" -ge 1 ] || die "không boot lần nào (0/$want_rows) — không coi là PASS"
     print_summary
     echo "# KTEST: $clean_boots/$total_boots boot sạch (smp=$SMP_ARG, NBOOT=$N_BOOT, ảnh/boot=$LABELS)"
@@ -1071,6 +1212,7 @@ case "$MODE" in
         ;;
     log-path) do_log_path ;;
     print-evidence) do_print_evidence "$PRINT_LABEL" "$PRINT_SMP" ;;
+    selftest-stack) do_selftest_stack || exit 1 ;;
     check-log)
         do_check_log "$CHECK_LABEL" "$CHECK_LOG" "$CHECK_SMP" || exit 1
         echo "# check-log: PASS"

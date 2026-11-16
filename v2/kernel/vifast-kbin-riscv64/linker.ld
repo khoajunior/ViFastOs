@@ -40,7 +40,8 @@ SECTIONS
        trong vùng NOLOAD phía sau. Nếu bỏ ALIGN(2M) này, guard nằm trong chính leaf 2 MiB của
        image ⇒ không thể set NONE riêng.
        KT-49: vùng này là **MAX_HARTS = 8** record per-hart, mỗi record
-         guard 4 KiB | stack 64 KiB | trap stack 16 KiB  (HART_STRIDE = 0x1_5000)
+         guard 4 KiB | stack 64 KiB | trap stack 16 KiB | syscall stack 32 KiB
+         (HART_STRIDE = 0x1_D000 từ KT-66; trước đó 0x1_5000)
        — khớp TUYỆT ĐỐI với `vifast_plat_common::smp` (mmu::init panic nếu lệch). */
     . = ALIGN(2M);
     __hart_area_base = .;
@@ -64,10 +65,18 @@ SECTIONS
         __trap_stack_top = .;
     }
 
+    /* KT-66: stack dispatch syscall per-hart (32 KiB) — NOLOAD, identity-mapped thấp nên vẫn
+       dùng được khi `satp` = root user (nửa cao/physmap không có trong root user). */
+    .syscall_stack (NOLOAD) : ALIGN(16) {
+        __syscall_stack_bottom = .;
+        . += 0x8000;
+        __syscall_stack_top = .;
+    }
+
     /* ---- hart 1..7: cùng khuôn record, chỉ cấp địa chỉ (NOLOAD); guard/stack/trap stack của
        từng hart tính bằng `__hart_area_base + hart*HART_STRIDE` trong Rust. */
     .hart_stacks (NOLOAD) : ALIGN(16) {
-        . += 7 * 0x15000;
+        . += 7 * 0x1d000;
     }
 
     __kernel_end = .;

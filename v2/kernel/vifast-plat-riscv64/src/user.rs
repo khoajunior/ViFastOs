@@ -51,6 +51,7 @@ use vifast_elf::ElfError;
 use vifast_plat_common::fault::{self, FaultKind, PteFacts, TrapFacts, FAULT_STATS};
 use vifast_plat_common::mmu::{PTE_EXEC, PTE_READ, PTE_USER, PTE_WRITE};
 use vifast_plat_common::obj::{CapId, MapFlags, ObjError, ObjKind};
+use vifast_plat_common::smp::MAX_HARTS;
 use vifast_plat_common::trap::{
     tf_reg_offset, Exception, ExceptionKind, TrapFrame, REG_A0, REG_A7, REG_SP, SSTATUS_SIE,
     SSTATUS_SPIE, SSTATUS_SPP, TF_SEPC_OFFSET, TF_SSTATUS_OFFSET,
@@ -63,6 +64,9 @@ use vifast_plat_common::{Platform, PlatformWriter};
 
 use crate::obj as aobj;
 use crate::{debug_put_byte, mmu, Riscv64Virt};
+
+// KT-66: API stack per-hart cho ảnh test (module riêng `crate::user_stack`).
+pub use crate::user_stack::{init_syscall_stacks, print_stack_evidence};
 
 /// `sstatus.SUM` — S-mode được đọc/ghi trang `U=1` (privileged spec).
 const SSTATUS_SUM: u64 = 1 << 18;
@@ -761,26 +765,74 @@ fn enter_with(
 // KT-65 — **stack riêng cho dispatch syscall** (không dùng trap stack 16 KiB của KT-49)
 // ---------------------------------------------------------------------------------------------
 
-/// Cỡ stack dispatch syscall. Trap stack per-hart chỉ **16 KiB** (bất biến KT-49); đường IPC
-/// `NBRecv`/`Send` với `Message` 64 MR làm khung dispatch sâu hơn 16 KiB ⇒ tràn xuống kernel
-/// stack và **ghi đè biến cục bộ** của scheduler (đã quan sát: `LoadedInit`/`steps` bị zero,
-/// `ret` về 0). Chuyển phần nặng sang stack riêng 32 KiB trong `.bss` của ảnh test.
-const SYSCALL_STACK_BYTES: usize = 32 * 1024;
+// KT-66: stack per-hart + canary/nước thấp nằm ở module riêng `user_stack` (R1 ≤ 1.500 dòng);
+// phần dưới chỉ còn scratch một-lượt + đổi `sp` sang block của hart hiện tại.
+#[repr(C)]
+struct SavedSp([u64; 2]);
 
-#[repr(align(16))]
-struct SyscallStack(
-    // Chỉ dùng làm **vùng nhớ** cho `sp`; nội dung không đọc bằng Rust (asm `mv sp`).
-    #[allow(dead_code)] [u8; SYSCALL_STACK_BYTES],
-);
-static mut SYSCALL_STACK: SyscallStack = SyscallStack([0; SYSCALL_STACK_BYTES]);
-/// `sp` kernel được lưu tạm trong lúc chạy dispatch trên stack riêng (không lồng nhau).
-static mut SYSCALL_SAVED_SP: [u64; 2] = [0; 2];
-/// Tham số/`tcb` của lượt dispatch đang chạy trên stack riêng.
+/// Hart đang chạy dispatch — asm đọc lại giá trị này ở cả hai phía `call`.
+static mut STACK_HART: usize = 0;
+/// `sp`/`ra` kernel lưu tạm **theo hart** trong lúc chạy dispatch trên stack riêng.
+static mut SYSCALL_SAVED_SP: [SavedSp; MAX_HARTS] = [const { SavedSp([0; 2]) }; MAX_HARTS];
+/// Tham số/`tcb` của lượt dispatch đang chạy trên stack riêng (một hart, không lồng nhau).
 static mut SYSCALL_TCB: u32 = 0;
 static mut SYSCALL_NR: u64 = 0;
 static mut SYSCALL_ARGS: [u64; 6] = [0; 6];
 /// Kết quả dispatch (kiểu `Copy`).
 static mut SYSCALL_ACTION: MaybeUninit<SyscallAction> = MaybeUninit::uninit();
+
+/// Dispatch một syscall U-mode trên **stack riêng của hart hiện tại** (xem
+/// [`crate::user_stack::init_syscall_stacks`]). Sau khi về, kiểm canary đáy block ngay (tràn ⇒
+/// `canary=1`).
+fn dispatch_on_private_stack(tcb: ObjId, nr: u64, args: [u64; 6]) -> SyscallAction {
+    let hart = crate::smp::current_hart().min(MAX_HARTS - 1);
+    let top = crate::user_stack::syscall_stack_top(hart);
+    if top == 0 {
+        let mut w = PlatformWriter(&Riscv64Virt);
+        let _ = writeln!(w, "# stack: chua cap cho hart={hart} (init_syscall_stacks)");
+        vifast_plat_common::Platform::put_str(&Riscv64Virt, "PANIC: syscall stack chua cap\n");
+        crate::debug_halt(1)
+    }
+    // SAFETY: ghi tham số + hart vào static trước khi đổi stack; một hart, không lồng nhau.
+    unsafe {
+        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_TCB), tcb);
+        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_NR), nr);
+        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_ARGS), args);
+        core::ptr::write(core::ptr::addr_of_mut!(STACK_HART), hart);
+    }
+    // SAFETY: đổi `sp` sang block **của hart này** (16 B aligned, NOLOAD identity), lưu `sp`/`ra`
+    // vào `SYSCALL_SAVED_SP[hart]`, `call` hàm Rust (giữ callee-saved theo ABI), rồi khôi phục
+    // `ra`/`sp`. Chỉ dùng `t0/t1` (caller-saved, đọc lại `STACK_HART` sau `call` — không giữ giá
+    // trị trong thanh ghi qua lời gọi); `clobber_abi("C")` khai báo đúng các thanh ghi bị clobber.
+    unsafe {
+        asm!(
+            "la t0, {hart}",
+            "ld t0, 0(t0)",
+            "slli t0, t0, 4",
+            "la t1, {saved}",
+            "add t0, t0, t1",
+            "sd sp, 0(t0)",
+            "sd ra, 8(t0)",
+            "mv sp, {top}",
+            "call {f}",
+            "la t0, {hart}",
+            "ld t0, 0(t0)",
+            "slli t0, t0, 4",
+            "la t1, {saved}",
+            "add t0, t0, t1",
+            "ld ra, 8(t0)",
+            "ld sp, 0(t0)",
+            hart = sym STACK_HART,
+            saved = sym SYSCALL_SAVED_SP,
+            top = in(reg) top,
+            f = sym syscall_on_private_stack,
+            clobber_abi("C"),
+            options(nostack),
+        );
+        crate::user_stack::check_stack_canary(hart);
+        (*core::ptr::addr_of!(SYSCALL_ACTION)).assume_init()
+    }
+}
 
 /// Chạy trên stack riêng: gọi đúng façade [`abi::dispatch`] như trước.
 extern "C" fn syscall_on_private_stack() {
@@ -802,38 +854,6 @@ extern "C" fn syscall_on_private_stack() {
             core::ptr::addr_of_mut!(SYSCALL_ACTION),
             MaybeUninit::new(action),
         );
-    }
-}
-
-/// Dispatch một syscall U-mode trên stack riêng (xem [`SYSCALL_STACK_BYTES`]).
-fn dispatch_on_private_stack(tcb: ObjId, nr: u64, args: [u64; 6]) -> SyscallAction {
-    // SAFETY: ghi tham số vào static trước khi đổi stack; một hart, không lồng nhau.
-    unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_TCB), tcb);
-        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_NR), nr);
-        core::ptr::write(core::ptr::addr_of_mut!(SYSCALL_ARGS), args);
-    }
-    let top = core::ptr::addr_of_mut!(SYSCALL_STACK) as u64 + SYSCALL_STACK_BYTES as u64;
-    // SAFETY: đổi `sp` sang stack riêng (16 B aligned, trong `.bss`), lưu `sp`/`ra` vào static,
-    // `call` hàm Rust (giữ callee-saved theo ABI), rồi khôi phục `ra`/`sp`. Không dùng stack của
-    // compiler trong khối asm; `clobber_abi("C")` khai báo đúng các thanh ghi bị clobber.
-    unsafe {
-        asm!(
-            "la t0, {saved}",
-            "sd sp, 0(t0)",
-            "sd ra, 8(t0)",
-            "mv sp, {top}",
-            "call {f}",
-            "la t0, {saved}",
-            "ld ra, 8(t0)",
-            "ld sp, 0(t0)",
-            saved = sym SYSCALL_SAVED_SP,
-            top = in(reg) top,
-            f = sym syscall_on_private_stack,
-            clobber_abi("C"),
-            options(nostack),
-        );
-        (*core::ptr::addr_of!(SYSCALL_ACTION)).assume_init()
     }
 }
 

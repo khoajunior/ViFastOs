@@ -1,0 +1,27 @@
+# KT-66 — clippy kernel (5 tổ hợp) + build 5 ảnh
+# thời điểm: 2026-11-16T01:12:21Z
+    Checking vifast-core v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-core)
+   Compiling vifast-kbin-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-kbin-riscv64)
+    Checking vifast-plat-common v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-plat-common)
+    Checking vifast-plat-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-plat-riscv64)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.03s
+CLIPPY_WORKSPACE_EXIT=0
+    Checking vifast-core v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-core)
+   Compiling vifast-kbin-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-kbin-riscv64)
+    Checking vifast-plat-common v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-plat-common)
+    Checking vifast-plat-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-plat-riscv64)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.96s
+CLIPPY_KTEST_EXIT=0
+   Compiling vifast-kbin-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-kbin-riscv64)
+    Checking vifast-plat-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-plat-riscv64)
+warning: vifast-kbin-riscv64@0.1.0: KT-65 init.elf 12648 B
+warning: vifast-kbin-riscv64@0.1.0: KT-65 procsrv.elf 12640 B
+warning: vifast-kbin-riscv64@0.1.0: KT-65 shell.elf 9352 B
+warning: vifast-kbin-riscv64@0.1.0: KT-65 child.elf 8504 B
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.18s
+CLIPPY_USER_EXIT=0
+    Checking vifast-plat-riscv64 v0.1.0 (/Users/mps/dvchd/ViFastOs/v2/kernel/vifast-plat-riscv64)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+CLIPPY_PLAT_EXIT=0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s
+CLIPPY_PLATUSER_EXIT=0
