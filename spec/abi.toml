@@ -214,6 +214,12 @@ returns = []
 params = ["tcb", "cap"]
 returns = []
 
+[method_signature."Tcb.SetTls"]
+params = ["tcb", "tls"]
+returns = []
+# D2-114: chữ ký còn thiếu — `[object].Tcb` đã có method 15 `SetTls` từ KT-05 nhưng `[method_signature]`
+# không có khối tương ứng (bất nhất). KT-74 đã CÀI ĐẶT đúng số 15 sinh từ `[object]`; khối này chỉ
+# ghi lại chữ ký đã dùng (arity 1) để `check_abi.py`/`vifast-gen` có nguồn. KHÔNG thêm/bớt method nào.
 [method_signature."Tcb.Suspend"]
 params = ["tcb", "mode"]
 variants = { mode = ["Abort", "Defer"] }

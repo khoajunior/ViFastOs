@@ -333,7 +333,7 @@ pub const OBJ_TCB_BYTES: usize = 512;
 #[rustfmt::skip]
 /// (method, params, returns) — từ `[method_signature]` (stable-draft).
 #[rustfmt::skip]
-pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 15] = [
+pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 16] = [
     ("CNode.Copy", &["cnode", "src", "dst", "rights?"], &[]),
     ("CNode.Delete", &["cnode", "slot"], &[]),
     ("CNode.Mint", &["cnode", "src", "dst", "rights?", "badge?"], &[]),
@@ -347,6 +347,7 @@ pub const METHOD_SIGNATURES: [(&str, &[&str], &[&str]); 15] = [
     ("Tcb.ReadState", &["tcb"], &["state", "suspended", "blocked_on_kind", "exit_code"]),
     ("Tcb.Resume", &["tcb"], &[]),
     ("Tcb.SetFaultEp", &["tcb", "cap"], &[]),
+    ("Tcb.SetTls", &["tcb", "tls"], &[]),
     ("Tcb.Suspend", &["tcb", "mode"], &[]),
     ("Untyped.Retype", &["cap", "dst", "type", "size_bits", "flags"], &["slot"]),
 ];

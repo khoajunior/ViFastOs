@@ -87,6 +87,7 @@ SINH TỰ ĐỘNG bởi `v2/tools/vifast-gen` từ `spec/abi.toml` — **đừng
 | `Tcb.ReadState` | tcb | state, suspended, blocked_on_kind, exit_code |
 | `Tcb.Resume` | tcb | — |
 | `Tcb.SetFaultEp` | tcb, cap | — |
+| `Tcb.SetTls` | tcb, tls | — |
 | `Tcb.Suspend` | tcb, mode | — |
 | `Untyped.Retype` | cap, dst, type, size_bits, flags | slot |
 
