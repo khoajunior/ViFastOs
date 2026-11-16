@@ -395,3 +395,25 @@ trả `NotSupported`) nên không dựng được untyped nhỏ để ép lỗi 
 tử" đã thu hẹp; (D5) ảnh A lấy method từ hằng sinh tự động, evidence `const:method_source=spec`;
 (D6) `ktest_inv` assert `delta.set_tls == 0`, `releases_clean` dùng `==`; (D7) sửa câu call-site
 (`src/proc_demo.rs`); (D8) chép toàn bộ gate log vào `JOURNAL/kt74-gate.log`.
+
+## KT-75 — `test-persist` bảy pha (K6): DONE, ba giới hạn **có văn bản** (không phải chặn)
+
+**Không chặn task nào.** KT-75 đóng nợ D2-111 (“`flush` bền qua reboot”) bằng ảnh test riêng
+`ktest-persist` + runner `v2/test/boot/persist.sh` (mỗi pha: ghi ở một tiến trình QEMU, đọc lại ở
+tiến trình khác trên cùng ảnh đĩa, so từng byte) + kiểm chứng host `vifast-fsutil` sau mỗi boot.
+Ba giới hạn phải nói rõ để KT-76 **không** nhận “tương đương v1” bằng bằng chứng sai:
+
+1. **Ca âm `flush` là mô hình cache**, không phải QEMU tự mất dữ liệu: QEMU ghi thẳng file ảnh
+   trên host nên dữ liệu “đã ghi” luôn nằm trong file. Cái được **đo** là **ranh giới bền**: không
+   `flush` ⇒ không byte nào ra thiết bị (sha256 ảnh không đổi, `device_flushes=0`), boot sau không
+   thấy tệp; có `flush` ⇒ dữ liệu sống qua reboot (bảy pha dương). Muốn chứng minh trên **đĩa thật**
+   thì cần phần cứng/thiết bị có cache bay hơi thật — **nợ của K6-DOD nếu reviewer yêu cầu**.
+2. **Matrix không chứa `ktest-persist`**: một pha là **hai** boot trên cùng ảnh đĩa, không vừa mô
+   hình “mỗi ảnh một boot” của `expected.txt` (D2-110 cấm nới mô hình). Matrix vẫn là bảy ảnh độc
+   lập (xanh toàn bộ); bằng chứng persist nằm ở `docs/k6-persist.md` + `JOURNAL/kt75-*`.
+3. **Ảnh sản phẩm vẫn không có U-mode/shell** (D2-113) — KT-75 **không** thay đổi ảnh sản phẩm
+   byte nào (`sha256` trùng D2-115, soak lại trên đúng sha đó). Nợ này **nguyên trạng** cho KT-76.
+
+**Nợ kỹ thuật còn lại**: ảnh persist chạy **một hart**, poll (như KT-72); chưa có `fsync` từ
+U-mode; chưa có ca torn-write giữa transaction trên ảnh này (KT-71 đã có bảy pha crash trên
+journal — bằng chứng riêng); chưa có ca dung lượng đầy (`NoSpace`) trong persist.

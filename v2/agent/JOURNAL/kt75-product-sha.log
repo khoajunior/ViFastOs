@@ -1,0 +1,6 @@
+# KT-75 — ảnh SẢN PHẨM: build SẠCH (KHÔNG feature), sha256 đo NGAY sau build (D2-108A)
+# lệnh: cargo build --manifest-path v2/kernel/Cargo.toml -p vifast-kbin-riscv64 --bin vifast-kbin-riscv64 --target riscv64gc-unknown-none-elf --release
+BUILD_EXIT=0
+# bytes=188552
+fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+digest build=ef566cfa583e34bb text=49874

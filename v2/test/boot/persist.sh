@@ -1,0 +1,397 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-75 — runner `test-persist` **7 pha** trên virtio-blk, mỗi pha sống qua **reboot QEMU thật**.
+#
+# Vì sao runner riêng: một pha = **hai** tiến trình QEMU (ghi rồi thoát; tiến trình **mới** đọc
+# lại) ⇒ không vừa mô hình “mỗi ảnh một boot” của `ktest.sh` (`expected.txt`: một plan TAP/boot).
+# Ở đây 10 boot chia thành:
+#
+#   b01  format + ghi P1                 b06  đọc lại P5 + ghi P6
+#   b02  đọc lại P1 + ghi P2             b07  đọc lại P6 + ghi P7
+#   b03  đọc lại P2 + ghi P3             b08  đọc lại P7 + in `phases=7 ok=7`
+#   b04  đọc lại P3 + ghi P4             b09  **ca âm**: ghi `/pneg.txt` KHÔNG flush (mất)
+#   b05  đọc lại P4 + ghi P5             b10  **ca âm**: boot mới thấy `/pneg.txt` vắng
+#
+# Bằng chứng **độc lập phía host** (không tin kernel): sau **mỗi** boot, `vifast-fsutil fsck` +
+# `ls` + `stat` + `get` trên **cùng** ảnh đĩa, so **từng byte** với mô hình sinh lại ở
+# `persist_host.py`; đồng thời sha256 ảnh phải **không đổi** trong lúc kiểm host (`fsutil_mutated=0`)
+# và **không đổi** qua ca âm (không có gì ra thiết bị).
+#
+# Dùng:
+#   bash v2/test/boot/persist.sh                 # chạy đủ 10 boot + kiểm host (PASS/FAIL)
+#   bash v2/test/boot/persist.sh --red-selftest  # chứng minh bộ kiểm **không rỗng**: sửa payload
+#                                                #   trên đĩa bằng fsutil rồi đòi verify QEMU đỏ
+#   KT75_IMAGE=<elf> KT75_SKIP_BUILD=1 bash …    # dùng ảnh có sẵn (đỏ trước: ảnh không có persist)
+#   KT75_LOGDIR=<dir> bash …                     # nơi để log/ảnh đĩa (mặc định /tmp/kt75-persist)
+# Exit 0 = 10/10 boot xanh + 7/7 pha + ca âm đúng; 1 = có lỗi (in từng dòng `not ok`).
+set -u
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+V2_ROOT="$(cd "$HERE/../.." && pwd)"
+REPO_ROOT="$(cd "$V2_ROOT/.." && pwd)"
+TARGET="riscv64gc-unknown-none-elf"
+KMANIFEST="$V2_ROOT/kernel/Cargo.toml"
+V2MANIFEST="$V2_ROOT/Cargo.toml"
+IMAGE="${KT75_IMAGE:-$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-ktest-persist}"
+FSUTIL="${KT75_FSUTIL:-$V2_ROOT/target/debug/vifast-fsutil}"
+LOGDIR="${KT75_LOGDIR:-/tmp/kt75-persist}"
+DISK="$LOGDIR/kt75-disk.img"
+HOSTPY="$HERE/persist_host.py"
+TIMEOUT_DS=900 # 90 s/boot (pha 7 ghi 144 block ⇒ ~900 request virtio dưới `-icount`)
+QEMU_MIN_MAJOR=9
+QEMU_MIN_MINOR=2
+QEMU_ICOUNT="-icount shift=6" # D2-74 (chỉ runner; run.sh/soak không icount)
+
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+FAILS=0
+BOOTS=0
+OK_BOOTS=0
+ROWS=""
+PIDS=""
+
+die() {
+    echo "persist.sh: $*" >&2
+    exit 2
+}
+
+PYTHON=""
+find_python() {
+    local c
+    for c in python3.12 python3.11 python3; do
+        if command -v "$c" >/dev/null 2>&1; then
+            PYTHON="$c"
+            return 0
+        fi
+    done
+    return 1
+}
+
+bad() {
+    echo "not ok - $*"
+    FAILS=$((FAILS + 1))
+}
+
+build_everything() {
+    command -v cargo >/dev/null 2>&1 || die "không có cargo"
+    if [ "${KT75_SKIP_BUILD:-0}" != "1" ]; then
+        echo "# build ảnh persist ($TARGET, release, --features ktest,vblk)"
+        if ! cargo build --manifest-path "$KMANIFEST" -p vifast-kbin-riscv64 \
+            --bin vifast-kbin-ktest-persist --features ktest,vblk \
+            --target "$TARGET" --release >"$LOGDIR/kt75-build-image.log" 2>&1; then
+            tail -20 "$LOGDIR/kt75-build-image.log" >&2
+            die "build ảnh persist FAIL"
+        fi
+        echo "# build vifast-fsutil (host)"
+        if ! cargo build --manifest-path "$V2MANIFEST" -p vifast-fsutil \
+            >"$LOGDIR/kt75-build-fsutil.log" 2>&1; then
+            tail -20 "$LOGDIR/kt75-build-fsutil.log" >&2
+            die "build vifast-fsutil FAIL"
+        fi
+    fi
+    [ -f "$IMAGE" ] || die "không thấy ảnh $IMAGE"
+    [ -x "$FSUTIL" ] || die "không thấy fsutil $FSUTIL"
+    bash "$HERE/budget.sh" "$IMAGE" ktest-persist >"$LOGDIR/kt75-budget.log" 2>&1 ||
+        die "budget ảnh persist VƯỢT trần (xem $LOGDIR/kt75-budget.log)"
+    grep -E "^# image=" "$LOGDIR/kt75-budget.log" || true
+}
+
+setup_tools() {
+    find_python || die "không có python3"
+    QEMU="$(command -v qemu-system-riscv64 || true)"
+    [ -n "$QEMU" ] || die "không có qemu-system-riscv64"
+    SBI="${OPENSBI:-}"
+    if [ -z "$SBI" ]; then
+        for c in /opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin \
+            /usr/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin \
+            /usr/local/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin; do
+            [ -f "$c" ] && {
+                SBI="$c"
+                break
+            }
+        done
+    fi
+    [ -f "${SBI:-/nonexistent}" ] || die "không tìm thấy OpenSBI fw_dynamic (đặt OPENSBI=...)"
+    local qv qmaj qrest qmin
+    qv="$("$QEMU" --version 2>/dev/null | sed -n '1s/.*version \([0-9][^ ]*\).*/\1/p')"
+    [ -n "$qv" ] || die "không đọc được phiên bản QEMU"
+    qmaj="${qv%%.*}"
+    qrest="${qv#*.}"
+    qmin="${qrest%%.*}"
+    case "$qmaj" in '' | *[!0-9]*) die "phiên bản QEMU [$qv] lạ" ;; esac
+    case "$qmin" in '' | *[!0-9]*) die "phiên bản QEMU [$qv] lạ" ;; esac
+    if [ "$qmaj" -lt "$QEMU_MIN_MAJOR" ] ||
+        { [ "$qmaj" -eq "$QEMU_MIN_MAJOR" ] && [ "$qmin" -lt "$QEMU_MIN_MINOR" ]; }; then
+        die "QEMU $qv < sàn $QEMU_MIN_MAJOR.$QEMU_MIN_MINOR"
+    fi
+    echo "# qemu $qv (icount shift=6) — opensbi $SBI"
+}
+
+fresh_disk() {
+    mkdir -p "$LOGDIR" || die "không tạo được $LOGDIR"
+    # 4 MiB = 8192 sector 512 B = đúng `vifast_fs::TOTAL_BLOCKS`.
+    dd if=/dev/zero of="$DISK" bs=4096 count=1024 >/dev/null 2>&1 ||
+        die "không tạo được ảnh đĩa 4 MiB $DISK"
+}
+
+sha_of() {
+    "$PYTHON" -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+}
+
+# `run_boot <tag> <verify> <write> <flags> <mode> <nonce>`: một tiến trình QEMU trên cùng ảnh đĩa.
+run_boot() {
+    local tag="$1" verify="$2" write="$3" flags="$4" mode="$5" nonce="$6"
+    local plan="$LOGDIR/$tag.plan" log="$LOGDIR/$tag.log" before="" after="" pid="" waited=0
+    local rc=0
+    BOOTS=$((BOOTS + 1))
+    "$PYTHON" "$HOSTPY" plan --verify "$verify" --write "$write" --flags "$flags" \
+        --mode "$mode" --nonce "$nonce" --out "$plan" >>"$LOGDIR/$tag.plan.log" 2>&1 ||
+        die "sinh kịch bản $tag hỏng"
+    dd if="$plan" of="$DISK" bs=512 count=1 conv=notrunc >/dev/null 2>&1 ||
+        die "ghi kịch bản vào LBA 0 hỏng"
+    before="$(sha_of "$DISK")"
+    "$QEMU" $QEMU_ICOUNT -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$IMAGE" \
+        -nographic -cpu rv64 -m 128M -smp 1 -no-reboot \
+        -drive "file=$DISK,format=raw,if=none,id=hd0" \
+        -device virtio-blk-pci,drive=hd0 >"$log" 2>&1 &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT_DS" ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null # chỉ PID do script này tạo (AGENTS §9)
+        wait "$pid" 2>/dev/null
+        bad "$tag: quá $((TIMEOUT_DS / 10)) s (đã kill pid $pid), log $log"
+        ROWS="$ROWS$tag|TIMEOUT|$pid|-|-
+"
+        return 1
+    fi
+    wait "$pid" 2>/dev/null
+    after="$(sha_of "$DISK")"
+    PIDS="$PIDS $pid"
+    LAST_PID="$pid"
+    LAST_BEFORE="$before"
+    LAST_AFTER="$after"
+    ROWS="$ROWS$tag|OK|$pid|$((waited))|$log
+"
+    echo "# boot: tag=$tag pid=$pid plan_verify=$verify plan_write=$write mode=$mode nonce=$nonce secs=$((waited / 10))"
+    return 0
+}
+
+# `check_log <tag> <kind> <phase> <verify> <write> <mode> <nonce>`
+check_log() {
+    local tag="$1" kind="$2" phase="$3" verify="$4" write="$5" mode="$6" nonce="$7"
+    local out="$LOGDIR/$tag.check-$kind.log"
+    if ! "$PYTHON" "$HOSTPY" check --log "$LOGDIR/$tag.log" --kind "$kind" --phase "$phase" \
+        --verify "$verify" --write "$write" --mode "$mode" --nonce "$nonce" >"$out" 2>&1; then
+        sed -n '1,40p' "$out" >&2
+        bad "$tag: log QEMU không khớp mô hình (kind=$kind phase=$phase)"
+        return 1
+    fi
+    grep -E "^# log-check: " "$out" || true
+    return 0
+}
+
+# `check_host <tag> <phase> <records>`
+check_host() {
+    local tag="$1" phase="$2" records="$3" out="$LOGDIR/$tag.host.log"
+    if ! "$PYTHON" "$HOSTPY" host --disk "$DISK" --fsutil "$FSUTIL" \
+        --phase "$phase" --records "$records" >"$out" 2>&1; then
+        sed -n '1,40p' "$out" >&2
+        bad "$tag: kiểm host ($phase, records=$records) ĐỎ"
+        return 1
+    fi
+    grep -E "^# host(:| file:)" "$out" | sed -n '1,12p'
+    OK_BOOTS=$((OK_BOOTS + 1))
+    return 0
+}
+
+expect_sha_changed() {
+    local tag="$1" want="$2"
+    if [ "$want" = "changed" ]; then
+        if [ "$LAST_BEFORE" = "$LAST_AFTER" ]; then
+            bad "$tag: ảnh đĩa KHÔNG đổi sau boot ghi (dữ liệu không ra thiết bị?)"
+            return 1
+        fi
+        echo "# sha: tag=$tag before=$LAST_BEFORE after=$LAST_AFTER changed=1"
+    else
+        if [ "$LAST_BEFORE" != "$LAST_AFTER" ]; then
+            bad "$tag: ảnh đĩa ĐỔI ở ca âm (lẽ ra không có gì ra thiết bị)"
+            return 1
+        fi
+        echo "# sha: tag=$tag sha=$LAST_AFTER changed=0 (ca âm: không có gì ra thiết bị)"
+    fi
+    return 0
+}
+
+run_sequence() {
+    local p=0 nonce_base=1000 tag=""
+    # b01: format + ghi P1
+    tag=b01
+    run_boot "$tag" 0 1 1 0 $((nonce_base + 1)) || return 1
+    check_log "$tag" write 1 0 1 0 $((nonce_base + 1)) || true
+    expect_sha_changed "$tag" changed || true
+    check_host "$tag" 1 1 || true
+    # b02..b07: đọc lại P(p-1) + ghi P(p)
+    for p in 2 3 4 5 6 7; do
+        tag="b0$p"
+        run_boot "$tag" $((p - 1)) "$p" 0 0 $((nonce_base + p)) || return 1
+        check_log "$tag" verify $((p - 1)) $((p - 1)) "$p" 0 $((nonce_base + p)) || true
+        check_log "$tag" write "$p" $((p - 1)) "$p" 0 $((nonce_base + p)) || true
+        expect_sha_changed "$tag" changed || true
+        check_host "$tag" "$p" $((2 * p - 1)) || true
+    done
+    # b08: đọc lại P7 + tổng kết `phases=7 ok=7`
+    tag=b08
+    run_boot "$tag" 7 0 0 0 $((nonce_base + 8)) || return 1
+    check_log "$tag" verify-last 7 7 0 0 $((nonce_base + 8)) || true
+    expect_sha_changed "$tag" changed || true
+    check_host "$tag" 7 14 || true
+    # b09: ca âm — ghi KHÔNG flush (cache bay hơi)
+    tag=b09
+    run_boot "$tag" 0 0 0 1 $((nonce_base + 9)) || return 1
+    check_log "$tag" neg-write 0 0 0 1 $((nonce_base + 9)) || true
+    expect_sha_changed "$tag" same || true
+    check_host "$tag" 7 14 || true
+    # b10: ca âm — boot mới thấy `/pneg.txt` vắng
+    tag=b10
+    run_boot "$tag" 0 0 0 2 $((nonce_base + 10)) || return 1
+    check_log "$tag" neg-verify 0 0 0 2 $((nonce_base + 10)) || true
+    expect_sha_changed "$tag" same || true
+    check_host "$tag" 7 14 || true
+    return 0
+}
+
+# `red_selftest`: chứng minh bộ kiểm **không rỗng** bằng một lần đỏ THẬT.
+#
+# (1) boot b01 ghi P1 xanh; (2) host `vifast-fsutil put-file` ghi đè `/p1.txt` bằng payload SAI;
+# (3) boot đọc lại P1 **phải** đỏ (`match=0`, `not ok`) — cả QEMU lẫn host đều phải bắt.
+red_selftest() {
+    local tag=b01 wrong="$LOGDIR/wrong.bin" plan="$LOGDIR/red.log" rc=0
+    fresh_disk
+    run_boot "$tag" 0 1 1 0 7001 || die "red-selftest: boot ghi P1 hỏng"
+    check_log "$tag" write 1 0 1 0 7001 || die "red-selftest: boot ghi P1 không khớp mô hình"
+    check_host "$tag" 1 1 || die "red-selftest: kiểm host P1 (trước khi phá) ĐỎ"
+    "$PYTHON" - "$wrong" <<'PY'
+import sys
+open(sys.argv[1], "wb").write(bytes([0xAA]) * 512)
+PY
+    "$FSUTIL" put-file "$DISK" /p1.txt "$wrong" >"$plan" 2>&1 ||
+        die "red-selftest: fsutil put-file hỏng"
+    echo "# red-selftest: host đã ghi đè /p1.txt bằng 512 B 0xAA (payload SAI)"
+    run_boot b02 1 0 0 0 7002 || die "red-selftest: boot đọc lại P1 không chạy"
+    if "$PYTHON" "$HOSTPY" check --log "$LOGDIR/b02.log" --kind verify --phase 1 \
+        --verify 1 --write 0 --mode 0 --nonce 7002 >>"$plan" 2>&1; then
+        bad "red-selftest: bộ kiểm QEMU KHÔNG bắt được payload sai (red mong đợi)"
+        rc=1
+    else
+        echo "# red-selftest: QEMU báo đỏ đúng (xem $LOGDIR/b02.log)"
+    fi
+    if grep -q "^not ok 1 - persist verify phase 1" "$LOGDIR/b02.log"; then
+        echo "# red-selftest: TAP QEMU 'not ok 1 - persist verify phase 1' có mặt"
+    else
+        bad "red-selftest: TAP QEMU không có 'not ok'"
+        rc=1
+    fi
+    if "$PYTHON" "$HOSTPY" host --disk "$DISK" --fsutil "$FSUTIL" --phase 1 --records 1 \
+        >>"$plan" 2>&1; then
+        bad "red-selftest: kiểm host KHÔNG bắt được payload sai"
+        rc=1
+    else
+        echo "# red-selftest: host cũng báo đỏ đúng (fsutil get khác mô hình)"
+    fi
+    if [ "$FAILS" -eq 0 ] && [ "$rc" -eq 0 ]; then
+        echo "# red-selftest: PASS (QEMU + host đều phát hiện payload bị đổi trên đĩa)"
+        return 0
+    fi
+    return 1
+}
+
+print_summary() {
+    echo "# ================= BẢNG BOOT (test-persist) ================="
+    printf '%s' "$ROWS" | while IFS='|' read -r t s p d l; do
+        [ -n "${t:-}" ] || continue
+        printf '# boot=%-4s kết quả=%-8s pid=%-6s 0.1s=%-5s log=%s\n' "$t" "$s" "$p" "$d" "$l"
+    done
+    echo "# ============================================================"
+    echo "# pids:$PIDS (mỗi boot một tiến trình QEMU mới)"
+    local distinct
+    # D2-102: `pids` phải là số **PID phân biệt** — `sort -u` khử trùng, không đếm dòng.
+    distinct="$(printf '%s\n' $PIDS | sed '/^$/d' | sort -u | wc -l | tr -d ' ')"
+    if [ "${RUN_KIND:-run}" = "run" ]; then
+        # `phase_reboots` phải là **giá trị tính** từ PID thật của cặp boot (ghi/đọc lại), không
+        # được là hằng số trong dòng tổng kết (D2-102: dòng tổng kết cũng là evidence). Chỉ đếm
+        # cặp mà **cả hai** boot đã chạy xong (`$2 == "OK"`).
+        local pairs_ok
+        pairs_ok="$(printf '%s' "$ROWS" | awk -F'|' '
+            $2 == "OK" && $1 ~ /^b0[1-8]$/ { pid[$1] = $3 }
+            END {
+                n = 0
+                for (phase = 1; phase <= 7; phase++) {
+                    w = sprintf("b0%d", phase)
+                    v = sprintf("b0%d", phase + 1)
+                    if (pid[w] != "" && pid[v] != "" && pid[w] != pid[v]) n++
+                }
+                print n
+            }')"
+        echo "# reboot: boots=$BOOTS pids=$distinct phase_reboots=$pairs_ok (7 pha; mỗi pha ghi ở một tiến trình, đọc lại ở tiến trình KHÁC)"
+        # Bảng **pha ↔ boot ↔ pid**: bằng chứng từng pha thật sự qua hai tiến trình QEMU khác nhau.
+        printf '%s' "$ROWS" | awk -F'|' '
+            $2 == "OK" && $1 ~ /^b0[1-8]$/ { pid[$1] = $3 }
+            END {
+                for (phase = 1; phase <= 7; phase++) {
+                    w = sprintf("b0%d", phase)
+                    v = sprintf("b0%d", phase + 1)
+                    distinct = (pid[w] != "" && pid[v] != "" && pid[w] != pid[v]) ? 1 : 0
+                    printf "# phase_reboot: phase=%d write_boot=%s write_pid=%s verify_boot=%s verify_pid=%s distinct_process=%d\n", phase, w, pid[w], v, pid[v], distinct
+                }
+            }'
+    else
+        echo "# reboot: boots=$BOOTS pids=$distinct (red-selftest/đỏ trước: không phải kết quả pha)"
+    fi
+}
+
+main() {
+    local mode="${1:-run}"
+    RUN_KIND=run
+    [ "$mode" = "--red-selftest" ] && RUN_KIND=red
+    mkdir -p "$LOGDIR" || die "không tạo được $LOGDIR"
+    setup_tools
+    build_everything
+    case "$mode" in
+        --red-selftest)
+            echo "# chế độ: --red-selftest (chứng minh bộ kiểm bắt được đột biến)"
+            red_selftest || FAILS=$((FAILS + 1))
+            ;;
+        run | '')
+            fresh_disk
+            run_sequence || true
+            # D2-102: KHÔNG in bằng hằng. `phases`/`ok` đọc từ **log b08** (đã qua `check_log` —
+            # kernel tự đếm từ nhật ký `/pstate` trên đĩa); `neg` lấy từ kết quả **thật** của hai
+            # boot ca âm; `boots`/`host_checks` là bộ đếm của chính runner.
+            summary_phases="$(sed -n 's/^# persist: phases=\([0-9][0-9]*\) .*/\1/p' "$LOGDIR/b08.log" 2>/dev/null | head -1)"
+            summary_ok="$(sed -n 's/^# persist: phases=[0-9][0-9]* ok=\([0-9][0-9]*\) .*/\1/p' "$LOGDIR/b08.log" 2>/dev/null | head -1)"
+            neg=0
+            if grep -qx "ok 1 - persist noflush write" "$LOGDIR/b09.log" 2>/dev/null &&
+                grep -qx "ok 1 - persist noflush verify" "$LOGDIR/b10.log" 2>/dev/null; then
+                neg=1
+            fi
+            if [ -z "$summary_phases" ] || [ -z "$summary_ok" ]; then
+                bad "không đọc được phases/ok từ log b08 — dòng tổng kết không được in bằng hằng"
+            elif [ "$FAILS" -eq 0 ]; then
+                echo "# persist: phases=$summary_phases ok=$summary_ok boots=$BOOTS neg=$neg host_checks=$OK_BOOTS"
+            fi
+            ;;
+        *) die "tham số '$mode' không hiểu (dùng: --red-selftest)" ;;
+    esac
+    print_summary
+    if [ "$FAILS" -ne 0 ]; then
+        echo "# persist.sh: FAIL ($FAILS lỗi)"
+        return 1
+    fi
+    echo "# persist.sh: PASS"
+    return 0
+}
+
+main "${1:-run}"

@@ -55,6 +55,14 @@ name = "vifast-kbin-ktest-proc"
 path = "src/ktest_proc.rs"
 required-features = ["ktest", "user"]
 
+# KT-75: ảnh **persist** riêng — `test-persist` 7 pha qua **reboot QEMU thật** trên cùng ảnh
+# đĩa (nợ D2-111). Cùng feature `ktest,vblk` (PCI ECAM + virtio-blk); tách ảnh để `.text` của
+# 6 ảnh cũ không đổi (D2-109/D2-111: tách khi thêm đường mới).
+[[bin]]
+name = "vifast-kbin-ktest-persist"
+path = "src/ktest_persist.rs"
+required-features = ["ktest", "vblk"]
+
 # KT-72: ảnh **virtio-blk** riêng — cần `-drive`/`-device virtio-blk-pci`, nên tách khỏi 12 boot
 # matrix cũ (D2-109: ảnh `ktest` 92,6 % trần; task cho phép tách ảnh khi chạm trần).
 [[bin]]

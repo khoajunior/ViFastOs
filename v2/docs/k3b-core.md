@@ -1750,3 +1750,50 @@ Bằng chứng (nguyên văn từ log trong repo):
 ```text scope=kt74-ktest-matrix.log
 # KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
 ```
+
+## 23. KT-75 — `test-persist` bảy pha trên virtio-blk: mỗi pha **ghi ở một tiến trình QEMU**, đọc lại ở tiến trình **khác**, trên **cùng** ảnh đĩa (K6)
+
+Chi tiết + toàn bộ bằng chứng: [`k6-persist.md`](k6-persist.md). Quy ước (D2-112): **mọi số đo nằm
+trong khối** ```text scope=`<tệp-log>`` **và trích nguyên văn**; ngoài khối chỉ có **định danh**.
+
+- **Đóng nợ D2-111** (“`flush` bền qua reboot”): runner riêng `v2/test/boot/persist.sh` điều khiển
+  **mười** boot trên **một** file ảnh đĩa; ảnh test riêng `ktest-persist`
+  (`kernel/vifast-kbin-riscv64/src/ktest_persist.rs`, feature `ktest,vblk`). Mỗi boot nhận **kịch
+  bản** ở **LBA=0** (sector FS dành riêng: `stage()` từ chối LBA=0, `format` chỉ ghi số không một
+  lần, `Fs::initialize` chỉ đọc LBA=0 khi superblock hỏng — `fs.rs:800`), kernel **in lại** kịch
+  bản (kể cả `nonce`) để runner đối chiếu.
+- **Bảy pha hành vi khác nhau** — tạo file mới; ghi đè mở rộng; append tại EOF; truncate về không
+  rồi ghi lại; rename; xoá rồi tạo lại **cùng tên**; file lớn qua **double-indirect** — mỗi pha kết thúc
+  bằng `Fs::fsync()` rồi `halt`; pha đọc lại chỉ xanh khi **từng byte** khớp payload sinh lại trong
+  boot mới. Nhật ký pha `/pstate` để **boot cuối tự đếm** `phases`/`ok` từ **đĩa**, không từ biến RAM —
+  lưu ý `ok` in **bằng** `phases` (cùng một biến) nên **không** phải bằng chứng độc lập; bằng chứng là
+  `writes_ok`/`verifies_ok`/`records` cộng host so **từng byte** `/pstate` (nhãn ở `k6-persist.md` §3.1).
+- **Ca âm `flush`** (D2-108B): ảnh test đặt **cache ghi-bay-hơi mô phỏng** giữa FS và virtio-blk
+  (`write` vào RAM, `flush` mới đẩy + `T_FLUSH`). Chế độ ca âm **bỏ đúng** hiệu lực `flush` ⇒
+  `pending_blocks` lớn hơn không, `device_flushes=0`, `pushed=0`; boot sau **không** thấy tệp; host
+  kiểm sha256 ảnh **không đổi**. Giới hạn: QEMU ghi thẳng file host nên **không** tự làm mất dữ
+  liệu — cái được đo là **ranh giới bền**, không phải “QEMU mất dữ liệu”.
+- **Kiểm chứng host độc lập**: sau **mỗi** boot, `vifast-fsutil fsck` + `ls` + `stat` + `get` trên
+  **cùng** ảnh đĩa, so từng byte với mô hình Python **cài đặt độc lập**; `fsutil_mutated=0` chứng
+  minh kiểm host không sửa ảnh. Thêm **đối chứng host** trong `lib/vifast-fs/tests/kt75_persist_host.rs`.
+- **Đỏ trước + tự phá**: runner với ảnh **không** có persist ⇒ đỏ thật (log báo **thiếu** dòng
+  kịch bản); `--red-selftest` ghi đè payload trên đĩa bằng `vifast-fsutil put-file` ⇒ **cả** QEMU
+  **và** host phải đỏ.
+- **Cổng**: gate `v2 gate --fast` PASS (gồm ba test host mới), matrix **giữ nguyên** bảy ảnh (ảnh
+  persist do runner riêng điều khiển vì một pha là **hai** boot), conformance **đầy đủ**, soak
+  **không lỗi** trên **đúng** sha ảnh sản phẩm **không đổi** so D2-115, clippy **EXIT=0**; ảnh
+  `ktest-persist` **dưới trần** (không nới).
+
+```text scope=kt75-persist-run.log
+# persist: phases=7 ok=7 boots=10 neg=1 host_checks=10
+# reboot: boots=10 pids=10 phase_reboots=7 (7 pha; mỗi pha ghi ở một tiến trình, đọc lại ở tiến trình KHÁC)
+# persist.sh: PASS
+```
+
+```text scope=kt75-gate-summary.log
+TESTS=729 / SUITES=100
+```
+
+```text scope=kt75-ktest-matrix.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```

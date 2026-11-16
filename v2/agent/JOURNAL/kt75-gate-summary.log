@@ -1,0 +1,2 @@
+TESTS=729 / SUITES=100
+# nguồn: JOURNAL/kt75-gate.log (toàn bộ log cổng --fast, chép nguyên) — đếm 'passed' từng suite + số dòng 'test result' (KHÔNG sửa tay)

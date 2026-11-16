@@ -4,35 +4,31 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`885e72ba`** (nhánh `main`) + cây KT-73 (commit `[KT-73]` do lead thực hiện sau
-                reviewer). Cây OS không chạm `viscript/`, `crates/`, `review/`, `.agents/`,
-                `out-b.log`, `spec/`. **KT-73 DONE phần cài + đo**; freeze lần ba sau khi vá
-                D2-112 + các mục D2..D9 của reviewer.
-BUILD_ID      : ảnh **sản phẩm** `.text` **trùng** KT-71/72 — băm FNV-1a **`02ed5a1810ba59ce`**;
-                **ELF sha256 đổi so KT-72** (`2e9550bdb6b49483…` → `545cfb64…`) — **không xác
-                định được** phần đổi từ artifact trong repo (ELF KT-72 không có trong repo;
-                `.rodata`/`.data` ngoài digest `.text`) ⇒ **không suy đoán nguyên nhân**; soak
-                chạy đúng bản `sha256=545cfb64…`. Ngưỡng: trần không đổi, pin `Machine` — số
-                nguyên văn trong mục KT-73 cuối tệp. Mọi số đo của task nằm trong **khối trích
-                nguyên văn** ở mục KT-73 (D2-112) — **không** có số đo viết tay ngoài khối.
-Task          : **KT-73 (K6 — virtio-console + UART IRQ → user)** — DONE phần cài + đo (chờ
-                reviewer kiểm delta). Tóm tắt: (a) **UART RX IRQ → ring → U-mode** — nhánh RX
-                trong `plic::on_external_interrupt` (chỉ khi `IER.RX` bật; TX của KT-48 giữ
-                nguyên), drain `RBR` có trần, codec byte trên slot bốn word của ring KT-69, map
-                Frame vào VSpace U-mode; cửa sổ ngắt hẹp `rx_begin`/`rx_end` + vét cạn `RBR`;
-                (b) **shell đọc bàn phím thật** — bỏ message `LINE`, shell đọc byte từ ring, TAP
-                `shell help echo` phụ thuộc `ok_uart_path`; (c) **virtio-console** qua PCI của
-                KT-72 (`VirtioKind`), feature chỉ `VIRTIO_F_VERSION_1`, hai queue; (d) **ca âm** —
-                `read_try` trả `Busy`, ring đầy mã `NotEnoughMemory`; (e) **mutation** — tắt
-                đường bơm ⇒ TAP đỏ; (f) **BLOCKED** console trong ảnh sản phẩm (thiếu người nhận,
-                không phải trần).
-Nguồn số     : `v2/docs/k6-console.md` (D2-112) + `JOURNAL/kt73-*`. Script kiểm
-                `JOURNAL/kt73-verify-numbers.sh` (tự phá: `kt73-verify-selfbreak.sh`).
-Cổng gần nhất : gate **PASS**, matrix **PASS**, conformance **PASS**, soak **PASS** — số nguyên
-                văn trong mục KT-73 cuối tệp.
-Nợ / BLOCKED  : console trong ảnh sản phẩm (thiếu U-mode/shell — `BLOCKED.md`); nguồn byte ca
-                kiểm là loopback (không phải bàn phím người); console poll chưa ngắt; chưa có ca
-                IRQ storm thật; coverage tích hợp mới một ảnh.
+HEAD          : nền KT-75 là **`84e0df15`** (sau `[KT-00] D2-115`); trong lúc làm, dòng ViScript
+                commit **`93e1d418`** (chỉ `viscript/agent/`) ⇒ HEAD hiện tại `93e1d418`; **delta
+                KT-75 chưa commit** (lead commit theo pathspec). Cây OS của KT-75 chỉ thêm đường
+                persist (`ktest-persist`, runner `persist.sh`, mô hình host, test host); **không**
+                chạm `viscript/`, `crates/`, `review/`, `.agents/`, `out-b.log`, `spec/`.
+BUILD_ID      : ảnh **sản phẩm** **không đổi byte nào** so D2-115 — `sha256=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da`,
+                `build=ef566cfa583e34bb`, `text=49874`, `bytes=188552` (build **SẠCH** không
+                feature, D2-108A) ⇒ soak chạy lại trên **đúng** sha đó. Ảnh test mới
+                `ktest-persist` `data+bss=27352` ≤ `image_cap=262144` (không nới).
+Task          : **KT-75 (K6 — `test-persist` bảy pha trên virtio-blk)** — DONE phần cài + đo (chờ
+                reviewer kiểm delta). Tóm tắt: (a) ảnh test riêng `ktest-persist` chạy **một**
+                kịch bản/boot đọc từ **LBA=0**; (b) runner `persist.sh` điều khiển **mười** boot
+                trên **một** ảnh đĩa — mỗi pha **ghi** ở một tiến trình QEMU, **đọc lại** ở tiến
+                trình khác, so **từng byte**; (c) bảy pha: tạo/ghi đè/append/truncate/rename/
+                xoá+tạo lại/double-indirect; (d) nhật ký pha `/pstate` để boot cuối tự đếm
+                `phases`/`ok` **từ đĩa**; (e) **ca âm** `flush` bằng cache ghi-bay-hơi mô phỏng
+                (bỏ đúng hiệu lực `flush` ⇒ mất dữ liệu, sha ảnh **không đổi**); (f) kiểm chứng
+                **host độc lập** bằng `vifast-fsutil` sau **mỗi** boot; (g) **đỏ trước** + tự phá.
+Nguồn số     : `v2/docs/k6-persist.md` (D2-112) + `v2/docs/k3b-core.md` §23 + `JOURNAL/kt75-*`.
+                Script kiểm `JOURNAL/kt75-verify-numbers.sh` (tự phá: `kt75-verify-selfbreak.sh`).
+Cổng gần nhất : gate **PASS**, matrix **PASS**, conformance **PASS**, soak **PASS**, clippy
+                **EXIT=0** — số nguyên văn trong **khối trích** ở mục KT-75 cuối tệp.
+Nợ / BLOCKED  : ảnh **sản phẩm** vẫn **thiếu** U-mode/shell (D2-113 mở cho KT-76); ca âm `flush`
+                là **mô hình cache** (QEMU không tự mất dữ liệu); matrix **không** chứa ảnh
+                persist; chưa có SMP/ngắt trên ảnh persist; chưa có `fsync` từ U-mode.
 ```
 ```
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
@@ -3310,3 +3306,89 @@ sạch, trước mọi thay đổi của KT-74). Đổi sang khẳng định **d
   ảnh nhúng; VFS thật thuộc KT-75+.
 - `exec` chưa có ca SMP thật (chuỗi chạy trên hart boot; hart phụ park).
 - Ca chạm biên `MAX_INIT_PAGES` của loader chưa có.
+
+## KT-75 — `test-persist` bảy pha trên virtio-blk (K6)
+
+**Vào**: KT-74 DONE (D2-115); HEAD `84e0df15`; gate baseline PASS, số trong khối dưới.
+
+**Làm** — ảnh test riêng `ktest-persist` (`kernel/vifast-kbin-riscv64/src/ktest_persist.rs`,
+feature `ktest,vblk`) + runner `v2/test/boot/persist.sh` + mô hình host
+`v2/test/boot/persist_host.py` + đối chứng host `lib/vifast-fs/tests/kt75_persist_host.rs`.
+Mỗi boot nhận **kịch bản** ở **LBA=0** (sector FS dành riêng — `fs.rs:800` chỉ đọc khi superblock
+hỏng), kernel in lại **nguyên văn** (kể cả `nonce`). Mỗi pha **ghi** ở một tiến trình QEMU rồi
+**thoát**; tiến trình **mới** boot lại trên **cùng** ảnh đĩa và **đọc lại từng byte**. Nhật ký pha
+`/pstate` để boot cuối tự đếm `phases`/`ok` **từ đĩa**. Ca âm `flush`: cache ghi-bay-hơi mô phỏng,
+bỏ đúng hiệu lực `flush` ⇒ `pending_blocks` lớn hơn không + `device_flushes=0` + sha256 ảnh
+**không đổi** + boot sau **không** thấy tệp. Kiểm chứng host: `vifast-fsutil fsck` + `ls` + `stat` +
+`get` trên **cùng** ảnh sau **mỗi** boot, so từng byte với mô hình Python **độc lập**.
+
+**Số đo** (D2-112 — mỗi khối là **một** tệp log trong `JOURNAL/`, trích nguyên văn):
+
+```text scope=kt75-persist-run.log
+# persist: phases=7 ok=7 boots=10 neg=1 host_checks=10
+# reboot: boots=10 pids=10 phase_reboots=7 (7 pha; mỗi pha ghi ở một tiến trình, đọc lại ở tiến trình KHÁC)
+# persist.sh: PASS
+```
+
+```text scope=kt75-qemu-b08.log
+# persist: phases=7 ok=7 writes_ok=7 verifies_ok=7 records=14 const:phases_want=7 const:records_want=14
+# persist: total_ok=1
+```
+
+```text scope=kt75-host-b08.log
+# host: phase=7 records=14 files=3 fsck=1 fail=0 img_sha256=45b102d233fcc0a404f471369482ca4592599afb26832d25af63280324c2afba fsutil_mutated=0
+```
+
+```text scope=kt75-gate-summary.log
+TESTS=729 / SUITES=100
+```
+
+```text scope=kt75-ktest-matrix.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```
+
+```text scope=kt75-conformance.log
+ok - trace-compare: 61/61 dòng khớp, 5/5 ca (22:16 23:19 24:7 25:7 26:12), build=7304a40491224327
+```
+
+```text scope=kt75-soak.log
+# soak: 0/1000 lỗi (PASS)
+```
+
+```text scope=kt75-budget.log
+# image=ktest-persist path=/Users/mps/dvchd/ViFastOs/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-persist file=221248 data+bss=27352 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+```
+
+```text scope=kt75-product-sha.log
+BUILD_EXIT=0
+# bytes=188552
+digest build=ef566cfa583e34bb text=49874
+```
+
+```text scope=kt75-clippy-kernel.log
+# clippy host (v2 workspace, -D warnings): EXIT=0
+# clippy vifast-kbin-ktest-persist (all features, -D warnings): EXIT=0
+```
+
+**Ca âm / đỏ trước** (không phải nguồn số đo — D2-112c):
+
+```text scope-red=kt75-qemu-b09.log
+# persist: phase=neg action=noflush_write wrote=600 ok=1 flush_honored=0 flushes_ignored=7 device_flushes=0 pending_blocks=12 pushed=0 overflow=0 bytes_lost=6144 (=pending(12)*512)
+```
+
+```text scope-red=kt75-qemu-b10.log
+# persist: phase=neg action=verify_absent absent=1 p7_match=1 mismatched=0 phases=7 writes_ok=7 verifies_ok=7 records=14 sha_prefix=5fe3d3c0
+```
+
+```text scope-red=kt75-red-selftest.log
+# red-selftest: PASS (QEMU + host đều phát hiện payload bị đổi trên đĩa)
+```
+
+**Nợ** — ảnh sản phẩm **thiếu** U-mode/shell (D2-113, cho KT-76); bộ đếm **chưa có ca âm**
+(`overflow`, `size_bad`, `absent_bad`, `replayed`, `errors`, `id_mismatch`, `timeouts`,
+`recorded`/`fsync`/`durable`, `ok`/`phases`/`records`/`total_ok` — vì `ok` in bằng `phases`) — nhãn
+“chưa chứng minh” ở `k6-persist.md` §3.1, **không** dùng làm
+bằng chứng an toàn; ca âm `flush` là **mô hình cache**
+(QEMU không tự làm mất dữ liệu trên file host); matrix **không** chứa ảnh persist (một pha là
+**hai** boot ⇒ runner riêng, không nới mô hình `ktest.sh`); chưa có SMP/ngắt trên ảnh persist; chưa
+có `fsync` từ U-mode; chưa có ca torn-write (thuộc KT-71).
