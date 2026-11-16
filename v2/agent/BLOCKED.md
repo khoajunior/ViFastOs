@@ -334,3 +334,64 @@ không hồi quy, docs). Các phần **còn nợ có chủ**, không phải bloc
 8. **Coverage tích hợp không có**: không boot nào chạy **driver + 70 TAP kernel**, **driver +
    U-mode**, hay **driver + conformance** cùng lúc; tách ảnh giữ coverage **cũ**, không thêm tổ hợp.
 9. **Xung đột VA là thật** (`ktest_obj.rs:31` dùng `0x4000_0000`) — lý do tách ảnh, đã ghi docs.
+
+## KT-74 — `Tcb.SetTls` + `exec` chain: **DONE phần cơ chế** / **BLOCKED** phần ảnh sản phẩm
+
+**Đã đóng**: `Tcb.SetTls` (method id **do `spec/abi.toml` `[object].Tcb` cấp**, core lấy qua
+`vifast_abi::TCB_SETTLS`, **không** tự đặt số), `tls` lưu trong `TcbData`/`TcbInfo`, `x4`/`tp` của
+U-mode nạp từ core ở **mọi** lần resume; `exec(path)` nạp ELF mới **thay** ảnh, giữ `pid`/cspace,
+reset entry/stack/TLS/thanh ghi, **giải phóng** VSpace+Frame cũ, **nguyên tử** khi lỗi; chuỗi
+**ba** bước A→B→C mỗi bước chạy thật; TAP `ktest-exec` + matrix + gate + soak + docs.
+
+**Phát hiện kiến trúc (đáng chú ý cho mọi task sau)**: kernel dùng `tp` làm **hart id**
+(`read_hart_id`), còn `sret` xuống U-mode nạp **toàn bộ** GPR từ trapframe ⇒ trước KT-74 `tp` của
+user luôn `0` nên `hart_id()` trong handler U-mode đúng **nhờ may**; khi `SetTls` đặt `tp` khác `0`
+thì `current_hart()` trả rác (đo được `hart=7`) và `dispatch_on_private_stack` panic. Vá:
+`user::restore_kernel_tp()` nạp lại `tp` từ `USER_KERNEL_CTX[3]` ở đầu `on_u_exception`; đường
+`sret` về U-mode tự khôi phục `x4` từ frame nên **không** rò hart id sang user. Ghi ở
+`docs/k6-exec.md` §2.2.
+
+**BLOCKED (có văn bản, theo phương án (b) của D2-113): ảnh SẢN PHẨM vẫn KHÔNG có U-mode/shell.**
+- **Trần KHÔNG phải lý do**: `.data+.bss` ảnh sản phẩm `200696 / 262144` (headroom `61448`), và ảnh
+  **đã có** U-mode+procsrv+shell (`ktest-proc`) chỉ `207256 ≤ 262144`; ảnh U-mode mới
+  (`ktest-exec`) `202992 ≤ 262144`. Không nới trần, không cần tách ảnh vì trần.
+- **Lý do thật**: ảnh sản phẩm **không có đường dẫn nào tới U-mode** — `src/main.rs` (376 dòng)
+  không có `user::`/`include_bytes!`/`procsrv`/`shell`; `Cargo.toml:13` `default = []` và mọi bin
+  U-mode `required-features = ktest,user*`; **mọi** call-site `user::load_init_slot` nằm trong
+  `src/ktest_*.rs`. Đưa U-mode vào sản phẩm = **viết mới** policy procsrv + vòng scheduler U-mode
+  + đường bàn phím (ring UART) cho ảnh sản phẩm ⇒ **vượt ngân sách ba giờ** của KT-74.
+- **Hệ quả cho KT-76**: K6 "tương đương v1" **không** được nhận chỉ vì `ktest-proc` có shell; nợ
+  D2-113 chuyển nguyên trạng. Ảnh sản phẩm **đã đổi** (sha mới, `.text` mới) ⇒ soak **đã chạy
+  lại** trên đúng sha đó.
+
+**Ngưỡng đã công bố (KHÔNG nới)**: `size_of::<Machine>()` `188872 → 189384` (+`512` B = **một**
+`u64` TLS cho mỗi TCB × trần `MAX_TCBS`). Pin **196608** và trần **262144** giữ nguyên; ba mẫu
+evidence trong `v2/test/boot/ktest.sh` (`# core: link`, `# core: phase`, `# user core:`) được cập
+nhật **cùng lúc** để khớp số đo mới — đây là **đo lại**, không phải nới ngưỡng (D2-109C).
+
+**Sửa test host lỗi thời (công bố rõ)**: `capalloc_tests::capalloc_cap_thu_hoi_cap_lai_cung_slot`
+khẳng định `invoke::stats()` (bộ đếm **toàn cục**) `>= 4` cố định ⇒ **phụ thuộc thứ tự chạy**
+(đo được: ca này **FAIL một mình** trên HEAD sạch, trước mọi thay đổi của KT-74). KT-74 đổi sang
+khẳng định **delta** của chính ca (`Copy 2 · Revoke 2 · Delete 2`) — chặt hơn, không phụ thuộc
+lịch chạy; không đổi ngữ nghĩa sản phẩm.
+
+**Nợ còn lại**: ABI `Tcb.Exec(path)` (cần VFS thật, KT-75+); `exec` chưa có ca SMP thật (một hart
+chạy chuỗi); ca chạm biên `MAX_INIT_PAGES` chưa có; ảnh sản phẩm U-mode/shell = BLOCKED ở trên.
+
+**KT-74 — bổ sung bằng chứng cho reviewer (sau khi lead hỏi)**: (a) **ca âm `restore_kernel_tp`** —
+bỏ dòng đó trong `on_u_exception` ⇒ `hart_id()` đọc `tp` của user (`hart=7` = `0x7431_0001` cắt bởi
+`min(MAX_HARTS-1)`) ⇒ `PANIC: syscall stack chua cap` ngay syscall đầu, **không** tới được `ok` nào
+(`JOURNAL/kt74-red-tp.log`); khôi phục ⇒ md5 `user.rs` trùng, boot đạt đủ TAP. (b) **phép tính pin**
+được **test** `pin_machine_tang_dung_8_byte_moi_tcb` chứng minh `8 × MAX_TCBS` chứ không suy luận
+(`JOURNAL/kt74-pin-calc.log`). (c) **`capalloc_cap_thu_hoi_cap_lai_cung_slot` hỏng có sẵn**: chạy
+**một mình** trên worktree ở commit nền ⇒ đỏ (`JOURNAL/kt74-red-capalloc-head.log`) — bản sửa đổi
+sang khẳng định **delta**, không xoá assertion nào.
+
+**KT-74 — vá theo review (D1..D8)**: (D1) verifier chỉ miễn số **trong đúng dòng tiêu đề** + selfbreak
+có bước chèn số trần ở prose ⇒ ĐỎ; (D2) số `hart` nằm trong khối `scope-red` (`kt74-red-tp.log`);
+(D3) `exec` chụp/khôi phục bảng dải VA khi loader lỗi muộn — **chưa có ca kiểm** lỗi muộn vì
+`ObjKind::Untyped` không được object layer hỗ trợ (`v2/kernel/vifast-plat-common/src/obj/mod.rs:720`
+trả `NotSupported`) nên không dựng được untyped nhỏ để ép lỗi ⇒ **nợ có ca** cho KT-76, câu "nguyên
+tử" đã thu hẹp; (D5) ảnh A lấy method từ hằng sinh tự động, evidence `const:method_source=spec`;
+(D6) `ktest_inv` assert `delta.set_tls == 0`, `releases_clean` dùng `==`; (D7) sửa câu call-site
+(`src/proc_demo.rs`); (D8) chép toàn bộ gate log vào `JOURNAL/kt74-gate.log`.

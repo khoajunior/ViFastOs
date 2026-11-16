@@ -89,3 +89,10 @@ ktest-proc 10 10
 # KT-72; ghi/đọc byte (bằng chứng host: tệp `.out` của chardev có đúng byte guest ghi); ca âm
 # "không dữ liệu" (`Busy = 14`) và "ring đầy" (mã `9`, không ghi đè, đọc lại đúng thứ tự).
 ktest-con 5 5
+# **KT-74** (K6, `Tcb.SetTls` + `exec`): ảnh **`ktest-exec`** thứ bảy — `Tcb.SetTls` (method **15**
+# của `[object].Tcb`, số sinh từ spec) qua **invocation** từ U-mode (syscall 0) với bằng chứng `tp`
+# **quan sát tại trap** (phần cứng, không phải kernel tự khai); ca âm mã 18/5/3; `exec(path)` giữ
+# pid/cspace, VSpace mới, **không rò** `objects/frames/caps`; **chuỗi 3 bước** A→B→C mỗi bước chạy
+# thật (`exit` 3/4/1) với `recycled` suy ra (D2-106); thất bại (`path` lạ, ELF hỏng) **nguyên tử**;
+# TLS **reset** sau `exec` rồi `SetTls` lại ⇒ `tp` đổi theo. Matrix thành **7 ảnh × smp 1/2/4 = 21**.
+ktest-exec 6 6

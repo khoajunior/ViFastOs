@@ -1689,3 +1689,64 @@ ok - trace-compare: 61/61 dòng khớp, 5/5 ca (22:16 23:19 24:7 25:7 26:12), bu
 ```text scope=kt73-soak.log
 # soak: 0/1000 lỗi (PASS)
 ```
+
+## 22. KT-74 — `Tcb.SetTls` + `exec` chain: nạp ELF mới **thay** ảnh (K6)
+
+Chi tiết + lý do: [`k6-exec.md`](k6-exec.md). Quy ước **D2-112**: **mọi số đo nằm trong khối**
+`scope=<tệp-log>` **và trích nguyên văn**; ngoài khối chỉ có **định danh** (hex, số hiệu spec
+`x.y`, mã task, ngày, `file:line`). Script kiểm: `JOURNAL/kt74-verify-numbers.sh`; tự phá **trên bản copy**:
+`JOURNAL/kt74-verify-selfbreak.sh` (luật **F** của D2-113).
+
+- **`Tcb.SetTls` = invocation, không phải syscall**: `spec/abi.toml` `[object].Tcb` **đã có**
+  `SetTls`, nên KT-74 chỉ **cài đặt** (tiền lệ D2-97) — core dùng hằng sinh tự động
+  (`vifast_abi::TCB_SETTLS`), **không** chép số, **không** sửa `spec/` (D2-99 hết lượt).
+  Chữ ký `MR0 = tls`, `length` = **một**, trả `a1` = **không**; **arity chính xác** (D2-104) ⇒ thiếu/thừa là
+  `InvalidArgument`; cap thiếu `RIGHT_WRITE` ⇒ `InsufficientRights`; method/cap ngoài danh sách
+  trắng ⇒ `NotSupported` (không `Ok` giả).
+- **Nơi lưu + nạp vào user**: `TcbData.tls` + `TcbInfo.tls` (model-only `[TK]`); `apply_tls` ghi
+  `tf.x[REG_TP]` (= `x4`) ở **mọi** lần vào U-mode (`enter_with`, `run_task`, `exec_frame`). Ghi
+  ở **mọi** trạng thái sống; giá trị có hiệu lực ở lần resume **kế tiếp** — khác seL4
+  (`TCB_SetTLSBase` đòi `Inactive`), để chuỗi `exec → SetTls → resume` chạy được.
+- **Phát hiện kiến trúc — `tp` đang là hart id của kernel**: `read_hart_id` đọc `tp`, còn `sret`
+  xuống U-mode nạp **toàn bộ** GPR từ trapframe. Trước KT-74 `tp` của user luôn **không** nên
+  `hart_id()` trong handler U-mode đúng **nhờ may**; `SetTls` đặt `tp` khác **không** làm
+  `current_hart()` trả rác (đo được `hart=7`) ⇒ `dispatch_on_private_stack` panic. Vá:
+  `user::restore_kernel_tp()` nạp lại `tp` từ `USER_KERNEL_CTX` ở **đầu** `on_u_exception`; đường
+  `sret` về U-mode tự khôi phục `x4` từ frame nên **không** rò hart id sang user.
+- **Bằng chứng `tp` là phần cứng**: trap entry lưu **toàn bộ** GPR ⇒ `tf.x[REG_TP]` tại `ecall` **là**
+  `tp` của U-mode; **không** cần `mv ?, tp` trong chương trình U-mode (**không** `unsafe`, D2-93/D2-101).
+- **`exec(path)` là kernel-mediated** (ABI **không** có `Tcb.Exec`; không được thêm syscall —
+  cùng tiền lệ D2-96): nạp ELF mới vào VSpace mới bằng **cùng** loader (`user::load_init_slot`,
+  giữ `pid`), **không** tạo TCB mới (giữ cspace/cap/`fault_ep`); reset `sepc`/`sp`/thanh ghi/TLS;
+  giải phóng VSpace+Frame cũ; **nguyên tử** — mọi đường lỗi của loader đi qua `bail!` nên trả lại
+  tài nguyên vừa cấp, và ảnh cũ **chỉ** bị giải phóng **sau** khi ảnh mới nạp xong.
+- **Không rò**: `objects/frames/caps` in **trước → sau** mỗi bước + `check_objmem`; **ca âm** của
+  phép đo (D2-108B): bỏ `release_with` ⇒ `frames` tăng gấp đôi, TAP đỏ.
+- **R1**: ba tệp mới tách khỏi `user.rs` (`user_tls.rs`, `user_run.rs`, `user_ranges.rs`) để giữ
+  ≤ 1.500 dòng/tệp; `user` **tái xuất** đúng tên cũ nên ảnh test không đổi đường dẫn.
+- **Ngưỡng**: `size_of::<Machine>()` tăng **đúng một** `u64` TLS × trần `MAX_TCBS` (số đo trong
+  khối dưới + test `pin_machine_tang_dung_8_byte_moi_tcb`) — pin và trần ảnh **giữ nguyên**
+  (D2-84/85); ba mẫu evidence trong `test/boot/ktest.sh` cập nhật **cùng lúc** (đo lại, không nới —
+  D2-109C).
+- **Ảnh sản phẩm chưa có U-mode/shell** ⇒ nợ D2-113 **chuyển cho KT-76**; trần **không** phải lý
+  do (headroom lớn hơn ảnh U-mode quan sát được), lý do là ảnh sản phẩm **không có đường dẫn**
+  tới U-mode (`main.rs` không có `user::`/`include_bytes!`; `Cargo.toml` `default = []`).
+
+Bằng chứng (nguyên văn từ log trong repo):
+
+```text scope=kt74-qemu-ktest-exec.log
+# tls: set=0x74310001 observed_first=0 observed=0x74310001 method=15 const:method_source=spec traps=6 stats=2 sys0_calls=2 sys0_err=0 exit=1 exit2=1 tcb=0x3 tcb_tls=0x74310001 ok=1
+# tls neg: method_bad=18 arity0=5 arity2=5 cap_untyped=18 cap_ro=3 tls_giu=0x74310001 set_tls_unchanged=1 ok=1
+# exec: step=1 pid=0 tcb=3 cspace_same=1 old_vspace=2 new_vspace=14 vspace_changed=1 old_entry=0x40000000 new_entry=0x40000000 const:elf_linked_at_base=1 img_differ=1 img_a=8520 img_b=8496 freed=11 new_pages=11 exit=2 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 same=1 check=1 ok=1
+# exec chain: execs=3 pid=0 tcb=3 exits=3,4,1 recycled=33 freed=33 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 frames_same=1 objects_same=1 caps_same=1 total=4 ok=1
+# exec atomic: path_err=NotFound elf_err=Elf vspace_same=1 entry_same=1 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 frames_same=1 objects_same=1 caps_same=1 execs_total=4 ok=1
+# tls reset: after_exec=0x0 observed=0 exit1=4 set=0xb2 observed2=0xb2 exit2=4 tcb_tls=0xb2 execs_total=5 ok=1
+```
+
+```text scope=kt74-qemu-ktest.log
+# core: phase fails=0 static=189384 pin=196608 image_cap=262144
+```
+
+```text scope=kt74-ktest-matrix.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```

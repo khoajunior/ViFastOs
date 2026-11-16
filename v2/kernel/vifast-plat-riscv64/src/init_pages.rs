@@ -114,17 +114,39 @@ impl LoadedInit {
     /// các pha sau (ring) cần chỗ cho hai chương trình mới. `unmap` trước `revoke` vì `revoke`
     /// Frame còn mapping ⇒ `HasChildren`. Không đổi kết quả TAP nào (chỉ dọn tài nguyên).
     pub fn release(&self) {
-        let m = aobj::machine();
-        let mut index = 0;
-        while index < self.pages.len() {
-            let _ = m.unmap(self.vspace, self.pages.va(index));
-            // Bảng flush chỉ 16 slot: xả ngay sau mỗi unmap (không xả ⇒ `NoSlots` ở lần release
-            // sau và Frame không được trả).
-            let _ = m.drain_flushes(aobj::run_flush);
-            let _ = m.revoke(self.pages.cap(index));
-            index += 1;
-        }
-        let _ = m.revoke(self.vspace);
-        let _ = m.drain_flushes(aobj::run_flush);
+        release_pages(self.vspace, &self.pages);
     }
+}
+
+/// **KT-74** — giải phóng `pages` + VSpace `vspace` (dùng chung cho [`LoadedInit::release`] và
+/// đường **thất bại** của loader: `exec` hỏng phải **không** để lại Frame/VSpace mồ côi).
+///
+/// Trả về số Frame thật sự được thu hồi (`revoke` Frame thành công) — evidence `# exec:` đếm
+/// `freed=`; VSpace thu hồi riêng.
+pub fn release_pages(vspace: CapId, pages: &InitPages) -> usize {
+    release_with(aobj::machine(), vspace, pages)
+}
+
+/// Như [`release_pages`] nhưng dùng **`m` đang có** — loader đang giữ `&mut Machine` nên không
+/// được gọi `aobj::machine()` lần hai (hai `&mut` cùng lúc trên một static).
+pub fn release_with(
+    m: &mut vifast_plat_common::obj::Machine<aobj::PhysmapMem>,
+    vspace: CapId,
+    pages: &InitPages,
+) -> usize {
+    let mut freed = 0usize;
+    let mut index = 0;
+    while index < pages.len() {
+        let _ = m.unmap(vspace, pages.va(index));
+        // Bảng flush chỉ 16 slot: xả ngay sau mỗi unmap (không xả ⇒ `NoSlots` ở lần release
+        // sau và Frame không được trả).
+        let _ = m.drain_flushes(aobj::run_flush);
+        if m.revoke(pages.cap(index)).is_ok() {
+            freed += 1;
+        }
+        index += 1;
+    }
+    let _ = m.revoke(vspace);
+    let _ = m.drain_flushes(aobj::run_flush);
+    freed
 }

@@ -3186,3 +3186,127 @@ Hai ngưỡng của KT-73: **trần ảnh** (nguyên văn `budget=` trong khối
   console **poll** chưa dùng ngắt; chưa có ca **IRQ storm** thật; coverage tích hợp mới **một** ảnh.
 - `timeouts`/`id_mismatch` của console **chưa có ca âm** ⇒ **không** dùng làm bằng chứng (giữ trong
   `ok` như lưới hồi quy) — bảng ở `docs/k6-console.md` §5.2.
+
+## KT-74 — K6: `Tcb.SetTls` + `exec` chain (Agent 2)
+
+Chi tiết + lý do: [`docs/k6-exec.md`](../docs/k6-exec.md). Quy ước D2-112: **mọi số đo nằm trong
+khối trích nguyên văn** (mỗi dòng đúng một tệp log); ngoài khối chỉ có định danh. Script:
+`JOURNAL/kt74-verify-numbers.sh`; tự phá **trên bản copy**: `JOURNAL/kt74-verify-selfbreak.sh`.
+
+Phạm vi **DONE**: `Tcb.SetTls` (method id do `spec/abi.toml` `[object].Tcb` cấp — core lấy qua hằng
+sinh tự động, **không** tự đặt số), `tls` trong TCB, `x4`/`tp` của U-mode nạp từ core ở **mọi** lần
+resume, ca âm đủ mã; `exec(path)` nạp ELF mới **thay** ảnh, giữ `pid`/cspace, reset
+entry/stack/TLS/thanh ghi, giải phóng VSpace+Frame cũ, **nguyên tử** khi lỗi; chuỗi **ba** bước
+A→B→C chạy thật; TAP `ktest-exec` + matrix + gate + soak + docs.
+
+**Phát hiện kiến trúc**: kernel dùng `tp` làm **hart id**, còn `sret` xuống U-mode nạp toàn bộ GPR
+từ trapframe ⇒ trước KT-74 `tp` của user luôn bằng **không** nên `hart_id()` trong handler U-mode đúng
+**nhờ may**; khi `SetTls` đặt `tp` khác **không**, `current_hart()` trả rác và
+`dispatch_on_private_stack` panic. Vá bằng `user::restore_kernel_tp()` (nạp lại `tp` từ
+`USER_KERNEL_CTX` ở đầu handler; đường `sret` về U-mode tự khôi phục `x4` từ frame nên **không** rò
+hart id sang user). Ghi ở `docs/k6-exec.md` §2.2.
+
+### Kết quả đo (nguyên văn)
+
+```text scope=kt74-qemu-ktest-exec.log
+# exec rig: stvec=0x802000a0 untyped=0 core_untyped=1 images=5 cspace=2 tcb=3 tcb_cptr=1 tls_const=0x74310001
+# tls: set=0x74310001 observed_first=0 observed=0x74310001 method=15 const:method_source=spec traps=6 stats=2 sys0_calls=2 sys0_err=0 exit=1 exit2=1 tcb=0x3 tcb_tls=0x74310001 ok=1
+# tls neg: method_bad=18 arity0=5 arity2=5 cap_untyped=18 cap_ro=3 tls_giu=0x74310001 set_tls_unchanged=1 ok=1
+# exec: step=1 pid=0 tcb=3 cspace_same=1 old_vspace=2 new_vspace=14 vspace_changed=1 old_entry=0x40000000 new_entry=0x40000000 const:elf_linked_at_base=1 img_differ=1 img_a=8520 img_b=8496 freed=11 new_pages=11 exit=2 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 same=1 check=1 ok=1
+# exec chain: execs=3 pid=0 tcb=3 exits=3,4,1 recycled=33 freed=33 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 frames_same=1 objects_same=1 caps_same=1 total=4 ok=1
+# exec atomic: path_err=NotFound elf_err=Elf vspace_same=1 entry_same=1 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 frames_same=1 objects_same=1 caps_same=1 execs_total=4 ok=1
+# tls reset: after_exec=0x0 observed=0 exit1=4 set=0xb2 observed2=0xb2 exit2=4 tcb_tls=0xb2 execs_total=5 ok=1
+# exec final: c0 objects=17 frames=11 caps=14 vspaces=1 page_tables=3 mappings=11 -> objects=2 frames=0 caps=2 vspaces=0 page_tables=0 mappings=0 releases_clean=1 fail=0 execs_total=5
+PANIC: KT-74 tls va exec xong (6 TAP, 0 fail)
+```
+
+**Ca âm của phép đo "không rò"** (D2-108B): đột biến bỏ `release_with` ⇒ `frames` **tăng gấp đôi** (khối
+`scope-red` dưới) ⇒ TAP
+`exec giu pid cspace` **đỏ** (`same=0`); log `JOURNAL/kt74-red-qemu.log` (**không** dùng làm nguồn
+số, D2-112c).
+
+```text scope=kt74-ktest-matrix.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```
+
+```text scope=kt74-qemu-ktest-exec-smp2.log
+ok 6 - tls reset sau exec
+```
+
+```text scope=kt74-soak.log
+# soak: 0/1000 lỗi (PASS)
+```
+
+```text scope=kt74-product-sha.log
+fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+```
+
+```text scope=kt74-product-digest.log
+build=ef566cfa583e34bb text=49874
+```
+
+### Ảnh sản phẩm có U-mode chưa? — **KHÔNG** (BLOCKED có văn bản, D2-113)
+
+Trần **không** phải lý do: `.data+.bss` ảnh sản phẩm / trần (số trong khối budget bên dưới),
+và ảnh **đã có** U-mode+procsrv+shell (`ktest-proc`) có `data+bss` **nhỏ hơn** trần; lý do thật là ảnh sản phẩm
+**không có đường dẫn nào** tới U-mode (`main.rs:1-376` không có `user::`/`include_bytes!`;
+`Cargo.toml:13` `default = []`; mọi call-site `load_init_slot` nằm trong `src/ktest_*.rs`). Nợ
+D2-113 **chuyển nguyên trạng cho KT-76**; chi tiết + số ở `docs/k6-exec.md` §8 và `BLOCKED.md`.
+
+### Vá theo review (D1..D8)
+
+- **D1**: verifier chỉ miễn số **trong đúng dòng tiêu đề** (trước đây cờ `heading` không reset ⇒ miễn
+  cả prose); selfbreak có thêm bước **chèn số trần ở prose** ⇒ phải ĐỎ (đã chạy, xem log).
+- **D2**: `hart` (= `tls` bị cắt) là **số đo**, nên nằm trong khối `scope-red` (dưới), không ở prose.
+
+```text scope-red=kt74-red-tp.log
+# stack: chua cap cho hart=7 (init_syscall_stacks)
+PANIC: syscall stack chua cap
+```
+
+- **D3**: `exec` chụp/khôi phục **bảng dải VA** của ô tác vụ khi loader lỗi muộn
+  (`user::ranges_save`/`ranges_restore`); **chưa có ca kiểm** cho lỗi muộn (lý do + `file:line` ở
+  `docs/k6-exec.md` §6) ⇒ câu "nguyên tử" đã **thu hẹp** đúng bằng chứng, ghi nợ cho KT-76.
+- **D5**: ảnh U-mode A lấy method từ **hằng sinh tự động** (`vifast_abi::TCB_SETTLS`), không chép
+  số; evidence đổi thành `const:method_source=spec` (không còn so hai bản sao của cùng một giá trị).
+- **D6**: `ktest_inv` **assert** `delta.set_tls` bằng **không** (gộp vào `ok18`, có in `tls_delta`);
+  `releases_clean` đổi `≤` → **`==` không** (không còn Frame/mapping sau `release`).
+- **D7**: câu "mọi call-site trong `src/ktest_*.rs`" sửa thành "chỉ trong ảnh test + `src/proc_demo.rs`".
+- **D8**: chép **toàn bộ** gate log vào `JOURNAL/kt74-gate.log` (số `TESTS/SUITES` có nguồn trong repo).
+
+### Ca âm + phép tính (chuẩn bị cho reviewer)
+
+- **Ca âm `restore_kernel_tp`**: bỏ đúng dòng đó trong `on_u_exception` ⇒ `hart_id()` đọc `tp` của
+  user ⇒ panic ngay syscall đầu (log `JOURNAL/kt74-red-tp.log`); khôi phục ⇒ md5 `user.rs` trùng và
+  boot đạt đủ TAP.
+- **Phần tăng pin** không phải "hợp lý": test host `pin_machine_tang_dung_8_byte_moi_tcb` khẳng định
+  đúng đẳng thức `một u64 × MAX_TCBS` và vẫn dưới pin (log `JOURNAL/kt74-pin-calc.log`).
+- **Test `capalloc` hỏng có sẵn**: chạy **một mình** trên worktree ở commit nền ⇒ đỏ (bộ đếm toàn
+  cục, phụ thuộc lịch chạy) — log `JOURNAL/kt74-red-capalloc-head.log`; bản sửa của KT-74 khẳng
+  định **delta**, không xoá assertion.
+
+### Ngưỡng (KHÔNG nới)
+
+Hai ngưỡng: **pin** và **trần ảnh** (giá trị trong khối `# core: phase` / budget). `size_of::<Machine>()` tăng
+đúng **một** `u64` TLS mỗi TCB × trần `MAX_TCBS` (test `pin_machine_tang_dung_8_byte_moi_tcb`) — vẫn dưới pin; ba mẫu
+evidence trong `v2/test/boot/ktest.sh` cập nhật **cùng lúc** (đo lại, không nới — D2-109C).
+
+```text scope=kt74-qemu-ktest.log
+# core: phase fails=0 static=189384 pin=196608 image_cap=262144
+```
+
+### Sửa test host lỗi thời (công bố)
+
+`capalloc_tests::capalloc_cap_thu_hoi_cap_lai_cung_slot` khẳng định bộ đếm **toàn cục**
+`invoke::stats()` theo trị tuyệt đối ⇒ **phụ thuộc thứ tự chạy** (đo được: **FAIL một mình** trên HEAD
+sạch, trước mọi thay đổi của KT-74). Đổi sang khẳng định **delta** của chính ca (`Copy`/`Revoke`/`Delete`
+/`Delete`) — chặt hơn, không phụ thuộc lịch chạy.
+
+### Nợ / BLOCKED
+
+- **Ảnh sản phẩm U-mode/shell: BLOCKED** (trên) — K6 "tương đương v1" không được nhận nhờ shell
+  của ảnh test.
+- ABI `Tcb.Exec(path)` chưa có (không thêm syscall trong KT-74) — `path` hiện là khoá trong bảng
+  ảnh nhúng; VFS thật thuộc KT-75+.
+- `exec` chưa có ca SMP thật (chuỗi chạy trên hart boot; hart phụ park).
+- Ca chạm biên `MAX_INIT_PAGES` của loader chưa có.

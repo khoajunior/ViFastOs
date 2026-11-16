@@ -286,6 +286,9 @@ pub struct TcbInfo {
     pub donated_sc: Option<ObjId>,
     /// Notification đang bind (KT-27 — KT-59 chưa bind, luôn `None`).
     pub bound_notification: Option<ObjId>,
+    /// **KT-74** — con trỏ TLS (`Tcb.SetTls`, method 15 của `[object].Tcb`; KHÔNG phải
+    /// `Model` API của sim). `0` = chưa đặt. Kernel nạp giá trị này vào `x4`/`tp` khi resume.
+    pub tls: u64,
 }
 
 impl TcbState {

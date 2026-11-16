@@ -20,6 +20,9 @@ user = ["vifast-plat-riscv64/user"]
 # KT-73: ảnh `ktest-con` — UART RX IRQ → ring → U-mode + virtio-console hai queue. Ảnh sản phẩm
 # và các ảnh cũ **không** bật (giữ nguyên `.text`/mapping; xem `docs/k6-console.md` §6).
 con = ["ktest", "user", "vifast-plat-riscv64/vcon"]
+# KT-74: ảnh `ktest-exec` — `Tcb.SetTls` (core) + `exec(path)` (plat). Tách ảnh riêng để `.text`
+# của 6 ảnh cũ **không đổi** (D2-109/D2-111: tách khi chạm trần hoặc khi thêm đường mới).
+exec = ["ktest", "user", "vifast-plat-riscv64/exec"]
 
 [[bin]]
 name = "vifast-kbin-riscv64"
@@ -66,6 +69,14 @@ required-features = ["ktest", "vblk"]
 name = "vifast-kbin-ktest-con"
 path = "src/ktest_con.rs"
 required-features = ["ktest", "user", "con"]
+
+# KT-74: ảnh **exec + TLS** riêng — `Tcb.SetTls` (method 15) + `exec(path)` 3 bước A→B→C, đo
+# `objects/frames/caps` trước/sau để chứng minh không rò. Tách khỏi `ktest-user`/`ktest-proc` để
+# TAP/`.text` của chúng không đổi (D2-109: mỗi ảnh một ngân sách, không nới trần).
+[[bin]]
+name = "vifast-kbin-ktest-exec"
+path = "src/ktest_exec.rs"
+required-features = ["ktest", "user", "exec"]
 
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }

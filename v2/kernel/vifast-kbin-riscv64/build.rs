@@ -38,6 +38,11 @@ fn main() {
     println!("cargo:rerun-if-changed=init/ring_client_user.rs");
     // KT-73: consumer ring UART → U-mode (ảnh `ktest-con`).
     println!("cargo:rerun-if-changed=init/con_client_user.rs");
+    // KT-74: ba bước **A/B/C** của chuỗi `exec` — mỗi bước một ELF riêng (TAP `ktest-exec`).
+    println!("cargo:rerun-if-changed=init/exec_a_user.rs");
+    println!("cargo:rerun-if-changed=init/exec_b_user.rs");
+    println!("cargo:rerun-if-changed=init/exec_c_user.rs");
+    println!("cargo:rerun-if-changed=init/exec_d_user.rs");
     println!("cargo:rerun-if-changed=init/pager_common.rs");
     println!("cargo:rerun-if-changed=init/pager_client_common.rs");
     println!("cargo:rerun-if-changed=init/pager_server_user.rs");
@@ -130,6 +135,25 @@ fn main() {
         ("vifast_virtio", virtio_lib.as_path()),
     ];
     build_user_elf(dir, "con_client_user.rs", "con_client.elf", &shim_con);
+    // KT-74: **ba ảnh `exec`** — A/B/C chỉ in marker + `Exit` riêng, để `exec(path)` phải nạp ELF
+    // **khác** thật (entry/segment khác) chứ không phải "chạy lại cùng ảnh".
+    // D5 (reviewer): ảnh A phải lấy **method id từ hằng sinh tự động** (`vifast_abi::TCB_SETTLS`)
+    // chứ không chép số — cùng nguồn với core, nên `const` và `method` quan sát được là **hai**
+    // đường độc lập.
+    build_user_elf(
+        dir,
+        "exec_a_user.rs",
+        "exec_a.elf",
+        &[
+            ("vifast_user_abi", user_lib.as_path()),
+            ("vifast_abi", abi_lib.as_path()),
+        ],
+    );
+    build_user_elf(dir, "exec_b_user.rs", "exec_b.elf", &shim);
+    build_user_elf(dir, "exec_c_user.rs", "exec_c.elf", &shim);
+    // D = bước **không** `SetTls`: ca "TLS reset sau exec" + "SetTls rồi resume" cần ảnh không
+    // tự ghi TLS (nếu không, 0 và 0xB2 không phân biệt được).
+    build_user_elf(dir, "exec_d_user.rs", "exec_d.elf", &shim);
     // KT-70: **ba tiến trình** pager — server (page cache + LRU) và hai client.
     build_user_elf(dir, "pager_server_user.rs", "pager_server.elf", &shim_all);
     build_user_elf(

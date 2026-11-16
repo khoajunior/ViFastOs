@@ -63,6 +63,7 @@ use vifast_plat_common::user::{
 use vifast_plat_common::{Platform, PlatformWriter};
 
 use crate::obj as aobj;
+use crate::user_ranges::UserRanges;
 
 pub use crate::init_pages::LoadedInit;
 use crate::{debug_put_byte, mmu, Riscv64Virt};
@@ -71,7 +72,7 @@ use crate::{debug_put_byte, mmu, Riscv64Virt};
 pub use crate::user_stack::{init_syscall_stacks, print_stack_evidence};
 
 /// `sstatus.SUM` — S-mode được đọc/ghi trang `U=1` (privileged spec).
-const SSTATUS_SUM: u64 = 1 << 18;
+pub(crate) const SSTATUS_SUM: u64 = 1 << 18;
 
 /// `e_machine` của RISC-V ELF64 (EM_RISCV = 243).
 pub const EM_RISCV: u16 = 243;
@@ -91,9 +92,13 @@ pub const USER_STACK_GUARD_BOTTOM: u64 = USER_STACK_TOP - USER_STACK_BYTES - 0x1
 /// Đỉnh trang guard (đáy stack).
 pub const USER_STACK_GUARD_TOP: u64 = USER_STACK_TOP - USER_STACK_BYTES;
 
-/// Số dải VA user đọc được (`DebugPutStr`): mỗi `PT_LOAD` một dải + stack + trang IPC buffer.
-const MAX_USER_RANGES: usize = vifast_elf::MAX_LOAD_SEGMENTS + 2;
+/// Số tác vụ U-mode tối đa mà runtime đa nhiệm hỗ trợ (KT-65: procsrv + shell + con + dự phòng).
+/// Mỗi tác vụ có **bảng dải user riêng**: `DebugPutStr` phải kiểm con trỏ theo đúng VSpace đang
+/// chạy, không dùng bảng của lượt nạp trước (KT-53 chỉ có một tác vụ nên bảng là static đơn).
+pub const MAX_PROCS: usize = 4;
 
+/// Bảng dải `[base,end)` theo **ô tác vụ** (nạp bằng [`load_init_slot`], chọn bằng
+/// [`set_active_slot`]).
 /// VSpace của lượt U-mode gần nhất (để phân loại fault **sau khi** khôi phục root kernel).
 static LAST_VSPACE: AtomicU32 = AtomicU32::new(u32::MAX);
 /// ASID nhãn của VSpace đó — nhãn `FaultKind::Vm.vspace`.
@@ -103,66 +108,6 @@ static LAST_ASID: AtomicU64 = AtomicU64::new(0);
 /// (fault U-mode ⇒ log + halt). Đây là deviation **chỉ trong ảnh test**, ghi ở §19 docs.
 static USER_FAULT_RECOVER: AtomicU32 = AtomicU32::new(0);
 
-/// Bảng dải VA user **đã map** (ghi lúc nạp, đọc trong syscall) — thay cho `walk` PTE sau khi
-/// `satp` trỏ root user (root user **không** có physmap/high alias, xem
-/// [`crate::obj::copy_kernel_low_root`]). Mỗi dải là `[base, end)` đã làm tròn trang.
-struct UserRanges {
-    count: AtomicU32,
-    base: [AtomicU64; MAX_USER_RANGES],
-    end: [AtomicU64; MAX_USER_RANGES],
-}
-
-impl UserRanges {
-    const fn new() -> Self {
-        Self {
-            count: AtomicU32::new(0),
-            base: [const { AtomicU64::new(0) }; MAX_USER_RANGES],
-            end: [const { AtomicU64::new(0) }; MAX_USER_RANGES],
-        }
-    }
-
-    fn reset(&self) {
-        self.count.store(0, Ordering::Relaxed);
-    }
-
-    fn push(&self, base: u64, end: u64) -> bool {
-        let index = self.count.load(Ordering::Relaxed) as usize;
-        if index >= MAX_USER_RANGES || end <= base {
-            return false;
-        }
-        self.base[index].store(base, Ordering::Relaxed);
-        self.end[index].store(end, Ordering::Relaxed);
-        self.count.store(index as u32 + 1, Ordering::Release);
-        true
-    }
-
-    /// `[ptr, ptr+len)` nằm trọn trong **một** dải đã map (không vắt qua hai dải).
-    fn contains(&self, ptr: u64, len: u64) -> bool {
-        if len == 0 {
-            return true;
-        }
-        let Some(last) = ptr.checked_add(len - 1) else {
-            return false;
-        };
-        let count = self.count.load(Ordering::Acquire) as usize;
-        for index in 0..count {
-            let base = self.base[index].load(Ordering::Relaxed);
-            let end = self.end[index].load(Ordering::Relaxed);
-            if ptr >= base && last < end {
-                return true;
-            }
-        }
-        false
-    }
-}
-
-/// Số tác vụ U-mode tối đa mà runtime đa nhiệm hỗ trợ (KT-65: procsrv + shell + con + dự phòng).
-/// Mỗi tác vụ có **bảng dải user riêng**: `DebugPutStr` phải kiểm con trỏ theo đúng VSpace đang
-/// chạy, không dùng bảng của lượt nạp trước (KT-53 chỉ có một tác vụ nên bảng là static đơn).
-pub const MAX_PROCS: usize = 4;
-
-/// Bảng dải `[base,end)` theo **ô tác vụ** (nạp bằng [`load_init_slot`], chọn bằng
-/// [`set_active_slot`]).
 static RANGE_SLOTS: [UserRanges; MAX_PROCS] = [const { UserRanges::new() }; MAX_PROCS];
 /// Ô bảng dải mà `load_init_slot` kế tiếp ghi vào.
 static LOAD_SLOT: AtomicU32 = AtomicU32::new(0);
@@ -283,40 +228,37 @@ pub fn captured_prefix(slot: usize, out: &mut [u8]) -> usize {
     len
 }
 
-// ---------------------------------------------------------------------------------------------
-// KT-65 — đa nhiệm U-mode tuần tự (kernel làm scheduler; không thêm syscall)
-// ---------------------------------------------------------------------------------------------
-
-/// Vì sao một lượt [`run_task`] trả về S-mode.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Stop {
-    /// Tác vụ gọi `Exit` (syscall 14). `code` = mã thoát.
-    Exit { code: u64 },
-    /// Tác vụ gọi `Yield` (syscall 8) — điểm nhường CPU của scheduler.
-    Yield,
-    /// Tác vụ chặn trong core (không dùng ở KT-65; giữ để không panic).
-    Blocked(TcbState),
-    /// Tác vụ gọi `DebugHalt` (13).
-    Halt { code: u64 },
-    /// Tác vụ U-mode **fault VM** trong pha pager (KT-70): trapframe giữ `sepc` để **chạy lại
-    /// instruction** sau khi pager map trang; chi tiết qua [`pager_fault`]/[`pager_fault_count`].
-    Fault,
-}
-
-/// `1` ⇔ bật ngữ nghĩa đa nhiệm (chỉ pha demo KT-65). Mặc định `0` giữ nguyên KT-53/62: `Yield`
-/// đi vào core như mọi syscall, `Switched` là lỗi nặng (PANIC).
+/// `1` ⇔ bật ngữ nghĩa **đa nhiệm** của runtime U-mode (chỉ pha demo KT-65). Mặc định `0` giữ
+/// nguyên KT-53/62: `Yield` đi vào core như mọi syscall, `Switched` là lỗi nặng (PANIC).
 static MULTITASK: AtomicU32 = AtomicU32::new(0);
-/// Loại [`Stop`] lần gần nhất (0 = chưa có).
+/// Loại [`crate::user_run::Stop`] lần gần nhất (0 = chưa có) — `on_u_exception` ghi.
 static STOP_KIND: AtomicU32 = AtomicU32::new(0);
-/// Mã thoát của [`Stop::Exit`]/[`Stop::Halt`].
+/// Mã thoát của `Stop::Exit`/`Stop::Halt`.
 static STOP_CODE: AtomicU64 = AtomicU64::new(0);
+
 /// Bật/tắt ngữ nghĩa đa nhiệm của runtime U-mode.
 pub fn enable_multitask(on: bool) {
     MULTITASK.store(u32::from(on), Ordering::Relaxed);
 }
 
+/// Ghi loại/mã dừng của lượt chạy hiện tại — `on_u_exception` gọi **trước** khi trả về S-mode.
+pub(crate) fn stop(kind: u32, code: u64) {
+    STOP_CODE.store(code, Ordering::Relaxed);
+    STOP_KIND.store(kind, Ordering::Release);
+}
+
+/// Loại dừng lần gần nhất (số nguyên thô — `crate::user_run` dịch thành `Stop`).
+pub(crate) fn stop_kind() -> u32 {
+    STOP_KIND.load(Ordering::Acquire)
+}
+
+/// Mã thoát lần gần nhất.
+pub(crate) fn stop_code() -> u64 {
+    STOP_CODE.load(Ordering::Relaxed)
+}
+
 use crate::tf_store::save as save_tf;
-/// Bản sao trapframe của tác vụ vừa dừng ([`Stop::Yield`]/[`Stop::Exit`]).
+/// Bản sao trapframe của tác vụ vừa dừng (`Stop::Yield`/`Stop::Exit`).
 pub use crate::tf_store::saved as saved_tf;
 
 /// KT-70: API pager-fault ở [`crate::pager_fault`] (tách để giữ luật R1); `user` giữ đường dẫn cũ.
@@ -324,30 +266,23 @@ pub use crate::pager_fault::{
     pager_fault, pager_fault_count, pager_faults, set_pager_faults, PagerFault,
 };
 
-fn stop(kind: u32, code: u64) {
-    STOP_CODE.store(code, Ordering::Relaxed);
-    STOP_KIND.store(kind, Ordering::Release);
+/// Chụp bảng dải VA của **ô đang nạp** — `exec` lưu trước khi gọi loader và khôi phục nếu loader
+/// lỗi **muộn** (sau `reset()`), để ảnh cũ không chạy với bảng dải rác (D2-108B).
+pub(crate) fn ranges_save() -> UserRanges {
+    let saved = UserRanges::new();
+    loading_ranges().snapshot_into(&saved);
+    saved
 }
 
-fn saved_stop() -> Stop {
-    match STOP_KIND.load(Ordering::Acquire) {
-        1 => Stop::Exit {
-            code: STOP_CODE.load(Ordering::Relaxed),
-        },
-        2 => Stop::Yield,
-        3 => Stop::Blocked(TcbState::Inactive),
-        4 => Stop::Halt {
-            code: STOP_CODE.load(Ordering::Relaxed),
-        },
-        5 => Stop::Fault,
-        _ => Stop::Blocked(TcbState::Inactive),
-    }
+/// Khôi phục bảng dải VA đã chụp bằng [`ranges_save`].
+pub(crate) fn ranges_restore(saved: &UserRanges) {
+    saved.snapshot_into(loading_ranges());
 }
 
-/// Chạy một tác vụ U-mode từ `loaded` với trapframe `tf` (đã có `sepc`/`sp`/regs). Trả về khi
-/// tác vụ `Yield`/`Exit` (đa nhiệm) hoặc `DebugHalt`; `tf` **không** bị sửa tại chỗ — bản mới
-/// nằm ở [`saved_tf`]. `a0` của lần vào đầu là của caller (0 với chương trình KT-65).
-pub fn run_task(loaded: &LoadedInit, tf: &mut TrapFrame) -> Stop {
+/// `pub(crate)` — hạ `sret` xuống `loaded` với trapframe `tf` và **trả về** khi tác vụ dừng
+/// (`Yield`/`Exit`/`Halt`/`Fault`). Loại/mã dừng nằm ở [`stop_kind`]/[`stop_code`];
+/// [`crate::user_run::run_task`] là cái bọc công khai (tách để giữ R1).
+pub(crate) fn enter_loaded(loaded: &LoadedInit, tf: &mut TrapFrame) {
     LAST_VSPACE.store(u32::from(loaded.vspace.0), Ordering::Relaxed);
     LAST_ASID.store(u64::from(loaded.asid), Ordering::Relaxed);
     USER_FAULT_RECOVER.store(0, Ordering::Relaxed);
@@ -355,17 +290,20 @@ pub fn run_task(loaded: &LoadedInit, tf: &mut TrapFrame) -> Stop {
     tf.sstatus = current & !(SSTATUS_SPP | SSTATUS_SPIE | SSTATUS_SIE | SSTATUS_SUM);
     USER_TASK.begin_run(tf.sstatus & SSTATUS_SPP != 0);
     USER_TASK.record_enter_sstatus(tf.sstatus);
+    // KT-74: `tp` của lượt resume **luôn** lấy từ core (SetTls/exec) — không giữ giá trị cũ
+    // trong trapframe của lần chạy trước.
+    crate::user_tls::apply_tls(tf);
     STOP_KIND.store(0, Ordering::Release);
     if !aobj::switch_root(loaded.root, loaded.asid) {
         let _ = aobj::restore_kernel_root();
-        return Stop::Blocked(TcbState::Inactive);
+        stop(3, 0);
+        return;
     }
-    // SAFETY: như `enter_with` — trapframe do scheduler dựng từ lần nạp/trap trước; `user_enter`
-    // chỉ quay lại qua `user_exit_resume` sau khi handler gọi `exit_to_kernel`.
+    // SAFETY: trapframe do scheduler dựng từ lần nạp/trap trước; `user_enter` chỉ quay lại qua
+    // `user_exit_resume` sau khi handler gọi `exit_to_kernel`.
     unsafe { user_enter(tf as *const TrapFrame) };
-    // KT-65: cùng lý do `enter_with` — trả về S-mode với `satp` kernel để scheduler/physmap chạy.
+    // KT-65: trả về S-mode với `satp` kernel để scheduler/physmap chạy.
     let _ = aobj::restore_kernel_root();
-    saved_stop()
 }
 
 /// Trạng thái tác vụ user (TCB-like tối thiểu) — TAP đọc sau mỗi lượt.
@@ -435,8 +373,19 @@ pub fn core_tcb() -> Option<ObjId> {
     }
 }
 
+/// **KT-74** — `Stop`/`run_task` chuyển sang [`crate::user_run`] cho R1; tái xuất để ảnh test
+/// giữ nguyên đường dẫn `crate::user::{Stop, run_task}`.
+pub use crate::user_run::{run_task, Stop};
+/// **KT-74** — API TLS/`exec` giữ **cùng đường dẫn** `crate::user::*` cho ảnh test; cài đặt nằm ở
+/// module riêng [`crate::user_tls`] để giữ luật R1 (≤ 1.500 dòng/tệp).
+pub use crate::user_tls::{apply_tls, exec_frame, record_tls_trap, tls_observed, tls_trap_count};
+
+/// Lỗi parse ELF mà `LoadError::Elf` mang — tái xuất để ảnh test so **đúng biến thể** (ca
+/// "exec thất bại nguyên tử" của KT-74) mà không phải thêm dependency `vifast-elf` cho kbin.
+pub use vifast_elf::ElfError as ElfParseError;
+
 /// Lỗi nạp `init` — đủ để TAP in/log, **không panic** trong đường nạp.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadError {
     /// ELF không hợp lệ (`vifast-elf`).
     Elf(ElfError),
@@ -501,20 +450,41 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
     let vspace = m
         .retype(untyped, ObjKind::VSpace, 0)
         .map_err(LoadError::Obj)?;
-    let root = m.vspace_root_pa(vspace).map_err(LoadError::Obj)?;
-    let asid = m.vspace_asid(vspace).map_err(LoadError::Obj)?;
+    // KT-74: danh sách trang của lần nạp **này** — khai báo ngay sau VSpace để **mọi** đường
+    // lỗi phía dưới dùng được `bail!` (trả lại Frame/VSpace, không mồ côi).
+    let mut init_pages = crate::init_pages::InitPages::new();
+    // KT-74 (atomic của `exec`): từ đây **mọi** đường lỗi phải trả Frame/VSpace vừa cấp — nếu
+    // không, `exec` hỏng để lại tài nguyên mồ côi và phép đo "objects/frames/caps bằng nhau"
+    // của `exec` sẽ sai. `parse` + kiểm W^X/overlap ở **trên** đã chạy trước khi cấp bất cứ thứ
+    // gì, nên lỗi hình dạng ELF không bao giờ tới đây; các lỗi còn lại (Obj/Physmap/Image) đều
+    // đi qua `bail!`.
+    macro_rules! bail {
+        ($pages:expr, $e:expr) => {{
+            // `m` đang giữ ⇒ dùng `release_with` (không gọi `aobj::machine()` lần hai). Truyền
+            // `$pages` qua **đối số macro** vì macro hygiene: `init_pages` khai báo sau macro.
+            crate::init_pages::release_with(m, vspace, &$pages);
+            return Err($e);
+        }};
+    }
+    let root = match m.vspace_root_pa(vspace) {
+        Ok(root) => root,
+        Err(e) => bail!(init_pages, LoadError::Obj(e)),
+    };
+    let asid = match m.vspace_asid(vspace) {
+        Ok(asid) => asid,
+        Err(e) => bail!(init_pages, LoadError::Obj(e)),
+    };
     // Chỉ chép **nửa thấp** root kernel (index 0..256 trừ cửa sổ user index 1) để kernel sống
     // khi `satp` trỏ root user; **không** chép nửa cao (high alias/physmap) — U-mode không có
     // đường PTE nào tới đó, và syscall không được dùng physmap sau khi đổi `satp`.
     if !aobj::copy_kernel_low_root(root, USER_ROOT_INDEX) {
-        return Err(LoadError::Physmap);
+        bail!(init_pages, LoadError::Physmap);
     }
     loading_ranges().reset();
 
     let mut text_pages = 0usize;
     let mut ro_pages = 0usize;
     let mut data_pages = 0usize;
-    let mut init_pages = crate::init_pages::InitPages::new();
     for segment in image.segments() {
         let flags = MapFlags {
             read: true,
@@ -528,10 +498,14 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
         let file_end = segment.vaddr + segment.file_size as u64;
         for index in 0..pages {
             let va = first_page + (index as u64) * 4096;
-            let frame = m
-                .retype(untyped, ObjKind::Frame, 12)
-                .map_err(LoadError::Obj)?;
-            let pa = m.frame_pa(frame).map_err(LoadError::Obj)?;
+            let frame = match m.retype(untyped, ObjKind::Frame, 12) {
+                Ok(frame) => frame,
+                Err(e) => bail!(init_pages, LoadError::Obj(e)),
+            };
+            let pa = match m.frame_pa(frame) {
+                Ok(pa) => pa,
+                Err(e) => bail!(init_pages, LoadError::Obj(e)),
+            };
             // Phần file rơi vào trang này (phần còn lại zero-fill).
             let page_end = va + 4096;
             let copy_start = va.max(segment.vaddr);
@@ -542,7 +516,7 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
                 let start = usize::try_from(offset).map_err(|_| LoadError::Image)?;
                 let end = usize::try_from(offset + len).map_err(|_| LoadError::Image)?;
                 if end > bytes.len() {
-                    return Err(LoadError::Image);
+                    bail!(init_pages, LoadError::Image);
                 }
                 (start, len as usize)
             } else {
@@ -550,14 +524,16 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
             };
             let data = &bytes[file_start..file_start + copy_len];
             if !write_page(pa, data) {
-                return Err(LoadError::Physmap);
+                bail!(init_pages, LoadError::Physmap);
             }
-            m.map(vspace, va, frame, flags).map_err(LoadError::Obj)?;
+            if let Err(e) = m.map(vspace, va, frame, flags) {
+                bail!(init_pages, LoadError::Obj(e));
+            }
             if !init_pages.push(va, frame) {
-                return Err(LoadError::Image);
+                bail!(init_pages, LoadError::Image);
             }
             if index == 0 && !loading_ranges().push(va, va + (pages as u64) * 4096) {
-                return Err(LoadError::Image);
+                bail!(init_pages, LoadError::Image);
             }
             if segment.executable() {
                 text_pages += 1;
@@ -573,20 +549,25 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
     let mut stack_pages = 0usize;
     let mut stack_va = USER_STACK_GUARD_TOP;
     while stack_va < USER_STACK_TOP {
-        let frame = m
-            .retype(untyped, ObjKind::Frame, 12)
-            .map_err(LoadError::Obj)?;
-        let pa = m.frame_pa(frame).map_err(LoadError::Obj)?;
+        let frame = match m.retype(untyped, ObjKind::Frame, 12) {
+            Ok(frame) => frame,
+            Err(e) => bail!(init_pages, LoadError::Obj(e)),
+        };
+        let pa = match m.frame_pa(frame) {
+            Ok(pa) => pa,
+            Err(e) => bail!(init_pages, LoadError::Obj(e)),
+        };
         if !write_page(pa, &[]) {
-            return Err(LoadError::Physmap);
+            bail!(init_pages, LoadError::Physmap);
         }
-        m.map(vspace, stack_va, frame, MapFlags::RW_NX_USER)
-            .map_err(LoadError::Obj)?;
+        if let Err(e) = m.map(vspace, stack_va, frame, MapFlags::RW_NX_USER) {
+            bail!(init_pages, LoadError::Obj(e));
+        }
         if !init_pages.push(stack_va, frame) {
-            return Err(LoadError::Image);
+            bail!(init_pages, LoadError::Image);
         }
         if stack_pages == 0 && !loading_ranges().push(USER_STACK_GUARD_TOP, USER_STACK_TOP) {
-            return Err(LoadError::Image);
+            bail!(init_pages, LoadError::Image);
         }
         stack_pages += 1;
         stack_va += 4096;
@@ -596,21 +577,26 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
     // `spec/abi.toml` dòng 58 chốt header IPC buffer chứa receive window (CPTR, ≤4 cap); shim
     // U-mode + kernel đọc/ghi cùng VA cố định này. Nằm trong cùng bảng cấp 1 với ảnh/stack
     // (0x4002_0000 ⇒ level-1 index 0) nên **không** cần bảng trang mới.
-    let ipc_frame = m
-        .retype(untyped, ObjKind::Frame, 12)
-        .map_err(LoadError::Obj)?;
-    let ipc_pa = m.frame_pa(ipc_frame).map_err(LoadError::Obj)?;
+    let ipc_frame = match m.retype(untyped, ObjKind::Frame, 12) {
+        Ok(frame) => frame,
+        Err(e) => bail!(init_pages, LoadError::Obj(e)),
+    };
+    let ipc_pa = match m.frame_pa(ipc_frame) {
+        Ok(pa) => pa,
+        Err(e) => bail!(init_pages, LoadError::Obj(e)),
+    };
     if !write_page(ipc_pa, &[]) {
-        return Err(LoadError::Physmap);
+        bail!(init_pages, LoadError::Physmap);
     }
     let ipc_va = crate::ipc_buffer::USER_IPC_BUFFER_VA;
-    m.map(vspace, ipc_va, ipc_frame, MapFlags::RW_NX_USER)
-        .map_err(LoadError::Obj)?;
+    if let Err(e) = m.map(vspace, ipc_va, ipc_frame, MapFlags::RW_NX_USER) {
+        bail!(init_pages, LoadError::Obj(e));
+    }
     if !init_pages.push(ipc_va, ipc_frame) {
-        return Err(LoadError::Image);
+        bail!(init_pages, LoadError::Image);
     }
     if !loading_ranges().push(ipc_va, ipc_va + 4096) {
-        return Err(LoadError::Image);
+        bail!(init_pages, LoadError::Image);
     }
 
     // Đi lại PTE thật để chứng minh quyền leaf (không tin cờ lúc map): `W+X` = 0, text có X,
@@ -620,7 +606,10 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
     for segment in image.segments() {
         let mut va = segment.vaddr & !0xfff;
         for _ in 0..segment.page_count() {
-            let walk = m.walk(vspace, va).map_err(LoadError::Obj)?;
+            let walk = match m.walk(vspace, va) {
+                Ok(walk) => walk,
+                Err(e) => bail!(init_pages, LoadError::Obj(e)),
+            };
             let raw = walk.raw;
             let read = raw & PTE_READ != 0;
             let write = raw & PTE_WRITE != 0;
@@ -732,6 +721,8 @@ fn enter_with(
     // `a0` = mode; các thanh ghi khác 0 (không lộ địa chỉ kernel cho user).
     tf.x[REG_A0] = mode;
     tf.sepc = loaded.entry;
+    // KT-74: TLS từ core (mặc định 0 khi chưa `SetTls`).
+    crate::user_tls::apply_tls(&mut tf);
     let current = read_sstatus();
     // U-mode: SPP=0; tắt SIE/SPIE/SUM (không cho ngắt S-mode chen vào U-phase; syscall không
     // cần ngắt). Giữ nguyên UXL/FS và các bit WARL khác của sstatus.
@@ -855,11 +846,15 @@ extern "C" fn syscall_on_private_stack() {
 /// - Fault ⇒ ghi `USER_TASK`/`TRAP_STATS`, in `# u-mode fault:` rồi `PANIC: u-mode fault …` +
 ///   `DebugHalt(1)` — không treo, không resume.
 pub fn on_u_exception(tf: &mut TrapFrame, exc: &Exception) {
+    crate::user_tls::restore_kernel_tp();
     let saved = *tf;
     if exc.kind == ExceptionKind::EnvironmentCallFromU {
         // Bằng chứng phần cứng: sstatus **ngay sau trap** từ U-mode (SPP=0, SIE=0, SPIE=0, SUM=0).
         USER_TASK.record_trap_sstatus(read_sstatus());
         USER_TASK.record_ecall(exc.from_supervisor);
+        // KT-74: `tp` của U-mode **tại trap** (không phải giá trị kernel tự khai) — evidence
+        // `# tls:`. RISC-V: `tp` = `x4`; trap entry đã lưu đủ GPR nên đọc thẳng từ frame.
+        crate::user_tls::record_tls_trap(tf);
         let nr = tf.reg(REG_A7);
         let args = [
             tf.arg(0),
@@ -1320,7 +1315,7 @@ fn with_kernel_root<R>(f: impl FnOnce() -> R) -> Result<R, u64> {
 }
 
 /// Đọc `sstatus` (giữ UXL/FS; loader tự xoá SPP/SPIE/SIE/SUM).
-fn read_sstatus() -> u64 {
+pub(crate) fn read_sstatus() -> u64 {
     let value: u64;
     // SAFETY: chỉ đọc CSR `sstatus` của hart hiện tại.
     unsafe { asm!("csrr {}, sstatus", out(reg) value, options(nomem, nostack)) };

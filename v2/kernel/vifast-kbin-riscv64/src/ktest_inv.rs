@@ -221,6 +221,9 @@ pub fn invocation_phase(
         moved: stats.moved.saturating_sub(before.moved),
         delete: stats.delete.saturating_sub(before.delete),
         revoke: stats.revoke.saturating_sub(before.revoke),
+        // KT-74: `Tcb.SetTls` — pha KT-67a không gọi method này ⇒ delta phải **0** (giữ nguyên
+        // khẳng định cũ, không nới).
+        set_tls: stats.set_tls.saturating_sub(before.set_tls),
     };
     let fault = FAULT_STATS.last();
     let mut frame_obj = 0u32;
@@ -306,10 +309,11 @@ pub fn invocation_phase(
         );
         let _ = writeln!(
             w,
-            "# inv: deny err={} stats={} allowed={} last_err={} syscalls={} entries={}",
+            "# inv: deny err={} stats={} allowed={} tls_delta={} last_err={} syscalls={} entries={}",
             user::sys_err(0),
             delta.denied,
             delta.allowed,
+            delta.set_tls,
             user::sys_err(0),
             snap.syscalls,
             snap.entries
@@ -377,7 +381,10 @@ pub fn invocation_phase(
         PLATFORM.put_str("not ok 17 - invocation frame unmap va fault: mapping/fault sai\n");
         *fails += 1;
     }
-    let ok18 = delta.denied == 3 && delta.allowed == 3 && user::sys_err(0) == 18;
+    // D6 (reviewer KT-74): câu "delta `set_tls` phải **0**" phải được **assert**, không chỉ nói —
+    // pha invocation (KT-67a) **không** gọi `Tcb.SetTls`, nên gộp vào `ok18` để nó có hiệu lực.
+    let ok18 =
+        delta.denied == 3 && delta.allowed == 3 && delta.set_tls == 0 && user::sys_err(0) == 18;
     if ok18 {
         PLATFORM.put_str("ok 18 - invocation ngoai danh sach\n");
     } else {

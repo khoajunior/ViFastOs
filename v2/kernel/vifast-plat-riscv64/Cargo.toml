@@ -23,6 +23,10 @@ vblk = ["ktest"]
 # KT-73: PCI (dùng lại của KT-72) + virtio-console 2 queue — chỉ ảnh `ktest-con`. Ảnh sản phẩm
 # **không** bật (chưa có người nhận U-mode — xem `docs/k6-console.md` §6, `BLOCKED` có `file:line`).
 vcon = ["ktest"]
+# KT-74: `exec(path)` (nạp ELF mới thay ảnh hiện tại) — chỉ ảnh `ktest-exec`; module `exec` cần
+# loader U-mode nên kéo theo `user`. Ảnh sản phẩm **không** bật (chưa có U-mode/shell — nợ D2-113
+# ghi `BLOCKED` có số ở `docs/k6-exec.md` §7).
+exec = ["user"]
 
 [dependencies]
 vifast-plat-common = { path = "../vifast-plat-common" }

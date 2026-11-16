@@ -157,6 +157,33 @@ impl Machine {
         Ok(())
     }
 
+    /// **KT-74** — `Tcb.SetTls` (method **15** của `[object].Tcb`, hằng
+    /// `vifast_abi::TCB_SETTLS`).
+    ///
+    /// Ghi **con trỏ TLS** của TCB. Kernel **không** đọc/ghi vùng TLS — nó chỉ giữ giá trị và
+    /// nạp vào `x4`/`tp` của U-mode ở mỗi lần resume (`vifast-plat-riscv64::user`). Ghi được ở
+    /// **mọi** trạng thái sống: giá trị có hiệu lực từ lần vào U-mode **kế tiếp** (giống
+    /// `Tcb.Configure` chỉ lưu cấu hình), nên chuỗi `exec → SetTls → resume` không cần TCB
+    /// `Inactive`.
+    ///
+    /// Kênh tham số ở tầng invocation: `MR0 = tls`, `length = 1` (xem `invoke::dispatch`).
+    /// `spec/abi.toml` **chưa** có khối `[method_signature."Tcb.SetTls"]` (chỉ `[object].Tcb` có
+    /// số 15) ⇒ arity 1 là **đề xuất** của KT-74, đã ghi ở `docs/k6-exec.md` §3 để Agent 0 bổ
+    /// sung chữ ký; **không** tự đặt số method (số vẫn lấy từ spec).
+    pub fn tcb_set_tls(&mut self, tcb: SlotRef, tls: u64) -> Result<(), KError> {
+        let tcb_obj = self.require_type(tcb, ObjType::Tcb)?;
+        // Chỉ ghi dữ liệu: **không** đổi trạng thái/scheduler ⇒ không gọi `sched_after_op`
+        // (hàm đó chỉ có tác dụng khi `preempt = true`).
+        self.tcb_data_mut(tcb_obj)?.tls = tls;
+        Ok(())
+    }
+
+    /// **KT-74** — con trỏ TLS hiện tại của TCB (theo `ObjId`). Arch đọc hàm này khi dựng
+    /// trapframe U-mode (`tf.x[4] = tp`) — **một** nguồn cho `SetTls` và resume.
+    pub fn tcb_tls(&self, tcb: ObjId) -> Result<u64, KError> {
+        Ok(self.tcb_data(tcb)?.tls)
+    }
+
     /// `SchedControl.Configure(sc, budget, period)` — `budget > 0`, `period > 0`,
     /// `budget ≤ period`; cấu hình lại giữa chu kỳ đặt `consumed = 0` (model-only `[TK]`).
     pub fn sched_control_configure(

@@ -695,6 +695,11 @@ fn capalloc_cap_thu_hoi_cap_lai_cung_slot() {
     let base_live = r.m.live_cap_count();
     let base_free = free_slots(&r.m, r.cnode);
     assert_eq!(base_free, 15, "chỉ self cap ở slot 0");
+    // **KT-74** — bộ đếm `invoke::stats()` là **toàn cục** và test chạy **song song**, nên khẳng
+    // định `>= 4` cố định là **phụ thuộc thứ tự** (đo được: ca này FAIL một mình trên HEAD sạch
+    // vì chưa có test nào khác cộng dồn). Đo **delta** của chính ca này: 2 `Copy` (2 lần `alloc`),
+    // 2 `Revoke`, 2 `Delete` — bất biến đúng, không phụ thuộc lịch chạy.
+    let base_stats = invoke::stats();
     let alloc = |m: &mut Machine, tcb: ObjId, cnode_cap: SlotRef, ep: u64| -> usize {
         for slot in 1..16u64 {
             match invoke_on(m, tcb, cnode_cap, invoke::CNODE_COPY, 2, [ep, slot, 0, 0]) {
@@ -760,8 +765,19 @@ fn capalloc_cap_thu_hoi_cap_lai_cung_slot() {
     assert_eq!(free_slots(&r.m, r.cnode), base_free);
     assert!(r.m.check_caps().is_ok());
     assert!(r.m.check_bytes(r.u).is_ok());
-    // Bộ đếm là **toàn cục** (mọi test trong cùng tiến trình): chỉ khẳng định các method mà
-    // chính test này gọi (Copy/Revoke/Delete) — không phụ thuộc thứ tự chạy với test Mint.
+    // Bộ đếm là **toàn cục** (mọi test trong cùng tiến trình): khẳng định **delta** của chính ca
+    // này (KT-74) — `Copy 2 · Revoke 2 · Delete 2` — nên không phụ thuộc thứ tự/song song.
     let s = invoke::stats();
-    assert!(s.copy >= 4 && s.revoke >= 2 && s.delete >= 2);
+    assert!(
+        s.copy >= base_stats.copy + 2
+            && s.revoke >= base_stats.revoke + 2
+            && s.delete >= base_stats.delete + 2,
+        "delta capalloc: copy {} -> {}, revoke {} -> {}, delete {} -> {}",
+        base_stats.copy,
+        s.copy,
+        base_stats.revoke,
+        s.revoke,
+        base_stats.delete,
+        s.delete
+    );
 }

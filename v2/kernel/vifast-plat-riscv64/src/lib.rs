@@ -71,6 +71,10 @@ pub mod init_pages;
 pub mod ipc_buffer;
 pub mod ipi;
 // KT-67: cầu nối D2-83 (core giữ cap ↔ object layer giữ Frame/PA) cho memsrv.
+/// **KT-74** `exec(path)` — nạp ELF mới **thay** ảnh hiện tại (giữ pid/cspace, giải phóng
+/// VSpace+Frame cũ, nguyên tử). Chỉ ảnh có U-mode (`feature = "exec"` ⇒ `user`).
+#[cfg(feature = "exec")]
+pub mod exec;
 pub mod mem_bridge;
 pub mod mmu;
 pub mod obj;
@@ -99,9 +103,18 @@ pub mod uart_console;
 /// nên không link module này (giữ nguyên 37+3 TAP cũ, procsrv/shell là K3.5).
 #[cfg(feature = "user")]
 pub mod user;
+/// **KT-74** bảng dải VA user theo ô tác vụ — tách khỏi `user` cho R1 (ngữ nghĩa không đổi).
+#[cfg(feature = "user")]
+pub mod user_ranges;
+/// **KT-74** TLS của U-mode (`Tcb.SetTls`) + trapframe mới cho `exec` — tách khỏi `user` cho R1.
+#[cfg(feature = "user")]
+pub mod user_run;
 /// KT-66: stack dispatch syscall per-hart + canary/nước thấp (tách khỏi `user` cho R1).
 #[cfg(feature = "user")]
 pub mod user_stack;
+/// **KT-74** (như trên): `apply_tls`/`exec_frame`/`restore_kernel_tp`/`tls_observed`.
+#[cfg(feature = "user")]
+pub mod user_tls;
 /// **KT-72** driver virtio-blk thật (virtqueue + read/write/flush) — chỉ ảnh test.
 #[cfg(feature = "vblk")]
 pub mod virtio_blk;

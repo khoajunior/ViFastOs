@@ -79,6 +79,9 @@ mod tlb;
 // KT-68 — test host cho `CNode.*` invocation + thuật toán capalloc (chỉ khi `cargo test`).
 #[cfg(test)]
 mod capalloc_tests;
+// KT-74 — test host cho `Tcb.SetTls` (method 15 của `[object].Tcb`), chỉ khi `cargo test`.
+#[cfg(test)]
+mod tls_tests;
 
 pub use arena::Region;
 pub use captable::{CapChildren, CapTable};

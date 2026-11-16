@@ -70,7 +70,7 @@ EXPECTED_FILE="$HERE/expected.txt"
 LOGDIR="${KT54_LOGDIR:-/tmp/k3-ktest}"
 TARGET="riscv64gc-unknown-none-elf"
 IMG_DIR="$V2_ROOT/kernel/target/$TARGET/release"
-LABELS="ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con" # thứ tự in bảng + thứ tự boot trong một vòng
+LABELS="ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec" # thứ tự in bảng + thứ tự boot trong một vòng
 LABEL_COUNT=0                              # số ảnh (đếm từ LABELS; không hardcode 3/4)
 TIMEOUT_DS=200                        # 20 s/boot (D2-72 Q10), đơn vị 0,1 s
 QEMU_ICOUNT="-icount shift=6"         # D2-74 (shift CỐ ĐỊNH, không `auto`)
@@ -119,6 +119,7 @@ image_path() {
         ktest-proc) printf '%s/vifast-kbin-ktest-proc' "$IMG_DIR" ;;
         ktest-vblk) printf '%s/vifast-kbin-ktest-vblk' "$IMG_DIR" ;;
         ktest-con) printf '%s/vifast-kbin-ktest-con' "$IMG_DIR" ;;
+        ktest-exec) printf '%s/vifast-kbin-ktest-exec' "$IMG_DIR" ;;
         *) return 1 ;;
     esac
 }
@@ -376,6 +377,19 @@ con ca am
 EOF
 }
 
+# KT-74: ảnh **`Tcb.SetTls` + `exec(path)`** (6 TAP) — TLS qua invocation + tp quan sát tại trap,
+# ca âm, `exec` giữ pid/cspace + không rò, chuỗi 3 bước, thất bại nguyên tử, TLS reset sau exec.
+manifest_exec() {
+    cat <<'EOF'
+tls dat qua invocation
+tls ca am
+exec giu pid cspace
+exec chain 3 buoc
+exec that bai nguyen tu
+tls reset sau exec
+EOF
+}
+
 # Tên TAP 37 của KT-55 phụ thuộc smp: `-smp 1` không chạy ca 24 (cần 2 hart thật).
 conf37_name() {
     if [ "${1:-1}" -ge 2 ]; then printf 'conformance 5/5'; else printf 'conformance 4/5 + 1 skipped'; fi
@@ -390,6 +404,7 @@ manifest_for() {
         ktest-proc) manifest_proc ;;
         ktest-vblk) manifest_vblk ;;
         ktest-con) manifest_con ;;
+        ktest-exec) manifest_exec ;;
         *) return 1 ;;
     esac | sed -e "s|__SMP__|$2|g" -e "s|__IPI20__|$(ipi_name "$2")|g" \
         -e "s|__CONF37__|$(conf37_name "$2")|g"
@@ -503,7 +518,7 @@ __EVID24__
 ^# faultprobe: va=0x200040 access=Read scause=0xd stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
 ^# faultprobe: va=0x200040 access=Write scause=0xf stval=0x200040 sepc=0x[0-9a-f]+ pte=0x0 reason=NotMapped mapped=0 scratch=0 src=trap$
 ^# faultprobe: va=0x1000 access=Write scause=0xf stval=0x1000 sepc=0x[0-9a-f]+ pte=0x[0-9a-f]+ reason=Permission mapped=1 scratch=1 src=trap$
-^# core: link addr=0x[0-9a-f]+ bytes=188872 pin=196608 image_cap=262144 parts=29 sum=188872 scalars=[0-9]+ padding=[0-9]+ sum_ok=1 in_image=1$
+^# core: link addr=0x[0-9a-f]+ bytes=189384 pin=196608 image_cap=262144 parts=29 sum=189384 scalars=[0-9]+ padding=[0-9]+ sum_ok=1 in_image=1$
 ^# core: untyped id=[0-9]+ base=0x[0-9a-f]+ bytes=65536 used=0 free=65536 allocated=0 gap=0 objects=1 caps=0 check_bytes=1 check_all_bytes=1$
 ^# core: tcb retype tcb=[0-9]+ slot=1 objects=11 caps=11 used=[0-9]+ state=Inactive check_caps=1 check_bytes=1$
 ^# core: configure cspace=1 sc=1 priority=3 mcp=10 budget=4 period=8 suspended_ok=1 resume=1 state=Ready check_sched=1 check_sc_refs=1 check_budget=1$
@@ -516,7 +531,7 @@ __EVID24__
 ^# ipc: cap-transfer installed=8 failed=1 unwrap=1 caps4=4 len=2 rights=0xb caps3=3 caps1=1 extra=1 badge=0xa5a5 check_ipc=1 check_caps=1$
 ^# ipc: cap-message direction=call-reply caller_caps=2 reply_caps=2 caller_bound=1 caller_ready=1 rights=0xb reply_caller=0 check_ipc=1 check_reply_links=1$
 ^# ipc: revoke deleted=[0-9]+ caller=Ready caller_err=Cancelled recv_waiter=Ready notif_waiter=Ready sender=Ready sender_err=Cancelled queue=0 queued=1 pending=0 sent=[0-9]+ dropped=1 check_ipc=1 check_reply_links=1 check_notifications=1$
-^# core: phase fails=0 static=188872 pin=196608 image_cap=262144$
+^# core: phase fails=0 static=189384 pin=196608 image_cap=262144$
 ^# mem: init untyped=2 u0=[0-9]+ u1=[0-9]+ base0=0x82000000 base1=0x80000000 window=1073741824 cap0=1073741824 cap1=1073741824 physmap=1$
 ^# mem: alloc cap0=[0-9]+ window=1073741824 base=0x82000000 used=2101248 free=[0-9]+ hole=0 live4=1 live2=1 live1g=0 pa4=0x82200000 pa2=0x82000000 s21=1 s12=1 real4=1 real2=1 live=2101248 stats=2101248 frames=2 allocs=2 check=1 obj=1$
 ^# mem: revoke used0=2101248 used1=0 holes=0 frames=0 free=1073741824 realloc4=0x82000000 same=1 stats=0 check=1 obj=1$
@@ -546,7 +561,7 @@ EOF
 EOF
             ;;
         ktest-user) cat <<'EOF'
-^# user core: static=188872 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
+^# user core: static=189384 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
 ^# user image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 root=0x[0-9a-f]+ obj_arena=0x[0-9a-f]+-0x[0-9a-f]+ untyped=2$
 ^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
 ^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=10 exits=1 exit=42$
@@ -577,7 +592,7 @@ EOF
 ^# inv: retype method=0 ty=Frame size=12 err=0 slot=15 stats=1/[0-9]+$
 ^# inv: map method=0 va=0x41000000 pa=0x[0-9a-f]+ err=0 stats=1 phys=0x1122334455667788$
 ^# inv: unmap method=1 va=0x41000000 err=0 stats=1 walk_after=0 objmem=1 caps=1$
-^# inv: deny err=18 stats=3 allowed=3 last_err=18 syscalls=[0-9]+ entries=2$
+^# inv: deny err=18 stats=3 allowed=3 tls_delta=0 last_err=18 syscalls=[0-9]+ entries=2$
 ^# inv: deny2 ran=1 frame_a_maps=0 frame_b_maps=0 walk_after=0$
 ^# inv: fault va=0x41000000 kind=Vm\{NotMapped,Read\} ok=1 snap_state=Faulted$
 ^# capx: pre cspace_b4=empty cspace_b5=empty walk=0 a5=Frame src_alive=1 policy=copy$
@@ -628,6 +643,17 @@ EOF
 ^Platform HART Count *: *__SMP__$
 EOF
             ;;
+        ktest-exec) cat <<'EOF'
+^# exec rig: stvec=0x[0-9a-f]+ untyped=[0-9]+ core_untyped=[0-9]+ images=[0-9]+ cspace=[0-9]+ tcb=[0-9]+ tcb_cptr=[0-9]+ tls_const=0x74310001$
+^# tls: set=0x74310001 observed_first=0 observed=0x74310001 method=15 const:method_source=spec traps=[0-9]+ stats=[0-9]+ sys0_calls=[0-9]+ sys0_err=0 exit=1 exit2=1 tcb=0x[0-9a-f]+ tcb_tls=0x74310001 ok=1$
+^# tls neg: method_bad=18 arity0=5 arity2=5 cap_untyped=18 cap_ro=3 tls_giu=0x74310001 set_tls_unchanged=1 ok=1$
+^# exec: step=1 pid=0 tcb=[0-9]+ cspace_same=1 old_vspace=[0-9]+ new_vspace=[0-9]+ vspace_changed=1 old_entry=0x[0-9a-f]+ new_entry=0x[0-9a-f]+ const:elf_linked_at_base=1 img_differ=1 img_a=[0-9]+ img_b=[0-9]+ freed=[0-9]+ new_pages=[0-9]+ exit=2 objects=[0-9]+ frames=[0-9]+ caps=[0-9]+ .* same=1 check=1 ok=1$
+^# exec chain: execs=3 pid=0 tcb=[0-9]+ exits=3,4,1 recycled=[1-9][0-9]* freed=[1-9][0-9]* objects=[0-9]+ frames=[0-9]+ caps=[0-9]+ .* frames_same=1 objects_same=1 caps_same=1 total=[0-9]+ ok=1$
+^# exec atomic: path_err=NotFound elf_err=Elf vspace_same=1 entry_same=1 objects=[0-9]+ frames=[0-9]+ caps=[0-9]+ .* frames_same=1 objects_same=1 caps_same=1 execs_total=[0-9]+ ok=1$
+^# tls reset: after_exec=0x0 observed=0 exit1=4 set=0xb2 observed2=0xb2 exit2=4 tcb_tls=0xb2 execs_total=[0-9]+ ok=1$
+^# exec final: c0 objects=[0-9]+ frames=[0-9]+ caps=[0-9]+ .* releases_clean=1 fail=0 execs_total=[0-9]+$
+EOF
+            ;;
         ktest-con) cat <<'EOF'
 ^# con image: hart=[0-9]+ stvec=0x[0-9a-f]+ direct=1 satp=0x[0-9a-f]+ mode=8 root=0x[0-9a-f]+ obj_arena=0x[0-9a-f]+-0x[0-9a-f]+ untyped=[0-9]+ tcb=[0-9]+ elf=[0-9]+$
 ^# con plic: base=0x[0-9a-f]+ ndev=[0-9]+ hart=[0-9]+ ctx=[0-9]+ threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0$
@@ -645,7 +671,7 @@ EOF
 EOF
             ;;
         ktest-proc) cat <<'EOF'
-^# user core: static=188872 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
+^# user core: static=189384 pin=196608 image_cap=262144 untyped=65536 harts=__SMP__ tcb=[0-9]+ ep=[0-9]+ cspace=[0-9]+ state=Running current=1 check=1$
 ^# init load: elf=1 entry=0x40000000 segs=3 text=1 ro=1 data=1 stack=8 image_end=0x[0-9a-f]+ guard=0x40007000 guard_none=1 wx=0 flags=1 high=1 root=0x[0-9a-f]+ asid=[1-9][0-9]* check=1$
 ^# init run: entry=0x40000000 u_mode=1 sret_spp=0 ecall_spp=0 entries=1 syscalls=10 exits=1 exit=42$
 ^# user exit: code=42 state=Exited exits=1$
@@ -704,6 +730,7 @@ panic_allow_re() {
         ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         ktest-vblk) printf '%s' '^PANIC: KT-72 vblk xong \(6 TAP, 0 fail\)$' ;;
         ktest-con) printf '%s' '^PANIC: KT-73 con xong \(5 TAP, 0 fail\)$' ;;
+        ktest-exec) printf '%s' '^PANIC: KT-74 tls va exec xong \(6 TAP, 0 fail\)$' ;;
         *) return 1 ;;
     esac
 }
@@ -956,6 +983,9 @@ validate_norm() {
             check_evidence "$log" "$label" "$smp"
             ;;
         ktest-vblk)
+            check_evidence "$log" "$label" "$smp"
+            ;;
+        ktest-exec)
             check_evidence "$log" "$label" "$smp"
             ;;
         ktest-con)
@@ -1360,6 +1390,15 @@ run_matrix() {
         --target "$TARGET" --release >/tmp/k3-ktest-build-con.log 2>&1; then
         tail -20 /tmp/k3-ktest-build-con.log >&2
         die "build ảnh test con FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-con.log)"
+    fi
+    # KT-74: ảnh **exec/TLS** (feature `ktest,user,exec`) — tách khỏi `ktest-user`/`ktest-proc`
+    # để TAP/`.text` của chúng không đổi.
+    echo "# build ảnh test exec ($TARGET, release, --features ktest,user,exec)"
+    if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
+        --bin vifast-kbin-ktest-exec --features ktest,user,exec \
+        --target "$TARGET" --release >/tmp/k3-ktest-build-exec.log 2>&1; then
+        tail -20 /tmp/k3-ktest-build-exec.log >&2
+        die "build ảnh test exec FAIL — CHƯA có ảnh test (xem /tmp/k3-ktest-build-exec.log)"
     fi
     # KT-53: ảnh user bật thêm feature `user` (module U-mode chỉ có trong ảnh này).
     echo "# build ảnh test user+proc ($TARGET, release, --features ktest,user)"

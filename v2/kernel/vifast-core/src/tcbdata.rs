@@ -46,6 +46,10 @@ pub(crate) struct TcbData {
     pub(crate) last_fault: Option<(ObjId, crate::tcb::FaultKind)>,
     /// `(word, badge)` của lần `Wait`/`Poll` Notification gần nhất (KT-27, KT-60).
     pub(crate) notif: Option<(u64, u64)>,
+    /// **KT-74** — con trỏ TLS của tiến trình (`Tcb.SetTls`, method **15** của `[object].Tcb`).
+    /// Model-only `[TK]`: kernel **không** đọc vùng TLS, chỉ giữ giá trị và nạp vào `x4`/`tp`
+    /// của U-mode mỗi lần resume (RISC-V: `tp` = `x4`). `0` = chưa đặt.
+    pub(crate) tls: u64,
 }
 
 impl TcbData {
@@ -67,6 +71,7 @@ impl TcbData {
         last_ipc_error: None,
         last_fault: None,
         notif: None,
+        tls: 0,
     };
 
     pub(crate) fn snapshot(&self) -> TcbInfo {
@@ -83,6 +88,7 @@ impl TcbData {
             sched_context: self.sched_context,
             donated_sc: self.donated_sc,
             bound_notification: self.bound_notification,
+            tls: self.tls,
         }
     }
 }

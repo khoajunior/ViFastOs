@@ -109,6 +109,22 @@ pub const CNODE_DELETE: u32 = 4;
 /// `CNode.Revoke` — method 5.
 pub const CNODE_REVOKE: u32 = 5;
 
+// ---------------------------------------------------------------------------------------------
+// KT-74 — `Tcb.SetTls` (object id 3). Số method **lấy từ `spec/abi.toml`** `[object].Tcb`
+// (`SetTls = 15`), qua hằng sinh tự động `vifast_abi::TCB_SETTLS` — **không** chép số tay
+// (D2-11/D2-102).
+// ---------------------------------------------------------------------------------------------
+
+/// `Tcb.SetTls` — method **15** của object `Tcb` (`spec/abi.toml` `[object].Tcb`).
+pub const TCB_SET_TLS: u32 = vifast_abi::TCB_SETTLS;
+
+/// `true` ⇔ `spec/abi.toml` khai `SetTls` đúng ở số này (test/TAP đối chiếu bảng sinh).
+pub fn tcb_set_tls_matches_spec() -> bool {
+    vifast_abi::TCB_METHODS
+        .iter()
+        .any(|(name, id)| *name == "SetTls" && u32::from(*id) == TCB_SET_TLS)
+}
+
 /// Id object `[object]` theo **tên** (sinh từ `spec/abi.toml`, không chép tay — D2-11).
 fn object_id(name: &str) -> Option<u64> {
     CORE_OBJECTS
@@ -166,6 +182,8 @@ pub struct InvocationStats {
     pub delete: u32,
     /// `CNode.Revoke` thành công.
     pub revoke: u32,
+    /// **KT-74** `Tcb.SetTls` thành công.
+    pub set_tls: u32,
 }
 
 static ALLOWED: AtomicU32 = AtomicU32::new(0);
@@ -178,6 +196,8 @@ static CNODE_MINTED: AtomicU32 = AtomicU32::new(0);
 static CNODE_MOVED: AtomicU32 = AtomicU32::new(0);
 static CNODE_DELETED: AtomicU32 = AtomicU32::new(0);
 static CNODE_REVOKED: AtomicU32 = AtomicU32::new(0);
+/// **KT-74** số `Tcb.SetTls` thành công (TAP `# tls:` đối chiếu).
+static TLS_SET: AtomicU32 = AtomicU32::new(0);
 
 fn bump(counter: &AtomicU32) {
     let _ = counter.fetch_add(1, Ordering::Relaxed);
@@ -196,6 +216,7 @@ pub fn stats() -> InvocationStats {
         moved: CNODE_MOVED.load(Ordering::Relaxed),
         delete: CNODE_DELETED.load(Ordering::Relaxed),
         revoke: CNODE_REVOKED.load(Ordering::Relaxed),
+        set_tls: TLS_SET.load(Ordering::Relaxed),
     }
 }
 
@@ -307,6 +328,8 @@ pub fn dispatch(
         // KT-68: `CNode.Copy/Mint/Move/Delete/Revoke` trên **chính cap CNode** đã gọi — cap
         // này chỉ vào CSpace của caller (khác `Untyped.Retype` không cần cap phụ).
         (ObjType::CNode, _) => cnode(m, tcb, c, method, args, len),
+        // KT-74: `Tcb.SetTls` (method 15 của `[object].Tcb`) — cap **chính là** TCB đã gọi.
+        (ObjType::Tcb, TCB_SET_TLS) => set_tls(m, slot, c, args, len),
         // Danh sách trắng hẹp: mọi loại/method khác giữ `NotSupported` (D2-53 Q11) — **không**
         // trả `Ok` giả. Đếm để TAP `# inv:` chứng minh nhánh này chạy thật.
         _ => {
@@ -314,6 +337,45 @@ pub fn dispatch(
             Err(KError::NotSupported.id() as u64)
         }
     }
+}
+
+// =============================================================================================
+// KT-74 — `Tcb.SetTls` (K6): con trỏ TLS của tiến trình U-mode
+// =============================================================================================
+
+/// `Tcb.SetTls` — ghi con trỏ TLS của **cap TCB đã gọi** (method `TCB_SET_TLS` = 15).
+///
+/// # Kênh tham số
+///
+/// | Tham số | Nguồn | Ghi chú |
+/// |---|---|---|
+/// | `tls` | `MR0` | con trỏ TLS (`tp` = `x4` của U-mode) |
+///
+/// **Arity chính xác 1** (D2-104): `length` khác 1 — thiếu (0) **hoặc** thừa (2..4) — đều
+/// `InvalidArgument` **5**, **có đếm**. Cap TCB phải có `RIGHT_WRITE`: thiếu ⇒
+/// `InsufficientRights` **3** (cùng luật quyền như `CNode.*`, D2-99(e)). Trả `a1 = 0`.
+///
+/// `SetTls` **không** đổi trạng thái TCB/scheduler: giá trị có hiệu lực ở lần vào U-mode kế
+/// tiếp, nên dùng được giữa hai bước của chuỗi `exec` (KT-74).
+fn set_tls(
+    m: &mut Machine,
+    slot: SlotRef,
+    c: crate::error::CapInfo,
+    args: [u64; 4],
+    len: usize,
+) -> Result<(u64, u64), u64> {
+    if c.rights & RIGHT_WRITE == 0 {
+        bump(&DENIED);
+        return Err(KError::InsufficientRights.id() as u64);
+    }
+    if len != 1 {
+        bump(&DENIED);
+        return Err(KError::InvalidArgument.id() as u64);
+    }
+    m.tcb_set_tls(slot, args[0]).map_err(|e| e.id() as u64)?;
+    bump(&TLS_SET);
+    bump(&ALLOWED);
+    Ok((0, 0))
 }
 
 // =============================================================================================
@@ -635,6 +697,7 @@ pub const fn is_whitelisted(ty: ObjType, method: u32) -> bool {
             | (ObjType::CNode, CNODE_MOVE)
             | (ObjType::CNode, CNODE_DELETE)
             | (ObjType::CNode, CNODE_REVOKE)
+            | (ObjType::Tcb, TCB_SET_TLS)
     )
 }
 
