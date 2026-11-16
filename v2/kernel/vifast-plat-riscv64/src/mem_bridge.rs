@@ -28,8 +28,12 @@
 //!
 //! `unsafe`: **không** — tệp này chỉ gọi API safe của object layer và core (D2-17).
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
+use vifast_core::invoke::{InvokeOp, InvokeOutcome};
+use vifast_core::spec::RESERVED_OBJECTS;
 use vifast_core::{CapId as CoreCap, KError, ObjId, ObjType, RIGHT_WRITE};
-use vifast_plat_common::obj::{CapId, FrameBudget, ObjError, ObjKind};
+use vifast_plat_common::obj::{CapId, FrameBudget, MapFlags, ObjError, ObjKind};
 
 use crate::core_bridge;
 use crate::obj as aobj;
@@ -208,4 +212,193 @@ pub fn budget(source: CapId) -> Option<FrameBudget> {
 /// Cấp key mới cho một Frame **đã có** (chỉ dùng cho test/chẩn đoán cap cũ): `None` nếu hỏng.
 pub fn key_of(core_obj: ObjId) -> Option<u64> {
     core_bridge::with_machine(|m| m.foreign_key(core_obj).ok())
+}
+
+// ---------------------------------------------------------------------------------------------
+// KT-67a — invocation hẹp (D2-97): object layer thi hành, core giữ cap/quyền (D2-83)
+// ---------------------------------------------------------------------------------------------
+
+/// Số Untyped tối đa được đăng ký với bridge (memsrv giữ cap trực tiếp) — bảng tĩnh, không cấp
+/// phát; mỗi entry là `(core ObjId, object-layer CapId)`.
+pub const MAX_REGISTERED_UNTYPEDS: usize = 4;
+
+static REG_OBJ: [AtomicU32; MAX_REGISTERED_UNTYPEDS] =
+    [const { AtomicU32::new(0) }; MAX_REGISTERED_UNTYPEDS];
+static REG_CAP: [AtomicU32; MAX_REGISTERED_UNTYPEDS] =
+    [const { AtomicU32::new(0) }; MAX_REGISTERED_UNTYPEDS];
+static REG_N: AtomicU32 = AtomicU32::new(0);
+
+/// Đăng ký **một chiều** `core ObjId → cap Untyped của object layer` (D2-83): memsrv giữ cap
+/// `Untyped` trong CSpace của nó; invocation `Untyped.Retype` chỉ chở `ObjId` của cap ấy qua
+/// hook, nên bridge cần bảng này để biết **cap nào** bên object layer sở hữu byte.
+///
+/// Trả `false` khi bảng đầy hoặc `obj == 0` — không ghi đè entry cũ (fail-closed).
+pub fn register_untyped(obj: ObjId, cap: CapId) -> bool {
+    if obj == 0 {
+        return false;
+    }
+    let n = REG_N.load(Ordering::Relaxed) as usize;
+    if n >= MAX_REGISTERED_UNTYPEDS {
+        return false;
+    }
+    REG_OBJ[n].store(obj, Ordering::Relaxed);
+    REG_CAP[n].store(u32::from(cap.0), Ordering::Relaxed);
+    REG_N.store((n + 1) as u32, Ordering::Relaxed);
+    true
+}
+
+/// Cap Untyped của object layer đã đăng ký cho `core ObjId` — `None` ⇒ fail-closed.
+pub fn registered_untyped(obj: ObjId) -> Option<CapId> {
+    let n = REG_N.load(Ordering::Relaxed) as usize;
+    let mut i = 0usize;
+    while i < n.min(MAX_REGISTERED_UNTYPEDS) {
+        if REG_OBJ[i].load(Ordering::Relaxed) == obj {
+            return Some(CapId(REG_CAP[i].load(Ordering::Relaxed) as u16));
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `ObjKind` của object layer → `ObjType` của core (chiều ngược của [`obj_kind`]).
+const fn core_type(kind: ObjKind) -> ObjType {
+    match kind {
+        ObjKind::Frame => ObjType::Frame,
+        ObjKind::PageTable => ObjType::PageTable,
+        ObjKind::VSpace => ObjType::VSpace,
+        ObjKind::Untyped => ObjType::Untyped,
+    }
+}
+
+/// Cờ `Frame.Map` (bit 0 R, 1 W, 2 X, 3 U, 4 Device) → [`MapFlags`] của object layer.
+fn decode_map_flags(bits: u64) -> Result<MapFlags, ObjError> {
+    if bits & !0x1f != 0 {
+        return Err(ObjError::InvalidArgument);
+    }
+    let flags = MapFlags {
+        read: bits & 1 != 0,
+        write: bits & 2 != 0,
+        exec: bits & 4 != 0,
+        user: bits & 8 != 0,
+        device: bits & 16 != 0,
+    };
+    if !flags.is_valid() {
+        return Err(ObjError::InvalidArgument);
+    }
+    Ok(flags)
+}
+
+/// **Thi hành** một invocation (KT-67a) trên object layer — arch cài [`vifast_core::syscall::
+/// SyscallEnv::invoke`]. Core đã kiểm cap/quyền/loại; ở đây chỉ còn **danh sách trắng hẹp** và
+/// biên object layer:
+///
+/// - `Untyped.Retype` (đợt 1): retype `Frame`/`PageTable`/`VSpace` từ cap Untyped **đã đăng ký**
+///   của memsrv; trả `key` để core dựng object đại diện + cap (D2-83).
+/// - `Frame.Map`/`Unmap` (đợt 2): map/gỡ **chính Frame** trong VSpace của cap phụ, qua
+///   `ObjectLayer::map/unmap` + `sfence.vma` — không đọc/ghi PTE ở tầng khác.
+///
+/// Lỗi giữ **nguồn gốc** ([`MemError::Obj`]/[`MemError::Core`]) để TAP đọc đúng mã ABI.
+pub fn invoke(op: InvokeOp) -> Result<InvokeOutcome, MemError> {
+    let kind = {
+        if op.ty == ObjType::Untyped {
+            if op.method != METHOD_RETYPE {
+                return Err(MemError::Core(KError::NotSupported));
+            }
+            let cap =
+                registered_untyped(op.obj).ok_or(MemError::Core(KError::InvalidCapability))?;
+            let kind = obj_kind_of_id(op.args[1]).ok_or(MemError::Core(KError::NotSupported))?;
+            let size_bits =
+                u8::try_from(op.args[2]).map_err(|_| MemError::Obj(ObjError::InvalidArgument))?;
+            let new = aobj::machine()
+                .retype(cap, kind, size_bits)
+                .map_err(MemError::Obj)?;
+            let id = aobj::machine().cap_key(new).map_err(MemError::Obj)?;
+            return Ok(InvokeOutcome::Object {
+                ty: core_type(kind),
+                key: make_key(new, id),
+            });
+        }
+        match op.ty {
+            ObjType::Frame => op.method,
+            _ => {
+                return Err(MemError::Core(KError::NotSupported));
+            }
+        }
+    };
+    // Frame.Map (0) / Frame.Unmap (1) — cả hai cần cap phụ VSpace.
+    let (vs, want_vs) = decode_key(op.aux_key);
+    let (frame, want_frame) = decode_key(op.key);
+    {
+        let m = aobj::machine();
+        if m.cap_kind(vs).ok() != Some(ObjKind::VSpace) || m.cap_key(vs).ok() != Some(want_vs) {
+            return Err(MemError::Core(KError::InvalidCapability));
+        }
+        if m.cap_kind(frame).ok() != Some(ObjKind::Frame)
+            || m.cap_key(frame).ok() != Some(want_frame)
+        {
+            return Err(MemError::Core(KError::InvalidCapability));
+        }
+    }
+    let va = op.args[1];
+    match kind {
+        METHOD_MAP => {
+            let flags = decode_map_flags(op.args[2]).map_err(MemError::Obj)?;
+            aobj::machine()
+                .map(vs, va, frame, flags)
+                .map_err(MemError::Obj)?;
+        }
+        METHOD_UNMAP => {
+            // M1 (reviewer-kt67a): **ràng buộc Frame ↔ mapping** — `ObjectLayer::unmap` tìm
+            // theo `va`, nên nếu chỉ gọi nó thì ai có **một** cap Frame bất kỳ + cap VSpace
+            // cũng gỡ được mapping của Frame khác (lỗ quyền). Kiểm leaf tại `va` thuộc **đúng**
+            // cap Frame này trước (so PA — PA Frame là duy nhất), sai ⇒ lỗi **không im lặng**.
+            let walk = aobj::machine().walk(vs, va).map_err(MemError::Obj)?;
+            if !walk.valid || !walk.leaf {
+                return Err(MemError::Obj(ObjError::NotMapped));
+            }
+            let frame_pa = aobj::machine().frame_pa(frame).map_err(MemError::Obj)?;
+            if walk.phys != frame_pa {
+                return Err(MemError::Core(KError::InvalidCapability));
+            }
+            aobj::machine().unmap(vs, va).map_err(MemError::Obj)?;
+        }
+        _ => return Err(MemError::Core(KError::NotSupported)),
+    }
+    let _ = aobj::machine().drain_flushes(aobj::run_flush);
+    Ok(InvokeOutcome::Value(0))
+}
+
+/// Trả object vừa retype về object layer khi core không dựng nổi đại diện (bảng cap đầy) —
+/// best-effort, giữ nguyên tử của `Untyped.Retype`.
+pub fn release_key(key: u64) {
+    let (cap, want) = decode_key(key);
+    let m = aobj::machine();
+    if m.cap_key(cap).ok() != Some(want) {
+        return;
+    }
+    let _ = m.revoke(cap);
+}
+
+/// Số method — **một nguồn**: lấy từ `vifast_core::invoke` (spec `[object]`).
+const METHOD_RETYPE: u32 = vifast_core::invoke::METHOD_RETYPE;
+const METHOD_MAP: u32 = vifast_core::invoke::METHOD_MAP;
+const METHOD_UNMAP: u32 = vifast_core::invoke::METHOD_UNMAP;
+
+/// Id `[object]` → `ObjKind` (chỉ ba loại VM): **không** chép số — đọc `vifast_abi`.
+fn obj_kind_of_id(raw: u64) -> Option<ObjKind> {
+    let find = |name: &str| {
+        RESERVED_OBJECTS
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, id)| u64::from(*id))
+    };
+    if Some(raw) == find("Frame") {
+        Some(ObjKind::Frame)
+    } else if Some(raw) == find("PageTable") {
+        Some(ObjKind::PageTable)
+    } else if Some(raw) == find("VSpace") {
+        Some(ObjKind::VSpace)
+    } else {
+        None
+    }
 }

@@ -1229,6 +1229,64 @@ impl SyscallEnv for UserMemAccess {
     fn num_harts(&mut self) -> u64 {
         crate::smp::hart_count() as u64
     }
+
+    /// **Invocation** (KT-67a, D2-97): core đã kiểm cap/quyền/loại; object layer thi hành
+    /// (`Frame`/`PageTable`/`VSpace` — D2-83). Lỗi trả **mã ABI** đúng nguồn (object layer hoặc
+    /// core), không bọc mã mới.
+    fn invoke(
+        &mut self,
+        op: vifast_core::invoke::InvokeOp,
+    ) -> Result<vifast_core::invoke::InvokeOutcome, u64> {
+        // Trong syscall U-mode, `satp` vẫn trỏ **root user** (không có physmap — xem
+        // `resolve_addr`): object layer chỉ chạm được sau khi khôi phục root kernel, rồi phải
+        // trả lại root user trước khi `sret` về U-mode. Cùng khuôn `resolve_addr`.
+        with_kernel_root(|| crate::mem_bridge::invoke(op)).and_then(|result| {
+            result.map_err(|error| {
+                error
+                    .abi_code()
+                    .map(u64::from)
+                    .unwrap_or(u64::from(vifast_core::KError::InvalidArgument.id()))
+            })
+        })
+    }
+
+    /// Rollback object vừa retype khi core không dựng nổi object đại diện (bảng cap đầy).
+    fn release_object(&mut self, key: u64) {
+        let _ = with_kernel_root(|| crate::mem_bridge::release_key(key));
+    }
+}
+
+/// Chạy `f` trên **root kernel** rồi trả lại đúng root user (`LAST_VSPACE`/`LAST_ASID`) — bắt
+/// buộc cho mọi thao tác object layer phát sinh từ syscall U-mode (D2-83): root user không map
+/// nửa cao/physmap (KT-53), nên `PhysMem` chỉ chạm được khi `satp` = root kernel.
+///
+/// Trả `Err(11)` (`NotMapped`) khi chưa có lượt U-mode; nếu không trả lại được root user thì
+/// dừng có chẩn đoán (chạy tiếp sẽ `sret` với root kernel — sai nặng, như `resolve_addr`).
+fn with_kernel_root<R>(f: impl FnOnce() -> R) -> Result<R, u64> {
+    let vs = LAST_VSPACE.load(Ordering::Relaxed);
+    if vs == u32::MAX {
+        return Err(ERR_NOT_MAPPED);
+    }
+    let vspace = CapId(vs as u16);
+    let (root, asid) = {
+        let m = aobj::machine();
+        (m.vspace_root_pa(vspace), m.vspace_asid(vspace))
+    };
+    let (Ok(root), Ok(asid)) = (root, asid) else {
+        return Err(ERR_NOT_MAPPED);
+    };
+    if !aobj::restore_kernel_root() {
+        return Err(ERR_NOT_MAPPED);
+    }
+    let out = f();
+    if !aobj::switch_root(root, asid) {
+        vifast_plat_common::Platform::put_str(
+            &Riscv64Virt,
+            "PANIC: u-mode invocation khong tra duoc satp user\n",
+        );
+        crate::debug_halt(1)
+    }
+    Ok(out)
 }
 
 /// Đọc `sstatus` (giữ UXL/FS; loader tự xoá SPP/SPIE/SIE/SUM).

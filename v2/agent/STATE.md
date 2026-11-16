@@ -4,73 +4,66 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : **`324d1da9`** (`[KT-66b]` bổ sung 2 tệp nguồn thiếu, trên `97903b15`
-                `[KT-66]`) — KT-66 **đã commit + push**; sau đó tab ViScript commit tiếp
-                `26e5f82c`/`627c698a` (`[ST-120b]`/`[ST-121]`) — **không đụng `v2/`**. Nhánh
-                `main`; `HEAD..origin/main` = 0; worktree chỉ còn `v2/agent/reports/kt64/` +
-                `viscript/`, `review/`, `.agents/`, `out-b.log` của tab khác — không chạm.
-BUILD_ID      : ảnh kernel **KT-66** (build cuối, sau refactor `user_stack.rs`): product
-                **188.184 / 200.120** (`build=ce9a8c7cff7c68a3`, sha256 `eb365a13…`), ktest
-                **574.032 / 209.856** (`9cc6c8f295cab617`), guard **54.048 / 2.680**
-                (`f5afbe3cdb70f901`), user **335.520 / 202.280** (`fbc03a81ae5485b0`), proc
-                **375.512 / 206.472** (`333c35bb2dbc208a`) — trần 262.144; NOLOAD per-hart
-                **950.272 B** báo **riêng** (D2-72 Q5); `size_of::<Machine>() = 188.872 B` ≤ pin
-                196.608 (không đổi). Soak product `BUILD_ID=ce9a8c7cff7c68a3
-                sha256=eb365a13…` (`JOURNAL/kt66-soak.log:1016-1020`).
-Task          : **KT-66 (K3.5 gate — cổng cuối phase K3.5)** — **DONE**: reviewer-kt66 vòng 1
-                **DRIFT** (không UNSAFE) → đã vá M1..M5 + D3/D4/D9 → confirm + lead commit
-                `97903b15` (`[KT-66]`) + `324d1da9` (`[KT-66b]`) → push; **chờ Agent 0 lật QUEUE
-                KT-66 DONE + K3.5 DONE**. Tóm tắt: (1) tách ảnh demo thứ tư
-                `vifast-kbin-ktest-proc` (10 TAP, ánh xạ 15..24→1..10), `ktest-user` còn 14 TAP,
-                **239.216 → 202.280 B (−36.936 B)**; (2) **stack syscall per-hart** trong NOLOAD
-                per-hart (32 KiB/hart, `HART_STRIDE 0x1D000`, tổng 950.272 B báo riêng) + canary
-                + nước thấp, `distinct=1 canary=0` smp 1/2/4 (hart 0 dùng **3.720 B** ảnh user /
-                **22.088 B** ảnh demo); arena đã thử và **đỏ thật** (root user không có physmap):
-                `stval=0xffffffc082007ff8`; (3) **L1 400.000 lượt PASS** (4 tiến trình song song,
-                0 vi phạm, 33m30s); (4) soak **0/1000**, matrix **12/12**, conformance **61/61
-                5/5**; budget 2 ngưỡng **mọi** ảnh; clippy kernel 5 tổ hợp sạch; `K35-DOD.md`
-                D1..D12 + `k35-procsrv.md` §9/§10 + 3 log đỏ-trước (split/stack/canary).
-Bước          : 11/11 (thêm bước commit): baseline gate **649/84** → đỏ-trước ảnh tách (24 vs 14) → tách
-                `ktest_proc.rs` + runner/expected/manifest → stack NOLOAD per-hart (arena thử
-                rồi loại) → canary/low → đỏ-trước stack (`distinct=0`) + canary (`canary=1`) →
-                (sau review vòng 1 **DRIFT**: vá M1 canary fail-closed, M3 harness fail-closed +
-                `--selftest-stack` 5/5, M2 nợ #9, M4 số/sha/UTC, M5 bỏ log arena + đóng băng DOD,
-                D3/D4 distinct mọi cặp + phạm vi đo, D9 "bốn ảnh/nhãn") →
-                matrix **12/12** → soak **0/1000** → L1 **400k** (4 tiến trình) → conformance
-                **61/61** → budget → clippy → `v2 check` FAIL (fmt + R1: `user.rs` 1.582 dòng) →
-                tách `user_stack.rs` (1.406 + 217 dòng) → fmt/build lại 5 ảnh → **chạy lại**
-                matrix/soak/conformance trên ảnh cuối → `gate --fast` **PASS 649/84** → DOD →
-                reviewer DRIFT → vá (M1 canary fail-closed, M3 harness fail-closed +
-                `--selftest-stack` 5/5, M2 nợ #9, M4 số/UTC/RAM, M5 bỏ log arena + đóng băng DOD,
-                D3/D4/D9) → chạy lại matrix/conformance/gate → **`97903b15`** `[KT-66]` (52 tệp)
-                + **`324d1da9`** `[KT-66b]` (2 tệp nguồn lead bỏ sót) → push.
-Nhánh         : main
-Cổng gần nhất : `./v2/bin/v2 check` **PASS** + `./v2/bin/v2 gate --fast` **PASS 649 test/84
-                suite**, L1 1.000 seed **911 ms** (`JOURNAL/kt66-gate.log:66,1226-1227`; lead chạy
-                lại trên HEAD cuối **919 ms** — cùng PASS);
-                `ktest.sh 1 matrix` **12/12** boot, TAP **60/60 + 3/3 + 14/14 + 10/10** × smp
-                1/2/4 (`kt66-ktest-matrix.log:27-38,67`); `selftest.sh` **18/18** (gồm
-                `--selftest-stack` **5/5**, log `kt66-selftest.log`); `soak.sh 1000 3`
-                **0/1000** wall **225 s**
-                (`kt66-soak.log:1016-1020`); conformance **61/61, 5/5**, `build=9cc6c8f2…`
-                (`kt66-trace-compare.log:5`); L1 100k × smp 1/2/4/8
-                (`kt66-l1-smp{1,2,4,8}.log`); clippy kernel 5 tổ hợp `EXIT=0`
-                (`kt66-core-build.log`). DOD **đóng băng** sau vá reviewer vòng 1:
-                `JOURNAL/kt66-K35-DOD-freeze.md` sha256 `a8935b9e73be…`
-                (`JOURNAL/kt66-dod-freeze.sha256`); từ đây **không sửa** DOD.
-Nợ đang mở    : (1) fault bridge U-mode mới là **cầu nối ABI** của K3.6, chưa phải đường kernel
-                đầy đủ; (2) `kill` chưa `Revoke cap TCB`/finalise tài nguyên (QD Q-A) và reply do
-                procsrv trả trước khi kernel xác nhận ⇒ `kill <pid sai>` chưa bị từ chối;
-                (3) `vifast-plat-user` **không phải workspace member** (build.rs gọi rustc trực
-                tiếp) nên không được `cargo fmt/clippy` phủ; (4) shell **chưa** đọc UART IRQ
-                (dòng do kernel bơm); (5) core multi-hart **chưa** nối IPI; (6) `TlbFlush`
-                `targets/acked` chưa quan sát được từ user; (7) slot 192 word/Region; (8) stack
-                syscall 32 KiB/hart **sát** mức dùng **22.088 B** ở ảnh demo (headroom ~10 KiB)
-                — nếu demo mọc thêm thì tăng block **có đo**, không nới ngầm; (9)
-                `SYSCALL_STACK` toàn cục **đã xoá** — không còn bom hẹn giờ cho smp>1; (10) **hart
-                1..3 chưa từng dispatch** (scheduler demo chỉ hart 0 — nợ IPI #6) ⇒ `distinct=1` là
-                đã **cấp** riêng, chưa phải đã **chạy** song song; stack demo 22.088/32.768 B
-                (headroom 10,4 KiB).
+HEAD          : **`b5277cb7`** (`[KT-00]` D2-99: quy ước gọi invocation — MR layout/dst slot/
+                return/quyền VSpace/Unmap kiểm frame/caps>0 ⇒ 18) — trên `19341f07` (mở KT-67a).
+                Nhánh `main`; `HEAD..origin/main` = 0. KT-67a **chưa commit** (reviewer DRIFT đã vá
+                M1/M2/M3/D2-99g/L1/L2/L3/L5/L6, chờ verdict confirm + lead commit
+                `[KT-67a]`/`[KT-67a-b]`): cây có **15 tệp `v2/` sửa + 15 tệp mới** của task này;
+                worktree **không** chạm `viscript/`, `v2/agent/reports/kt64/`, `review/`,
+                `.agents/`, `out-b.log`.
+BUILD_ID      : ảnh kernel **KT-67a** (build trên cây KT-67a, `-smp 1`): product
+                **188.544 / 200.184** (`build=02ed5a1810ba59ce`, sha256 `7f7a7936…`; soak log),
+                ktest **599.696 / 209.920**, guard **54.064 / 2.680**, user
+                **383.504 / 202.408**, proc **391.976 / 206.560** — trần **262.144**;
+                `size_of::<Machine>() = 188.872 B` ≤ pin **196.608 B** (`# user core: static=188872
+                pin=196608`, smp 1/2/4); NOLOAD per-hart **950.272 B** báo riêng (D2-72 Q5).
+Task          : **KT-67a (K6 — invocation hẹp D2-97)** — **DONE phần cài** (chờ reviewer):
+                syscall 0 trên cap **không** phải Endpoint ⇒ invocation `method = label`, danh
+                sách trắng **`Untyped.Retype` (1.0) + `Frame.Map` (11.0) + `Frame.Unmap` (11.1)**;
+                method/loại ngoài danh sách ⇒ `NotSupported` **18** (D2-53 Q11) + đếm. **memsrv
+                thật**: chương trình U-mode `inv.elf` giữ cap `Untyped` cấp lúc spawn, **tự**
+                `Retype` Frame (bỏ đường kernel-mediated KT-67); **client map thật**: `Frame.Map`
+                vào VSpace của chính nó tại `0x4100_0000`, `sd`/`ld` 8 B thật, `Frame.Unmap`, đọc
+                lại ⇒ `FaultKind::Vm{NotMapped,Read}` (trap thật). Không sửa `spec/`, không thêm
+                syscall, không đổi `MessageInfo` 35 bit. **“VSpace.Map” không có method id** trong
+                ABI (VSpace id 9 chỉ `GetAsid=0`, id 1 để trống D2-32) ⇒ dùng `Frame.Map = 11.0`;
+                `CNode.Insert` không có method id trong bảng CNode ⇒ giữ `NotSupported` (nợ §5).
+                **Sau review (DRIFT vá)**: quy ước tham số theo **D2-99**; `Frame.Unmap` ràng buộc
+                Frame ↔ mapping (M1, so PA leaf — sai ⇒ 1/11, mapping giữ), `Map/Unmap` đòi cap
+                VSpace có `RIGHT_WRITE` (M2 ⇒ 3), `caps>0 ⇒ 18` + đếm (D2-99g), `made == ty` (L1),
+                rollback 3 bước `drop_root_cap`→`kill_foreign_object`→`release_object` (L2); test
+                âm trong TAP 17 (Frame B + VSpace chỉ READ).
+Bước          : 9/9 — baseline gate **661/87** → đỏ-trước 4 log (`kt67a-red-*`) → core
+                `invoke.rs` + hook `SyscallEnv` → bridge/`UserMemAccess` (+ `with_kernel_root`) →
+                chương trình `inv.elf` + pha TAP 15..18 → gate/matrix/soak lần 1 → reviewer
+                **DRIFT trung bình** (không UNSAFE) → vá **M1/M2/M3 + D2-99(g) + L1/L2/L3/L5/L6**
+                (M1 ràng buộc Frame↔mapping + test âm; M2 đòi `RIGHT_WRITE` trên cap VSpace;
+                `caps>0 ⇒ 18 + đếm`; `made==ty`; rollback 3 bước; docs theo D2-99/D2-98; HEAD/đếm
+                tệp/clippy log thật) → chạy lại **gate 661/87 + matrix 12/12 + soak 0/1000** →
+                báo lead spawn confirm. Chờ verdict confirm trước khi lead commit/push.
+Cổng gần nhất : `./v2/bin/v2 gate --fast` **PASS 661 test/87 suite**, L1 1.000 seed **1.118 ms**
+                (`JOURNAL/kt67a-gate.log`); `cargo test -p vifast-core` **25/25** (6 test mới của
+                `invoke.rs`, `JOURNAL/kt67a-core-tests.log`); `ktest.sh 1 matrix` **12/12** boot,
+                TAP **65/65 + 3/3 + 18/18 + 10/10** × smp 1/2/4
+                (`JOURNAL/kt67a-ktest-matrix.log`); `soak.sh 1000 3` **0/1000** wall **251 s**, build `02ed5a1810ba59ce` sha256 `7f7a7936…`
+                (`JOURNAL/kt67a-soak.log`); budget `.data+.bss` product **200.184**, ktest
+                **209.920**, guard **2.680**, user **202.408**, proc **206.560** (trần 262.144);
+                clippy kernel **4 tổ hợp** `-D warnings` `EXIT=0`
+                (`JOURNAL/kt67a-clippy-kernel.log`).
+Nợ đang mở    : (1) **chuyển cap giữa hai TCB U-mode** = **shim gap, KHÔNG phải thiếu ABI**
+                (D2-98): receive window đã có trong `spec/abi.toml`
+                `[calling.riscv64].ipc_buffer` (dòng 58), core có `tcb_set_recv_window`/
+                `plan_cap_transfer`/`deliver_caps`; thiếu là shim U-mode — `syscall7`
+                (`v2/kernel/vifast-plat-user/lib.rs:28`) không ghi header IPC buffer; chỗ từ chối
+                `MessageInfo.caps > 0` là nhánh invocation (`v2/kernel/vifast-core/src/invoke.rs`,
+                trả 18), `build_message` **không** kiểm caps ⇒ KT-67a chứng minh memsrv+client
+                **một cspace**; **KT-67b** cài header/window (không sửa spec); (2) `CNode.Insert`
+                (D2-96/97 nhắc) **không có method id** trong `spec/abi.toml` CNode 0..6 ⇒ giữ
+                `NotSupported`, core đã có API `copy/mint/delete/revoke`; (3) D2-97 ghi “27
+                method” nhưng spec hiện có **13** `[method_signature]` — **D2-98 đã đính chính**;
+                (4) quy ước tham số invocation = **D2-99**, `spec/` sẽ chốt ở KT-67b; (5) nợ cũ
+                K3.5/K3b giữ nguyên (memsrv **vòng NBRecv** đầy đủ/cấp phát theo yêu cầu nhiều
+                client chưa làm; `kill`/IPI/slot 192 word như STATE trước).
 ```
 
 
@@ -2897,3 +2890,59 @@ matrix **12/12**; soak **0/1000** wall **238 s** (`BUILD_ID=a6dff9f704e6cd88`); 
 | 2026-11-12 | KT-01 | 3–7/8 | `329177e` | — | cổng chưa có | đỏ trước: `git tag -l v1-archive` rỗng; tạo tag; dán review#1; sửa câu chữ Exit + mở Q-01 |
 | 2026-11-12 | KT-01 | 1/8 | `329177e` | — | cổng chưa có | mở vòng 1: đọc 7 tệp + STATE + review subagent trước task đầu |
 | 2026-11-12 | — | khởi tạo | `ca2eaf5` | — | — | bàn giao vòng 1: 17 dòng task, 5 READY (KT-01, KT-02, KT-04a, KT-T26, KT-R1), KT-04d REVIEW |
+
+## KT-67a — invocation hẹp (D2-97): memsrv tự retype + client U-mode map/đọc/ghi thật
+
+**Vào**: HEAD `19341f07` (`[KT-00]` mở KT-67a; D2-97: invocation **đã** trong ABI); baseline
+`gate --fast` **PASS 661/87**; worktree không chạm tab khác.
+
+**Đỏ-trước** (4 log giữ trong `JOURNAL/`, không xoá): `kt67a-red-no-invocation.log` (bỏ nhánh
+invocation ⇒ mọi `Call` non-Endpoint trả **18**, TAP 15..18 đỏ); `kt67a-red-no-map.log` (chỉ
+Retype ⇒ TAP 15 xanh, 16/17/18 đỏ); `kt67a-red-retype-unregistered.log` (bridge chưa đăng ký cap
+Untyped ⇒ `registered=0`, `retype err=1`); `kt67a-red-satp-kernel-fault.log` (không khôi phục
+root kernel ⇒ `PANIC: trap LoadPageFault stval=0xffffffc0804fb008` — bug thật, vá bằng
+`with_kernel_root`).
+
+**Sửa** — (1) **core** `invoke.rs` (mới): giải mã `MessageInfo` (`label = method`), danh sách
+trắng `Untyped.Retype (1.0)`, `Frame.Map (11.0)`, `Frame.Unmap (11.1)`; method/loại khác ⇒
+`NotSupported` 18 + `INVOCATION_STATS`; Retype kiểm quyền `RIGHT_WRITE`/slot đích **trước**, hook
+arch cấp object rồi core `add_foreign_object` + `root_cap` + `put_cap` (lỗi core ⇒
+`release_object` rollback); 6 test host (core **25** test). (2) `syscall.rs`: hook
+`SyscallEnv::invoke`/`release_object` (mặc định 18 — D2-53 Q11), syscall 0 rẽ nhánh Endpoint/IPC
+vs invocation. (3) `spec.rs`/`lib.rs`: tái xuất `CORE_OBJECTS`/`RESERVED_OBJECTS` (id object sinh
+từ spec — D2-11). (4) **plat**: `mem_bridge::invoke/register_untyped/release_key` (object layer
+thi hành `retype/map/unmap` + `sfence`; bảng một chiều core ObjId → cap Untyped, D2-83);
+`UserMemAccess::invoke` + `with_kernel_root` (satp đang là root user trong syscall — phải khôi
+phục root kernel rồi trả lại trước `sret`). (5) **U-mode**: `init/inv_user.S` + `inv_user.rs`
+(ELF `inv.elf`, **0 `unsafe`**): tự `Untyped.Retype` Frame 4 KiB (slot 15), `Frame.Map` vào VSpace
+slot 14 tại `0x4100_0000` (cờ `R|W|U=0xb`), `sd`/`ld` 8 B **thật** (`0x1122334455667788`),
+`Frame.Unmap`, đọc lại ⇒ fault, 2 invocation ngoài danh sách ⇒ 18. (6) **ảnh test**
+`ktest_user.rs`: pha `invocation_phase` (TAP 15..18) cấp cap lúc “spawn” (copy cap Untyped boot +
+cap VSpace đại diện), nạp `inv.elf` ô 1, đăng ký bridge; `ktest.sh`/`expected.txt`:
+`ktest-user 18 18` + 6 dòng evidence `# inv:` + PANIC mới (KT-54: cùng commit).
+
+**Bằng chứng** (`JOURNAL/kt67a-ktest-user.log`, số do kernel in — D2-80):
+
+```text
+# inv: prep untyped_slot=13 vspace_slot=14 frame_slot=15 frame_b_slot=18 vspace_ro_slot=19 tcb=16 va=0x41000000 registered=1 vspace_key=0x13000e frame_b_pa=0x82015000 root=0x804fb000
+# inv: retype method=0 ty=Frame size=12 err=0 slot=15 stats=1/3
+# inv: map method=0 va=0x41000000 pa=0x82016000 err=0 stats=1 phys=0x1122334455667788
+# inv: unmap method=1 va=0x41000000 err=0 stats=1 walk_after=0 objmem=1 caps=1
+# inv: deny err=18 stats=3 allowed=3 last_err=18 syscalls=22 entries=2
+# inv: deny2 ran=1 frame_a_maps=0 frame_b_maps=0 ro_vspace=1 caps_msg=1 walk_after=0
+# inv: fault va=0x41000000 kind=Vm{NotMapped,Read} ok=1 snap_state=Faulted
+```
+
+- TAP `ktest-user` **18/18**; matrix `ktest.sh 1 matrix` **12/12** (65/65 + 3/3 + 18/18 + 10/10 ×
+  smp 1/2/4, `JOURNAL/kt67a-ktest-matrix.log`); soak ảnh sản phẩm **0/1000** wall **251 s**
+  (`JOURNAL/kt67a-soak.log`, `build=02ed5a1810ba59ce` sha256 `7f7a7936…`).
+- `gate --fast` **PASS 661/87** (L1 1.000 seed **1.118 ms**); `cargo test -p vifast-core` **25/25**
+  (`JOURNAL/kt67a-core-tests.log`).
+- Budget `.data+.bss`: product **200.184**, ktest **209.920**, guard **2.680**, user **202.408**,
+  proc **206.560** / trần **262.144**; `size_of::<Machine>() = 188.872 B` ≤ pin **196.608**
+  (D2-84/85).
+
+**Nợ** (chi tiết `k6-memsrv.md` §7.5 / `k3b-core.md` §14.6): chuyển cap giữa **hai TCB U-mode**
+còn bất khả (`build_message` từ chối `caps > 0`; shim không có cửa sổ cap) ⇒ memsrv+client là
+**một** chương trình/cspace; `CNode.Insert` không có method id trong spec ⇒ giữ 18; D2-97 ghi
+“27 method” nhưng spec có **13** — đề nghị Agent 0 đính chính (không sửa spec).

@@ -60,6 +60,7 @@ mod core_sync;
 mod core_tcb;
 mod error;
 mod footprint;
+pub mod invoke;
 pub mod ipc;
 mod machine;
 mod machine_slot;

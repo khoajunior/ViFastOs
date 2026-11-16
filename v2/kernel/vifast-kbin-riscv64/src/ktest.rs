@@ -104,8 +104,10 @@
 //! 55. `ok 55 - core revoke finalise` — `Revoke` cây Untyped khi có caller/waiter/hàng: caller
 //!     `Ready + Cancelled`, Recv/Notification waiter thức (`Ready + Cancelled`), hàng rỗng,
 //!     `ipc_dropped` cộng đủ; evidence `# ipc: revoke …`.
+//!
 //! 56..59. `ok 56..59` — KT-64: slot CNode từ arena, `SchedContext.Bind`, `tcb_resume_with_regs`,
 //!    `TlbFlush` thật (xem `ktest_core64`).
+//!
 //! 60..64. `ok 60..64` — **KT-67** (K6): `vifast-alloc` cấp Frame 2 MiB + 4 KiB (ghi/đọc thật,
 //!    đối chiếu byte hai phía), `Revoke` về 0 + cấp lại đúng PA cũ, hết memory trả mã 9 không
 //!    panic, **cầu nối D2-83** (cap Frame của object layer được đại diện trong core, chuyển qua

@@ -28,6 +28,8 @@ fn main() {
     println!("cargo:rerun-if-changed=init/procsrv_user.rs");
     println!("cargo:rerun-if-changed=init/shell_user.rs");
     println!("cargo:rerun-if-changed=init/child_user.rs");
+    println!("cargo:rerun-if-changed=init/inv_user.rs");
+    println!("cargo:rerun-if-changed=init/inv_user.S");
     println!("cargo:rerun-if-changed=init/init.ld");
     if std::env::var_os("CARGO_FEATURE_USER").is_none() {
         return;
@@ -56,6 +58,8 @@ fn main() {
         "child.elf",
         Some(&user_lib),
     );
+    // KT-67a: chương trình U-mode invocation/memsrv (D2-97).
+    build_user_elf(Path::new(&dir), "inv_user.rs", "inv.elf", Some(&user_lib));
 }
 
 /// Biên dịch + liên kết một chương trình user thành ELF64 ở `$OUT_DIR/<out_name>`.

@@ -47,6 +47,10 @@
 #![no_std]
 #![no_main]
 
+// KT-67a: pha invocation tách tệp (R1 ≤ 1.500 dòng).
+#[path = "ktest_inv.rs"]
+mod ktest_inv;
+
 use core::fmt::Write;
 
 use vifast_core::syscall::{SyscallEnv, SyscallOutcome, REPLY_NONE};
@@ -72,7 +76,7 @@ const MARKER_BYTES: u64 = 51;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..14\n");
+    PLATFORM.put_str("TAP version 13\n1..18\n");
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
     // Bảng trang + arena/guard trước (mmu::init bật satp); ASID lease rồi object layer.
@@ -456,16 +460,24 @@ pub extern "C" fn rust_main() -> ! {
         PLATFORM.halt(1)
     }
 
+    // ---------------- TAP 15..18: KT-67a invocation (D2-97) trên U-mode thật ----------------
+    ktest_inv::invocation_phase(sys.root, sys.us, sys.cspace, obj.untyped0, &mut fails);
+
+    if fails > 0 {
+        PLATFORM.put_str("# ktest halt\n");
+        PLATFORM.halt(1)
+    }
+
     // ---------------- kết thúc sạch (KT-66): ảnh user chỉ còn 14 TAP syscall/core -------------
     // Demo procsrv/shell/con + fault phase KT-56 đã **tách** sang ảnh `vifast-kbin-ktest-proc`
     // (`src/ktest_proc.rs`) để ảnh này trả headroom: không còn `proc_demo`, 3 ELF demo và
     // 32 KiB stack syscall tĩnh trong `.bss` của ảnh này.
     user::print_stack_evidence();
-    PLATFORM.put_str("# ktest-user: taps=14 ok=1\n");
+    PLATFORM.put_str("# ktest-user: taps=18 ok=1\n");
     // PANIC **có chủ đích** (không phải fault): kết thúc boot sạch với đúng **một** dòng PANIC
     // theo mẫu của runner (`expected.txt`: `ktest-user 14 14`). In thẳng + `halt` (không qua
     // `panic!`) để log không có dòng `PANIC at …` thứ hai.
-    PLATFORM.put_str("PANIC: KT-66 u-mode pha syscall xong (14 TAP, 0 fail)\n");
+    PLATFORM.put_str("PANIC: KT-67a u-mode pha syscall va invocation xong (18 TAP, 0 fail)\n");
     PLATFORM.halt(1)
 }
 

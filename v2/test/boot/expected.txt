@@ -46,9 +46,10 @@ ktest 65 65
 ktest-guard 3 3
 
 # KT-53 → **KT-62/H** — ảnh test **user** (bin riêng): U-mode + `init` ELF + **16 syscall đi vào
-# `Machine` thật** = 14 TAP (1..14). KT-66 **tách ảnh demo** sang `ktest-proc` (bên dưới) để ảnh
-# này trả headroom; boot kết thúc bằng `PANIC: KT-66 u-mode pha syscall xong (14 TAP, 0 fail)`.
-ktest-user 14 14
+# `Machine` thật** = 14 TAP (1..14) + **KT-67a** invocation hẹp = **18 TAP** (15..18). KT-66
+# **tách ảnh demo** sang `ktest-proc` (bên dưới) để ảnh này trả headroom; boot kết thúc bằng
+# `PANIC: KT-67a u-mode pha syscall va invocation xong (18 TAP, 0 fail)`.
+ktest-user 18 18
 
 # **KT-66** — ảnh demo thứ tư `vifast-kbin-ktest-proc` (bin riêng, cùng feature `ktest,user`):
 # đúng mười ca cũ **15..24** của `ktest-user`, đánh số lại **1..10** (TAP một ảnh phải liên tục

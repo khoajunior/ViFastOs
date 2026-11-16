@@ -150,3 +150,125 @@ nguồn sự thật, cần D2 + rủi ro + ngân sách riêng. Hai lựa chọn 
 
 Chốt: **(A)** trong KT-67 (D2-96); phần invocation để memsrv tự retype là **KT-67a** (D2 mới),
 không nhét vào task này.
+
+## 7. KT-67a — invocation hẹp: memsrv **thật** (tự retype) + client **map/đọc/ghi thật**
+
+**D2-97 sửa D2-96(b)/(c)**: invocation **đã** nằm trong ABI (`spec/abi.toml` `[syscall].0`:
+*“Endpoint: IPC; object khác: invocation (method = label), trả ngay”*), nên KT-67a **không** mở
+`spec/`, không thêm syscall, không đổi 16 số hiệu, không đổi `MessageInfo` 35 bit. Việc của task
+là **cài đặt** đường invocation.
+
+### 7.1 Đã cài (danh sách trắng hẹp, tăng dần)
+
+| Object (id `[object]`) | method | Nghĩa | Trạng thái |
+|---|---|---|---|
+| `Untyped` (1) | 0 (`Retype`) | memsrv tự cấp `Frame`/`PageTable`/`VSpace` từ cap `Untyped` của mình | **cài** (đợt 1) |
+| `Frame` (11) | 0 (`Map`) | map **chính Frame** vào `VSpace` truyền ở `MR0` | **cài** (đợt 2) |
+| `Frame` (11) | 1 (`Unmap`) | gỡ mapping tại `MR1` | **cài** (đợt 2) |
+| mọi cặp khác | — | `NotSupported` **18** (D2-53 Q11) — **không** `Ok` giả; có đếm (`# inv: deny`) | giữ nguyên |
+
+> **Tên method**: “`VSpace.Map`” của D2-97 **không có số method** trong ABI hiện tại —
+> `VSpace` (id 9) chỉ có `GetAsid = 0`, method id 1 **để trống theo D2-32**; `PageTable`
+> (id 10) có `Map = 0` nhưng root PageTable **không có cap** trong object layer. Vì vậy phép
+> map đi qua đúng tên/số method mà spec cấp cho thao tác này: **`Frame.Map` = 11.0** (map Frame
+> vào VSpace ở `MR0`). Không thêm method id mới.
+
+Kênh tham số (core `v2/kernel/vifast-core/src/invoke.rs`) — **quy ước D2-99** (lead, 2026-11-16):
+`MR0..MR3` + trả `a1`; đây **không phải** “không có ABI mới” — chữ ký tham số **chưa** có trong
+`spec/`, **KT-67b** sẽ cập nhật `spec/` **một lần** (`Untyped.Retype` + `Frame.Map/Unmap`) cho
+khớp D2-99:
+
+| Method | `MR0` | `MR1` | `MR2` | `MR3` |
+|---|---|---|---|---|
+| `Untyped.Retype` | cptr đích (slot trong CSpace caller) | `type` id (`[object]` 9/10/11) | `size_bits` | `flags` (0; `GUEST` reserved ⇒ `NotSupported` với VSpace) |
+| `Frame.Map` | cptr cap `VSpace` | `va` | cờ `R=1,W=2,X=4,U=8,Device=16` | — |
+| `Frame.Unmap` | cptr cap `VSpace` | `va` | — | — |
+
+Kiểm quyền/bất biến trên đường invocation (reviewer-kt67a M1/M2):
+
+- `Frame.Map` **và** `Frame.Unmap` đòi cap `VSpace` ở `MR0` có `RIGHT_WRITE` (cap chỉ READ ⇒
+  `InsufficientRights` **3**);
+- `Frame.Unmap` **ràng buộc Frame ↔ mapping**: leaf tại `va` phải thuộc **đúng** cap Frame được
+  gọi (so PA — PA Frame là duy nhất); VA đang map Frame khác/không map ⇒ `InvalidCapability` **1**
+  hoặc `NotMapped` **11**, mapping **không** bị gỡ (test âm trong TAP 17);
+- `MessageInfo.caps > 0` (chuyển cap qua invocation — KT-67b) ⇒ `NotSupported` **18** + đếm
+  (D2-99(g)); method/loại ngoài danh sách cũng **18** + đếm.
+
+Biên giới D2-83 giữ nguyên: core **không** đọc/ghi PTE/byte; nó kiểm cap/quyền/loại, giải mã
+method rồi gọi hook `SyscallEnv::invoke` — arch cài bằng object layer (`mem_bridge::invoke` →
+`ObjectLayer::retype/map/unmap` + `sfence.vma`). Retype xong, object layer trả `key`; core dựng
+**object đại diện** + cap gốc rồi `put_cap` vào slot đích của caller (nguyên tử; lỗi bảng ⇒
+`release_object` trả object về object layer).
+
+### 7.2 memsrv: bỏ đường kernel-mediated
+
+Chương trình U-mode `init/inv_user.S` (ELF riêng `inv.elf`, nạp vào ô tác vụ 1) giữ **cap
+`Untyped` được cấp lúc spawn** (slot 13 — bản `copy` của cap Untyped boot, có `RIGHT_WRITE`) và
+tự `Untyped.Retype` ⇒ `Frame` 4 KiB vào slot 15. **Không** gọi `mem_bridge::grant` (đường
+kernel-mediated của KT-67); `grant`/`release`/`resolve` vẫn giữ trong crate như **đường phụ**
+(TAP 63/64 cũ dùng), không phải đường cấp Frame của pha này.
+
+Bridge chỉ còn **một bảng một chiều** `core ObjId → cap Untyped của object layer`
+(`mem_bridge::register_untyped`, tối đa 4 entry) để hook biết cap nào sở hữu byte — byte/PA vẫn
+do object layer quyết (D2-83), core không kế toán PA.
+
+### 7.3 Client U-mode: map/ghi/đọc/unmap/fault thật
+
+Cùng chương trình (một cspace) làm **client**: `Frame.Map` map Frame vừa retype vào VSpace của
+chính nó tại `0x4100_0000` (cap VSpace ở slot 14, do kernel cài lúc spawn), rồi:
+
+1. `sd`/`ld` 8 B qua PTE vừa cài — giá trị `0x1122334455667788`;
+2. `Frame.Unmap` gỡ mapping;
+3. đọc lại đúng VA ⇒ **load page fault** `scause=0xd`, `stval=0x4100_0000` — kernel phân loại
+   `FaultKind::Vm{access=Read, reason=NotMapped}` (lượt chạy dùng `enter_expect_fault`, test-only);
+4. hai invocation ngoài danh sách trắng ⇒ `NotSupported` 18.
+
+Bằng chứng do **kernel đo**, không tin lời chương trình: `mem_bridge::resolve(core obj)` → PA
+thật của Frame, kernel đọc 8 B **vật lý** tại PA (đúng giá trị chương trình ghi),
+`ObjectLayer::walk` sau `Unmap` trả invalid, `FaultKind` lấy từ trap phần cứng.
+
+### 7.4 TAP + bằng chứng (`# inv:`, KT-67a)
+
+TAP 15..18 của ảnh `ktest-user` (18 TAP; `expected.txt` `ktest-user 18 18`); dòng log lấy từ
+boot thật (`v2/agent/JOURNAL/kt67a-journal.md` §3, D2-80):
+
+```text
+# inv: prep untyped_slot=13 vspace_slot=14 frame_slot=15 frame_b_slot=18 vspace_ro_slot=19 tcb=16 va=0x41000000 registered=1 vspace_key=0x13000e frame_b_pa=0x82015000 root=0x804fb000
+# inv: retype method=0 ty=Frame size=12 err=0 slot=15 stats=1/3
+# inv: map method=0 va=0x41000000 pa=0x82015000 err=0 stats=1 phys=0x1122334455667788
+# inv: unmap method=1 va=0x41000000 err=0 stats=1 walk_after=0 objmem=1 caps=1
+# inv: deny err=18 stats=3 allowed=3 last_err=18 syscalls=22 entries=2
+# inv: deny2 ran=1 frame_a_maps=0 frame_b_maps=0 ro_vspace=1 caps_msg=1 walk_after=0
+# inv: fault va=0x41000000 kind=Vm{NotMapped,Read} ok=1 snap_state=Faulted
+ok 15 - invocation untyped retype
+ok 16 - invocation frame map
+ok 17 - invocation frame unmap va fault
+ok 18 - invocation ngoai danh sach
+```
+
+`stats=…/…` là **delta** của riêng pha (mốc trước pha đã có 1 lần `NotSupported` từ TAP 8
+kernel-level: `Call` trên cap TCB) — TAP không phụ thuộc thứ tự pha.
+
+Red-before (log trong `v2/agent/JOURNAL/`):
+`kt67a-red-no-invocation.log` (bỏ nhánh invocation ⇒ cả 4 TAP đỏ, trả 18),
+`kt67a-red-no-map.log` (chỉ có Retype ⇒ TAP 15 xanh, 16/17/18 đỏ),
+`kt67a-red-retype-unregistered.log` + `kt67a-red-satp-kernel-fault.log` (đường memsrv thật hỏng:
+bridge chưa đăng ký ⇒ `err=1`; và kernel fault khi chạm object layer lúc `satp` = root user).
+
+### 7.5 Còn BLOCKED (file:line)
+
+1. **Chuyển cap Frame từ memsrv U-mode sang một client TCB khác** — **không phải thiếu ABI**
+   (D2-98): receive window **đã** nằm trong ABI — `spec/abi.toml`
+   `[calling.riscv64].ipc_buffer = "Frame bind qua Tcb.Configure; header chứa receive window
+   (CPTR, ≤4 cap)"` (dòng 58) — và core đã có `tcb_set_recv_window`/`plan_cap_transfer`/
+   `deliver_caps` (`v2/kernel/vifast-core/src/core_ipc.rs`, `core_capxfer.rs`). Phần **thiếu là
+   shim U-mode**: `syscall7` (`v2/kernel/vifast-plat-user/lib.rs:28`) không ghi header IPC buffer
+   (khai `caps` + CPTR nguồn); chỗ **từ chối** `MessageInfo.caps > 0` hiện là nhánh invocation
+   (`v2/kernel/vifast-core/src/invoke.rs`, trả 18) — `build_message`
+   (`v2/kernel/vifast-core/src/syscall.rs`) **không** kiểm `caps`. Vì vậy pha này **memsrv + client là
+   một chương trình/cspace**; **KT-67b (D2-98)** cài header IPC buffer + receive window trong
+   shim để tách 2 tiến trình — **không** cần sửa `spec/`.
+2. **`CNode.Insert`** (D2-96/97 nhắc) **không có method id** trong bảng `CNode` của
+   `spec/abi.toml` (`Copy=0, Mint=1, Move=2, Mutate=3, Delete=4, Revoke=5, Rotate=6`; `spec/`
+   đóng băng) ⇒ chưa cài, `NotSupported`. Core **đã có** API `Machine::copy/mint/delete/revoke`
+   nên task sau chỉ cần gắn method id có sẵn (0/1/2/4/5) — không thêm id mới.

@@ -48,7 +48,7 @@
 //!
 //! `#![forbid(unsafe_code)]` của crate áp dụng nguyên vẹn: tệp này chỉ gọi API an toàn.
 
-use crate::error::{KError, ObjId, SlotRef};
+use crate::error::{KError, ObjId, ObjType, SlotRef};
 use crate::ipc::{Message, MessageInfo, WORDS_IN_REGISTERS};
 use crate::machine::Machine;
 use crate::spec::SYSCALL_COUNT;
@@ -170,6 +170,20 @@ pub trait SyscallEnv {
     /// Số hart **nền tảng đang online** (≤ 8) — D2-88(a): `DebugGetInfo.num_harts` là số hart
     /// phần cứng (arch đọc SBI HSM), **không** phải số hart mà core model đang chạy.
     fn num_harts(&mut self) -> u64;
+
+    /// **Invocation** (KT-67a, D2-97) trên object không phải Endpoint — arch cài bằng object
+    /// layer (D2-83: core không sở hữu `Frame`/`PageTable`/`VSpace`). Trả **mã lỗi ABI** khi
+    /// hỏng. Mặc định `NotSupported` (18) — đúng D2-53 Q11 cho nền tảng chưa cài invocation.
+    fn invoke(
+        &mut self,
+        _op: crate::invoke::InvokeOp,
+    ) -> Result<crate::invoke::InvokeOutcome, u64> {
+        Err(KError::NotSupported.id() as u64)
+    }
+
+    /// Rollback object vừa cấp bên object layer khi core **không** dựng nổi object đại diện
+    /// (bảng đầy) — giữ nguyên tử của `Untyped.Retype`. Mặc định không làm gì.
+    fn release_object(&mut self, _key: u64) {}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -192,6 +206,20 @@ fn cap_slot(m: &Machine, tcb: ObjId, cptr: u64) -> Result<SlotRef, KError> {
         return Err(KError::InvalidCapability);
     }
     Ok(SlotRef::new(cspace, slot))
+}
+
+/// Loại object của cap tại `slot` — invocation cần biết trước khi quyết định đường IPC hay
+/// invocation (syscall 0). Slot rỗng/cap chết ⇒ `InvalidCapability` (1) như `cap_slot`.
+fn cap_type_at(m: &Machine, slot: SlotRef) -> Result<ObjType, KError> {
+    let cap = m.cap_at(slot.cnode, slot.slot).map_err(|e| match e {
+        KError::SlotEmpty => KError::InvalidCapability,
+        other => other,
+    })?;
+    let info = m.cap_info(cap)?;
+    if !info.alive {
+        return Err(KError::InvalidCapability);
+    }
+    Ok(info.ty)
 }
 
 /// Dựng `Message` từ `MessageInfo` thô + tối đa 4 MR thanh ghi.
@@ -290,11 +318,25 @@ pub fn dispatch(
     }
     match nr {
         // ---------------------------------------------------------------- IPC 0..7
-        0 => match cap_slot(m, tcb, args[0])
-            .and_then(|ep| build_message(args[1], &args[2..6]).map(|msg| (ep, msg)))
-        {
-            Ok((ep, msg)) => match m.call_msg(tcb, ep, msg) {
-                Ok(()) => after_ipc(m, tcb, hart, SyscallReturn::new(0, 0)),
+        0 => match cap_slot(m, tcb, args[0]) {
+            // D2-97: cap **không** phải Endpoint ⇒ invocation (method = `label`), trả ngay.
+            Ok(slot) => match cap_type_at(m, slot) {
+                Ok(ty) if ty != ObjType::Endpoint => {
+                    let mrs = [args[2], args[3], args[4], args[5]];
+                    match crate::invoke::dispatch(m, tcb, slot, args[1], &mrs, env) {
+                        Ok((error, value)) => {
+                            SyscallOutcome::Return(SyscallReturn::new(error, value))
+                        }
+                        Err(code) => SyscallOutcome::Return(SyscallReturn::err(code)),
+                    }
+                }
+                Ok(_) => match build_message(args[1], &args[2..6]) {
+                    Ok(msg) => match m.call_msg(tcb, slot, msg) {
+                        Ok(()) => after_ipc(m, tcb, hart, SyscallReturn::new(0, 0)),
+                        Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
+                    },
+                    Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
+                },
                 Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),
             },
             Err(e) => SyscallOutcome::Return(SyscallReturn::err(e.id() as u64)),

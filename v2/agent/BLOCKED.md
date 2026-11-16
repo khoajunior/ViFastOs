@@ -237,14 +237,42 @@ theo ràng buộc task.
 
 **Hai lựa chọn** (chi tiết + phân tích: `v2/docs/k6-memsrv.md` §6):
 
-- **(A) đề xuất** — memsrv `NBRecv` request rồi gửi yêu cầu cấp; kernel
+- **(A) đề xuất — SUPERSEDED bởi D2-97/D2-98/D2-99 (giữ làm lịch sử)** — memsrv `NBRecv` request rồi gửi yêu cầu cấp; kernel
   (`vifast-plat-riscv64::mem_bridge::grant` + `prepare_caps`) cấp Frame và cài cap vào receive
   window của client. Không sửa `spec/`; nhược điểm: quyền của cap client do kernel kiểm hộ.
 - **(B)** — mở ABI một lần (D2 mới + sửa `spec/` + sim/parity): memsrv tự cấp/trả cap.
 
-**ĐÃ CHỐT (D2-96, lead 2026-11-16)**: chọn **(A)** — KT-67 = allocator thật + memory bridge
-**kernel-mediated**; `memsrv` U-mode = **policy façade** (chưa cài). Invocation hẹp
+**ĐÃ CHỐT (D2-96, lead 2026-11-16) — SUPERSEDED bởi D2-97/D2-98/D2-99**: chọn **(A)** — KT-67 =
+allocator thật + memory bridge **kernel-mediated**; `memsrv` U-mode = **policy façade** (chưa cài).
+Invocation hẹp
 `Untyped.Retype` (để memsrv giữ cap `Untyped` và tự retype) tách sang **KT-67a** (D2 mới vì mở
 `spec/[method_signature]`), **không** nhét vào KT-67.
 
 Không còn câu hỏi mở cho KT-67; **không** tự mở `spec/`.
+
+**CẬP NHẬT KT-67a (2026-11-16, Agent 2)**: **D2-97** phát hiện invocation **đã** nằm trong ABI
+(`spec/abi.toml` `[syscall].0`: “object khác: invocation (method = label)” + `[object]`), nên
+**không** cần mở `spec/`; KT-67a đã **cài** đường invocation hẹp và **gỡ** phần “memsrv không tự
+retype”. Đường cấp Frame của pha này **không** đi qua `mem_bridge::grant`: U-mode `Call` ⇒ core
+`invoke` (kiểm cap/quyền của chính caller) ⇒ `SyscallEnv::invoke` ⇒ `mem_bridge::invoke` — đây là
+**hook arch của object layer** (nơi **duy nhất** sở hữu Frame theo D2-83), **không** phải bước
+kernel quyết định/cấp hộ như `grant`.
+
+- `Untyped.Retype` (method 0): memsrv U-mode giữ cap `Untyped` (cấp lúc spawn) và **tự** retype
+  `Frame` — không còn đường kernel-mediated `mem_bridge::grant` trong pha này;
+- `Frame.Map`/`Frame.Unmap` (method 0/1): client U-mode **tự map** Frame vào VSpace của mình, ghi/
+  đọc thật 8 B, unmap rồi đọc lại ⇒ `FaultKind::Vm{NotMapped,Read}` (TAP `ktest-user` 15..18).
+
+**Còn một điểm chưa làm — nhưng KHÔNG phải thiếu ABI (D2-98 sửa lại)**: **chuyển cap Frame
+giữa hai TCB U-mode** (memsrv → client khác tiến trình). ABI **đã có** receive window trong IPC
+buffer: `spec/abi.toml` `[calling.riscv64].ipc_buffer = "Frame bind qua Tcb.Configure; header chứa
+receive window (CPTR, ≤4 cap)"` (dòng 58), và core đã có mô hình
+`tcb_set_recv_window`/`plan_cap_transfer`/`deliver_caps` (`v2/kernel/vifast-core/src/core_ipc.rs`,
+`core_capxfer.rs`). Phần **thiếu là shim U-mode**: `syscall7`
+(`v2/kernel/vifast-plat-user/lib.rs:28`) **không** ghi header IPC buffer (nơi khai `caps` + CPTR
+nguồn), và `build_message` (`v2/kernel/vifast-core/src/syscall.rs`) từ chối `MessageInfo.caps > 0`
+thay vì lấy window từ header. Vì vậy KT-67a chứng minh **memsrv+client trong một cspace**;
+**KT-67b (D2-98)** cài header IPC buffer + receive window trong shim để tách hai tiến trình —
+**không** cần sửa `spec/`. Ngoài ra `CNode.Insert` mà D2-96/97 nhắc **không có method id** trong
+bảng `CNode` của spec (`Copy=0..Rotate=6`, spec đóng băng) nên giữ `NotSupported`; core đã có API
+`copy/mint/delete/revoke` để gắn id có sẵn ở task sau.

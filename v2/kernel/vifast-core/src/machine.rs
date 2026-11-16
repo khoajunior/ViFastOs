@@ -1013,6 +1013,37 @@ impl Machine {
         Ok(())
     }
 
+    /// **KT-67a (reviewer L2)** — bỏ một cap **chưa nằm trong slot** (rollback nội bộ khi cài
+    /// cap đại diện thất bại): đánh dấu cap chết + reparent con về ông gần nhất, **không** đụng
+    /// CNode. Từ chối cap đang ở slot (dùng `delete`) hoặc cap đã chết.
+    pub fn drop_root_cap(&mut self, cap: CapId) -> Result<(), KError> {
+        let c = self.cap(cap)?;
+        if !c.alive || c.slot.is_some() {
+            return Err(KError::IllegalOperation);
+        }
+        let mut new_parent = c.parent;
+        while let Some(p) = new_parent {
+            if p != 0 && (p as usize) <= self.n_caps && self.caps[p as usize - 1].alive {
+                break;
+            }
+            new_parent = if p != 0 && (p as usize) <= self.n_caps {
+                self.caps[p as usize - 1].parent
+            } else {
+                None
+            };
+        }
+        for other in &mut self.caps[..self.n_caps] {
+            if other.alive && other.parent == Some(cap) {
+                other.parent = new_parent;
+            }
+        }
+        if let Some(entry) = self.caps.get_mut(cap as usize - 1) {
+            entry.alive = false;
+            entry.parent = None;
+        }
+        Ok(())
+    }
+
     /// `CNode.Revoke`: xoá con/cháu của cap trong `slot` (hoặc mọi cap của CNode khi
     /// `slot = None`). Revoke cap Untyped finalise mọi object trong cây Untyped và đặt
     /// watermark về 0. Trả số cap bị xoá.
