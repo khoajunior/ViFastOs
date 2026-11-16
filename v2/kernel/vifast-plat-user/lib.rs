@@ -38,6 +38,7 @@
 #![no_std]
 
 use core::arch::asm;
+use core::sync::atomic::Ordering;
 
 /// Syscall `Call` — Endpoint: IPC; object khác: invocation (D2-97).
 pub const SYS_CALL: u64 = 0;
@@ -331,6 +332,46 @@ pub fn poke_u64(va: u64, value: u64) {
 /// sống của mình, vd. giữ message đang chờ trong hàng Endpoint; `Exit` sẽ huỷ hàng chờ — D2-25).
 pub fn yield_now() -> [u64; 7] {
     syscall7(SYS_YIELD, 0, 0, 0, 0, 0, 0)
+}
+
+// ---------------------------------------------------------------------------------------------
+// KT-69 — truy cập **nguyên tử** trên vùng nhớ user (ring chia sẻ)
+// ---------------------------------------------------------------------------------------------
+
+/// Đọc 8 B kiểu **Acquire** tại `va` của **chính** tiến trình (D2-101: chỉ bộ nhớ user, không
+/// CSR/không lệnh đặc quyền). Dùng cho ring 1 producer/1 consumer: consumer thấy slot trước khi
+/// thấy `head` tăng.
+///
+/// # Safety nội bộ
+/// `va` phải **căn 8** và nằm trong vùng đã map `R` của tiến trình gọi; caller bảo đảm (ring
+/// dùng offset hằng trong Frame đã map). Không có writer đồng thời cùng ô (SPSC).
+pub fn atomic_load_acquire(va: u64) -> u64 {
+    // SAFETY: xem trên — `AtomicU64` chỉ yêu cầu căn lề + vùng nhớ hợp lệ; đây là bộ nhớ user
+    // của chính tiến trình, không phải CSR/physmap.
+    unsafe { (*(va as *const core::sync::atomic::AtomicU64)).load(Ordering::Acquire) }
+}
+
+/// Ghi 8 B kiểu **Release** tại `va` (cùng điều kiện như [`atomic_load_acquire`]) — publish
+/// `head`/`tail` sau khi slot đã ghi/đọc xong.
+pub fn atomic_store_release(va: u64, value: u64) {
+    // SAFETY: xem [`atomic_load_acquire`] — chỉ ghi bộ nhớ user đã map `R|W`, ô 8 B căn lề.
+    unsafe {
+        (*(va as *const core::sync::atomic::AtomicU64)).store(value, Ordering::Release);
+    }
+}
+
+/// Đọc 8 B thường (Relaxed) tại `va` — cho word payload của slot (không phải điểm đồng bộ).
+pub fn atomic_load_relaxed(va: u64) -> u64 {
+    // SAFETY: như [`atomic_load_acquire`].
+    unsafe { (*(va as *const core::sync::atomic::AtomicU64)).load(Ordering::Relaxed) }
+}
+
+/// Ghi 8 B thường (Relaxed) tại `va` — cho word payload của slot.
+pub fn atomic_store_relaxed(va: u64, value: u64) {
+    // SAFETY: như [`atomic_load_acquire`].
+    unsafe {
+        (*(va as *const core::sync::atomic::AtomicU64)).store(value, Ordering::Relaxed);
+    }
 }
 
 /// `Exit(code)` rồi chờ kernel thu hồi — không quay lại U-mode.

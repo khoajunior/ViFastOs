@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# IDL tối thiểu của ViFastOs v2 (KT-69) — interface `ringchan`.
+#
+# Định dạng (một interface / một tệp, dòng `#` là chú thích):
+#   interface <tên> version <u32>
+#   method <tên>
+#     param <tên> <u32|u64>      # tham số vô hướng, tối đa 4 (MR0..MR3)
+#     cap <tên> <frame|buffer>   # tối đa MỘT cap/buffer trên mỗi method
+#     returns <u32|u64|unit>
+#
+# Method id **sinh tuần tự từ tệp này** (0..N-1 theo thứ tự khai báo): `spec/abi.toml` không có
+# bảng method cho interface mới, nên generator ghi rõ nguồn số thay vì đọc spec (D2-102c).
+# Sinh stub: `./v2/bin/vifast-idl gen`; kiểm lệch: `./v2/bin/vifast-idl --check`.
+interface ringchan version 1
+
+# Server -> client: trao cap Frame của ring + hình học slot. Đây là method **duy nhất** mang cap.
+method attach
+  param slots u32
+  cap buf frame
+  returns u32
+
+# Client -> server: nhịp đồng bộ sau mỗi lô đã tiêu thụ (phase tăng dần, count = tổng đã nhận).
+method sync
+  param phase u32
+  param count u64
+  returns u32
+
+# Client -> server: kết thúc — mã lỗi quan sát được + tổng đã gửi/đã nhận.
+method finish
+  param err u32
+  param sent u64
+  param got u64
+  returns u32

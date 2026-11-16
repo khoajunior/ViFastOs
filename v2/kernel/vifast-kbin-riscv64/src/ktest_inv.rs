@@ -387,6 +387,13 @@ pub fn invocation_phase(
     // **KT-68** — trả `VSpace`/PageTable của pha này về object layer sau khi đã đo xong TAP
     // 15..18: arena object layer chỉ 64 KiB và pha capalloc cần ~16 KiB PageTable cho hai
     // chương trình mới. Chỉ giải phóng **sau** mọi phép đo; không đổi kết quả TAP nào ở trên.
-    let _ = aobj::machine().revoke(loaded.vspace);
+    // KT-69: xoá cap tạm trong cspace gốc (13..19) sau khi đo xong — cspace gốc chỉ 32 slot,
+    // các pha sau cần slot trống; không đổi kết quả TAP 15..18.
+    core_bridge::with_machine(|m| {
+        for slot in INV_SLOT_UNTYPED..=INV_SLOT_VSPACE_RO {
+            let _ = m.delete(SlotRef::new(root, slot));
+        }
+    });
+    loaded.release();
     ok15 && ok16 && ok17 && ok18
 }

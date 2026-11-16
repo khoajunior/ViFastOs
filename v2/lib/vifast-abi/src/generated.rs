@@ -116,6 +116,20 @@ pub const CNODE_METHODS: [(&str, u16); 7] = [
     ("Rotate", 6),
 ];
 #[rustfmt::skip]
+pub const CNODE_COPY: u32 = 0;
+#[rustfmt::skip]
+pub const CNODE_MINT: u32 = 1;
+#[rustfmt::skip]
+pub const CNODE_MOVE: u32 = 2;
+#[rustfmt::skip]
+pub const CNODE_MUTATE: u32 = 3;
+#[rustfmt::skip]
+pub const CNODE_DELETE: u32 = 4;
+#[rustfmt::skip]
+pub const CNODE_REVOKE: u32 = 5;
+#[rustfmt::skip]
+pub const CNODE_ROTATE: u32 = 6;
+#[rustfmt::skip]
 pub const FRAME_METHODS: [(&str, u16); 5] = [
     ("Map", 0),
     ("Unmap", 1),
@@ -124,15 +138,33 @@ pub const FRAME_METHODS: [(&str, u16); 5] = [
     ("UnmapIo", 4),
 ];
 #[rustfmt::skip]
+pub const FRAME_MAP: u32 = 0;
+#[rustfmt::skip]
+pub const FRAME_UNMAP: u32 = 1;
+#[rustfmt::skip]
+pub const FRAME_GETADDRESS: u32 = 2;
+#[rustfmt::skip]
+pub const FRAME_MAPIO: u32 = 3;
+#[rustfmt::skip]
+pub const FRAME_UNMAPIO: u32 = 4;
+#[rustfmt::skip]
 pub const IOSPACE_METHODS: [(&str, u16); 2] = [
     ("Flush", 0),
     ("Attach", 1),
 ];
 #[rustfmt::skip]
+pub const IOSPACE_FLUSH: u32 = 0;
+#[rustfmt::skip]
+pub const IOSPACE_ATTACH: u32 = 1;
+#[rustfmt::skip]
 pub const IRQCONTROL_METHODS: [(&str, u16); 2] = [
     ("GetLine", 0),
     ("GetMsi", 1),
 ];
+#[rustfmt::skip]
+pub const IRQCONTROL_GETLINE: u32 = 0;
+#[rustfmt::skip]
+pub const IRQCONTROL_GETMSI: u32 = 1;
 #[rustfmt::skip]
 pub const IRQHANDLER_METHODS: [(&str, u16); 4] = [
     ("SetNotification", 0),
@@ -141,16 +173,34 @@ pub const IRQHANDLER_METHODS: [(&str, u16); 4] = [
     ("SetAffinity", 3),
 ];
 #[rustfmt::skip]
+pub const IRQHANDLER_SETNOTIFICATION: u32 = 0;
+#[rustfmt::skip]
+pub const IRQHANDLER_ACK: u32 = 1;
+#[rustfmt::skip]
+pub const IRQHANDLER_CLEAR: u32 = 2;
+#[rustfmt::skip]
+pub const IRQHANDLER_SETAFFINITY: u32 = 3;
+#[rustfmt::skip]
 pub const PAGETABLE_METHODS: [(&str, u16); 2] = [
     ("Map", 0),
     ("Unmap", 1),
 ];
+#[rustfmt::skip]
+pub const PAGETABLE_MAP: u32 = 0;
+#[rustfmt::skip]
+pub const PAGETABLE_UNMAP: u32 = 1;
 #[rustfmt::skip]
 pub const POWERCONTROL_METHODS: [(&str, u16); 3] = [
     ("HartOffline", 0),
     ("HartOnline", 1),
     ("Suspend", 2),
 ];
+#[rustfmt::skip]
+pub const POWERCONTROL_HARTOFFLINE: u32 = 0;
+#[rustfmt::skip]
+pub const POWERCONTROL_HARTONLINE: u32 = 1;
+#[rustfmt::skip]
+pub const POWERCONTROL_SUSPEND: u32 = 2;
 #[rustfmt::skip]
 pub const SCHEDCONTEXT_METHODS: [(&str, u16); 4] = [
     ("Bind", 0),
@@ -159,9 +209,19 @@ pub const SCHEDCONTEXT_METHODS: [(&str, u16); 4] = [
     ("YieldTo", 3),
 ];
 #[rustfmt::skip]
+pub const SCHEDCONTEXT_BIND: u32 = 0;
+#[rustfmt::skip]
+pub const SCHEDCONTEXT_UNBIND: u32 = 1;
+#[rustfmt::skip]
+pub const SCHEDCONTEXT_CONSUMED: u32 = 2;
+#[rustfmt::skip]
+pub const SCHEDCONTEXT_YIELDTO: u32 = 3;
+#[rustfmt::skip]
 pub const SCHEDCONTROL_METHODS: [(&str, u16); 1] = [
     ("Configure", 0),
 ];
+#[rustfmt::skip]
+pub const SCHEDCONTROL_CONFIGURE: u32 = 0;
 #[rustfmt::skip]
 pub const TCB_METHODS: [(&str, u16); 16] = [
     ("Configure", 0),
@@ -182,9 +242,43 @@ pub const TCB_METHODS: [(&str, u16); 16] = [
     ("SetTls", 15),
 ];
 #[rustfmt::skip]
+pub const TCB_CONFIGURE: u32 = 0;
+#[rustfmt::skip]
+pub const TCB_SETFAULTEP: u32 = 1;
+#[rustfmt::skip]
+pub const TCB_READSTATE: u32 = 2;
+#[rustfmt::skip]
+pub const TCB_SUSPEND: u32 = 3;
+#[rustfmt::skip]
+pub const TCB_SETPRIORITY: u32 = 4;
+#[rustfmt::skip]
+pub const TCB_SETMCP: u32 = 5;
+#[rustfmt::skip]
+pub const TCB_SETAFFINITY: u32 = 6;
+#[rustfmt::skip]
+pub const TCB_SETSCHEDPARAMS: u32 = 7;
+#[rustfmt::skip]
+pub const TCB_SETTIMEOUTEP: u32 = 8;
+#[rustfmt::skip]
+pub const TCB_READREGS: u32 = 9;
+#[rustfmt::skip]
+pub const TCB_WRITEREGS: u32 = 10;
+#[rustfmt::skip]
+pub const TCB_COPYREGS: u32 = 11;
+#[rustfmt::skip]
+pub const TCB_RESUME: u32 = 12;
+#[rustfmt::skip]
+pub const TCB_BINDNOTIFICATION: u32 = 13;
+#[rustfmt::skip]
+pub const TCB_UNBINDNOTIFICATION: u32 = 14;
+#[rustfmt::skip]
+pub const TCB_SETTLS: u32 = 15;
+#[rustfmt::skip]
 pub const UNTYPED_METHODS: [(&str, u16); 1] = [
     ("Retype", 0),
 ];
+#[rustfmt::skip]
+pub const UNTYPED_RETYPE: u32 = 0;
 #[rustfmt::skip]
 pub const VCPU_METHODS: [(&str, u16); 6] = [
     ("Run", 0),
@@ -195,9 +289,23 @@ pub const VCPU_METHODS: [(&str, u16); 6] = [
     ("Configure", 5),
 ];
 #[rustfmt::skip]
+pub const VCPU_RUN: u32 = 0;
+#[rustfmt::skip]
+pub const VCPU_READREGS: u32 = 1;
+#[rustfmt::skip]
+pub const VCPU_WRITEREGS: u32 = 2;
+#[rustfmt::skip]
+pub const VCPU_INJECTIRQ: u32 = 3;
+#[rustfmt::skip]
+pub const VCPU_SETTSC: u32 = 4;
+#[rustfmt::skip]
+pub const VCPU_CONFIGURE: u32 = 5;
+#[rustfmt::skip]
 pub const VSPACE_METHODS: [(&str, u16); 1] = [
     ("GetAsid", 0),
 ];
+#[rustfmt::skip]
+pub const VSPACE_GETASID: u32 = 0;
 #[rustfmt::skip]
 pub const SLOT_BYTES: usize = 48;
 #[rustfmt::skip]

@@ -286,6 +286,22 @@ do_check() {
             echo "--- gen fixtures: FAIL" >&2
             fails=$((fails + 1))
         fi
+        # KT-69: stub IDL sinh từ `v2/lib/vifast-idl/idl/*.vidl` — cùng luật gen-check (D2-11):
+        # sửa tay stub hoặc sửa IDL mà không sinh lại đều bị bắt.
+        echo "--- idl-gen-check (KT-69: stub sinh từ .vidl)"
+        if (cd "$REPO_ROOT" && ./v2/bin/vifast-idl --check); then
+            echo "--- idl-gen-check: OK"
+        else
+            echo "--- idl-gen-check: FAIL" >&2
+            fails=$((fails + 1))
+        fi
+        echo "--- fixture âm của idl-gen-check"
+        if (cd "$REPO_ROOT" && bash v2/test/gen/run_idl_fixtures.sh); then
+            echo "--- idl fixtures: OK"
+        else
+            echo "--- idl fixtures: FAIL" >&2
+            fails=$((fails + 1))
+        fi
         else
             echo "--- abi fixtures: FAIL" >&2
             fails=$((fails + 1))

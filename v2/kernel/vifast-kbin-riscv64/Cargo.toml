@@ -56,3 +56,7 @@ vifast-core = { path = "../vifast-core" }
 # với sim. Cả hai `no_std`, không cấp phát, không dependency ngoài (D2-21).
 vifast-scenario = { path = "../../lib/vifast-scenario" }
 vifast-traceformat = { path = "../../lib/vifast-traceformat", default-features = false }
+# KT-69: IDL stub sinh từ `.vidl` (method id/label/encode-decode) + ring 1P/1C trên Frame chia sẻ.
+# Cả hai `no_std`, không phụ thuộc crate ngoài (D2-21).
+vifast-idl = { path = "../../lib/vifast-idl" }
+vifast-ring = { path = "../../lib/vifast-ring" }

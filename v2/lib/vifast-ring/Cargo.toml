@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "vifast-ring"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "KT-69: ring 1 producer/1 consumer trên Frame chia sẻ (Acquire/Release, no_std, không unsafe)"
+
+[dependencies]

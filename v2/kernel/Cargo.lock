@@ -22,12 +22,18 @@ name = "vifast-elf"
 version = "0.1.0"
 
 [[package]]
+name = "vifast-idl"
+version = "0.1.0"
+
+[[package]]
 name = "vifast-kbin-riscv64"
 version = "0.1.0"
 dependencies = [
  "vifast-core",
+ "vifast-idl",
  "vifast-plat-common",
  "vifast-plat-riscv64",
+ "vifast-ring",
  "vifast-scenario",
  "vifast-traceformat",
 ]
@@ -52,6 +58,10 @@ dependencies = [
 
 [[package]]
 name = "vifast-pte"
+version = "0.1.0"
+
+[[package]]
+name = "vifast-ring"
 version = "0.1.0"
 
 [[package]]

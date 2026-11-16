@@ -1448,3 +1448,29 @@ bash v2/test/boot/ktest.sh 1 matrix                                    # 12 boot
 bash v2/test/conformance/run.sh --boot --smp 2                         # simulation + boot + trace
 ./v2/bin/v2 gate --fast                                                # cổng
 ```
+
+## 17. KT-69 — IDL tối thiểu + ring buffer chia sẻ (K6)
+
+Nguồn chi tiết: [`k6-idl.md`](k6-idl.md). Tóm tắt phần **kernel/ABI**:
+
+- **Không mở `spec/`**: `spec/abi.toml` giữ nguyên (D2-99); IDL của interface dịch vụ nằm ở
+  `v2/lib/vifast-idl/idl/ring.vidl`, method id sinh tuần tự từ IDL (ghi rõ nguồn số).
+- **Không thêm syscall/không đổi `MessageInfo` 35 bit**: `attach` mang cap Frame qua **send caps
+  header** (KT-67b) + receive window; frame được map bằng invocation `Frame.Map` (11.0 — số lấy
+  từ hằng sinh `vifast_abi::FRAME_MAP`, D2-102c).
+- **Ring**: `vifast-ring` thuần `no_std`/không `unsafe`; header 4 KiB, 8 slot × 32 B; `send`/
+  `recv` một slot, **Release/Acquire** qua `head`/`tail`; đầy ⇒ **9** (`NotEnoughMemory`), rỗng
+  ⇒ **14** (`Busy`), không chặn/không ghi đè; wrap bằng bộ đếm một chiều.
+- **Hai tiến trình U-mode thật** (`ring_server.elf`/`ring_client.elf`, 2 CNode/2 TCB/2 VSpace):
+  server lấp đầy ring + probe mã 9; client thử rỗng 3 lần (mã 14), tiêu thụ 40 message/5 vòng,
+  kiểm thứ tự/nội dung; 40 message, `prod_sum = cons_sum = 820`.
+- **Dọn tài nguyên giữa pha (KT-69)**: `LoadedInit::release` (module `init_pages.rs`) gỡ mapping
+  + thu hồi **Frame/PageTable/VSpace** sau khi đo xong TAP của từng pha (object layer chỉ 64 KiB
+  và `MAX_OBJECTS = 96`); cap tạm trong cspace gốc (13..28) được `delete` sau mỗi pha. **Chỉ
+  dọn sau khi đo**, không đổi điều kiện TAP nào của KT-67a/67b/68.
+- **TAP 25..29** trên `ktest-user` (29 TAP): IDL handshake · đầy/rỗng đúng mã · thứ tự + wrap ·
+  race có kiểm soát + mapping hai VSpace cùng PA + bất biến. Evidence `# idl:`/`# ring:` do
+  kernel in từ biến đo (D2-102); runner đòi đủ (fail-closed).
+- **Ngưỡng**: `size_of::<Machine>()` **188.872 B** không đổi ≤ 196.608 B; `ktest-user`
+  `.data+.bss` **202.792 B** ≤ 262.144 B; matrix **12/12**; soak **0/1000**; clippy 4/4
+  `EXIT=0` — log ở `v2/agent/JOURNAL/kt69-*.log`.

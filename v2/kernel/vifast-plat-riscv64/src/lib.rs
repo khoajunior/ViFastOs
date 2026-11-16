@@ -64,6 +64,8 @@ use vifast_plat_common::trap::{
 use vifast_plat_common::{Platform, PlatformWriter};
 
 pub mod core_bridge;
+/// KT-69: danh sách trang của chương trình U-mode + `LoadedInit::release` (tách khỏi `user` cho R1).
+pub mod init_pages;
 /// KT-67b: đọc header IPC buffer của U-mode (chỉ ảnh có `user`; tách khỏi `user` cho R1).
 #[cfg(feature = "user")]
 pub mod ipc_buffer;

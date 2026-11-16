@@ -56,6 +56,9 @@ mod ktest_capx;
 // KT-68: pha capalloc (CNode.*) — tách tệp (R1 ≤ 1.500 dòng).
 #[path = "ktest_capa.rs"]
 mod ktest_capa;
+// KT-69 (K6): IDL + ring chia sẻ (TAP 25..29) — hai tiến trình U-mode thật.
+#[path = "ktest_ring.rs"]
+mod ktest_ring;
 
 use core::fmt::Write;
 
@@ -82,7 +85,7 @@ const MARKER_BYTES: u64 = 51;
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    PLATFORM.put_str("TAP version 13\n1..24\n");
+    PLATFORM.put_str("TAP version 13\n1..29\n");
     PLATFORM.set_trap_vector(trap_vector());
     let stvec = read_trap_vector();
     // Bảng trang + arena/guard trước (mmu::init bật satp); ASID lease rồi object layer.
@@ -475,6 +478,9 @@ pub extern "C" fn rust_main() -> ! {
     // ---------------- TAP 20..24: KT-68 capalloc (CNode cấp/thu hồi theo cây MDB) ----------
     ktest_capa::capalloc_phase(sys.root, sys.us, sys.ctl, obj.untyped0, &mut fails);
 
+    // ---------------- TAP 25..29: KT-69 IDL + ring chia sẻ (hai tiến trình U-mode) ----------
+    ktest_ring::ring_phase(sys.root, sys.us, sys.ctl, obj.untyped0, &mut fails);
+
     if fails > 0 {
         PLATFORM.put_str("# ktest halt\n");
         PLATFORM.halt(1)
@@ -485,12 +491,12 @@ pub extern "C" fn rust_main() -> ! {
     // (`src/ktest_proc.rs`) để ảnh này trả headroom: không còn `proc_demo`, 3 ELF demo và
     // 32 KiB stack syscall tĩnh trong `.bss` của ảnh này.
     user::print_stack_evidence();
-    PLATFORM.put_str("# ktest-user: taps=24 ok=1\n");
+    PLATFORM.put_str("# ktest-user: taps=29 ok=1\n");
     // PANIC **có chủ đích** (không phải fault): kết thúc boot sạch với đúng **một** dòng PANIC
     // theo mẫu của runner (`expected.txt`: `ktest-user 14 14`). In thẳng + `halt` (không qua
     // `panic!`) để log không có dòng `PANIC at …` thứ hai.
     PLATFORM.put_str(
-        "PANIC: KT-68 u-mode pha syscall, invocation, chuyen cap va capalloc xong (24 TAP, 0 fail)\n",
+        "PANIC: KT-69 u-mode pha syscall, invocation, capalloc, IDL va ring xong (29 TAP, 0 fail)\n",
     );
     PLATFORM.halt(1)
 }

@@ -40,6 +40,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vifast-idl"
+version = "0.1.0"
+
+[[package]]
 name = "vifast-model"
 version = "0.1.0"
 dependencies = [
@@ -53,6 +57,10 @@ version = "0.1.0"
 
 [[package]]
 name = "vifast-pte"
+version = "0.1.0"
+
+[[package]]
+name = "vifast-ring"
 version = "0.1.0"
 
 [[package]]

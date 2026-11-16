@@ -13,12 +13,13 @@
 #                     trap lồng fatal (56).
 #   - `ktest-guard` : 3 TAP — guard page fault **thật**: load `scause=13` (probe resume) rồi store
 #                     `scause=15` fatal `PANIC: guard page fault`.
-#   - `ktest-user`  : 24 TAP (KT-62 + KT-67a + KT-67b + KT-68) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
+#   - `ktest-user`  : 29 TAP (KT-62 + KT-67a + KT-67b + KT-68 + KT-69) — U-mode + core: nạp `init` ELF (W^X), `sret`, 10 syscall qua
 #                     `Machine` thật (DebugGetInfo 15, Yield 8, Exit 14 + 5 lần ngoài dải ⇒ 19), TAP
 #                     kernel-level cho bảng 16 syscall/cap sai/IPC/NB/WaitAddr/Clock/Yield (7..13),
 #                     `Exit` không Reply (14); **KT-67a** invocation hẹp (15..18: Retype/Map/Unmap/
 #                     method lạ ⇒ 18) trên U-mode thật; **KT-67b** chuyển cap Frame giữa hai tiến
 #                     trình U-mode (19: memsrv.elf → client.elf, cap trong cspace B, map/ghi/đọc);
+#                     **KT-68** capalloc (20..24); **KT-69** IDL + ring (25..29, `ring_server`/`ring_client`);
 #                     kết thúc sạch bằng PANIC có chủ đích.
 #   - `ktest-proc`  : 10 TAP (KT-65, **tách ảnh KT-66**) — đúng mười ca cũ 15..24 của ảnh user:
 #                     procsrv/shell/con U-mode (1..7) + 3 TAP fault/wx (8..10, PANIC `u-mode fault`).
@@ -33,7 +34,7 @@
 #   4. **đúng 1 dòng `PANIC`, đúng mẫu cho phép của ảnh** (ảnh chính: trap lồng; guard: guard page
 #      fault; user: u-mode fault) — PANIC khác mẫu hoặc PANIC thứ hai ⇒ đỏ;
 #   5. mỗi TAP N có **đúng một** dòng `ok N - <tên>` khớp tên trong manifest của runner;
-#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **98** mục, guard **5**, user **49**,
+#   6. mọi dòng `# evidence` bắt buộc của ảnh đều có (ảnh chính **98** mục, guard **5**, user **55**,
 #      proc **28**); KT-66 thêm kiểm **stack syscall per-hart** (`check_stack_lines`: tập hart
 #      0..N-1, `base` phân biệt, `low` trong `[base, top]`, `canary=0`);
 #   8. **KT-55**: mỗi ca conformance in `# conf: scn=N name=… steps=K` và đúng **K** dòng
@@ -311,6 +312,11 @@ capalloc mint copy move
 capalloc revoke cay delete reparent
 capalloc ca am
 capalloc bat bien
+idl stub sinh tu vidl
+ring day
+ring rong
+ring thu tu va wrap
+ring race co kiem soat
 EOF
 }
 
@@ -538,7 +544,13 @@ EOF
 ^# capa: am empty=1 occupied=1 rights=1 range=1 ro_cnode=1 mutate=1 rotate=1 other=1 denied=1 short=1 long=1 arity=10 stale=1 dead_alive=1 caps=1$
 ^# capa: rfree s=12->12 c=12->12 live=[0-9]+->[0-9]+ cap_high=[0-9]+->[0-9]+ installed\+=1 failed\+=0$
 ^# capa: invariants caps=1 ipc=1 bytes=1 obj=1 frames=[0-9]+$
-^# ktest-user: taps=24 ok=1$
+^# idl: const:iface=ringchan const:version=1 const:methods=3 attach=0 sync=1 finish=2 seen=0x7 attach_msgs=1 sync_msgs=[1-9][0-9]* finish_msgs=1 sync_acks=[1-9][0-9]* attach_caps=1 labels_ok=1 const:caps_max=1$
+^# ring: frame=0x[0-9a-f]+ const:va=0x42000000 size=8 slot=32 head=40 tail=40 seq=40 used=0 check=1 open=1 const:capacity=8 const:slot_bytes=32$
+^# ring: sent=40 recv=40 full_err=[1-9][0-9]* full_code=9 full_name=NotEnoughMemory full_head=8 empty_err=3 empty_code_first=14 empty_code_last=14 empty_name=Busy empty_tail=0 first=0 last=39 wrap=head/size=5 const:size=8 head=40 order=1 hdrerr=0 dups=0 lost=0 bad=0 peak=8 const:total=40$
+^# ring: prod_sum=820 cons_sum=820 sum_equal=1 slot0=[0-9]+/[0-9]+/[0-9]+/[0-9]+ const:sum=820$
+^# ring: map server=1 client=1 same_pa=1 pa=0x[0-9a-f]+ s_pa=0x[0-9a-f]+ c_pa=0x[0-9a-f]+ s_flags=1 c_flags=1 pre_walk=0/0$
+^# ring: caps b4=1 b4_ty=Frame b4_alive=1 frame_obj=[0-9]+ installed=[0-9]+->[0-9]+ failed=[0-9]+->[0-9]+ caps=1 ipc=1 obj=1 bytes=1 steps=s[0-9]+/c[0-9]+ exits=0/0 run_steps=[0-9]+$
+^# ktest-user: taps=29 ok=1$
 ^OpenSBI v[0-9]+\.[0-9]+\.[0-9]+$
 ^Platform HART Count *: *__SMP__$
 EOF
@@ -596,7 +608,7 @@ panic_allow_re() {
     case "$1" in
         ktest) printf '%s' '^PANIC: nested trap \(KT-45: trap trong handler = fatal, khong resume\)$' ;;
         ktest-guard) printf '%s' '^PANIC: guard page fault scause=0xf stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+$' ;;
-        ktest-user) printf '%s' '^PANIC: KT-68 u-mode pha syscall, invocation, chuyen cap va capalloc xong \(24 TAP, 0 fail\)$' ;;
+        ktest-user) printf '%s' '^PANIC: KT-69 u-mode pha syscall, invocation, capalloc, IDL va ring xong \(29 TAP, 0 fail\)$' ;;
         ktest-proc) printf '%s' '^PANIC: u-mode fault scause=0xc stval=0x[0-9a-f]+ sepc=0x[0-9a-f]+ sstatus=0x[0-9a-f]+ from_u=1$' ;;
         *) return 1 ;;
     esac

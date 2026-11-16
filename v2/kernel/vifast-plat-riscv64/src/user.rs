@@ -63,6 +63,8 @@ use vifast_plat_common::user::{
 use vifast_plat_common::{Platform, PlatformWriter};
 
 use crate::obj as aobj;
+
+pub use crate::init_pages::LoadedInit;
 use crate::{debug_put_byte, mmu, Riscv64Virt};
 
 // KT-66: API stack per-hart cho ảnh test (module riêng `crate::user_stack`).
@@ -470,43 +472,6 @@ impl LoadError {
     }
 }
 
-/// Kết quả nạp `init` — địa chỉ/cờ **thật** của lần boot này.
-#[derive(Clone, Copy, Debug)]
-pub struct LoadedInit {
-    /// Cap VSpace của user process.
-    pub vspace: CapId,
-    /// PA root page table.
-    pub root: u64,
-    /// ASID nhãn của VSpace.
-    pub asid: u16,
-    /// Entry point (`e_entry`).
-    pub entry: u64,
-    /// Số `PT_LOAD` đã map.
-    pub segments: usize,
-    /// Số trang segment executable.
-    pub text_pages: usize,
-    /// Số trang segment chỉ đọc.
-    pub ro_pages: usize,
-    /// Số trang segment ghi được.
-    pub data_pages: usize,
-    /// Số trang stack user.
-    pub stack_pages: usize,
-    /// Cuối vùng ảnh ELF (đã làm tròn trang).
-    pub image_end: u64,
-    /// Đáy trang guard dưới stack.
-    pub stack_guard: u64,
-    /// `check_objmem` ĐẠT sau khi nạp.
-    pub check_ok: bool,
-    /// Số trang leaf có **đồng thời** `W` và `X` (phải 0 — W^X đi lại bằng PTE thật).
-    pub wx_pages: usize,
-    /// Cờ leaf khớp quyền segment (`R|X` text, `R` rodata, `R|W` data, `U` mọi leaf user).
-    pub flags_ok: bool,
-    /// Nửa cao (kernel high alias + physmap) **không** map trong VSpace user.
-    pub high_half_unmapped: bool,
-    /// Trang guard ngay dưới stack user **không** map (walk invalid).
-    pub guard_unmapped: bool,
-}
-
 /// Nạp `init` ELF vào một VSpace mới: parse `vifast-elf`, map segment **theo quyền**, map stack
 /// user + để hở trang guard, rồi `check_objmem`.
 ///
@@ -552,6 +517,7 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
     let mut text_pages = 0usize;
     let mut ro_pages = 0usize;
     let mut data_pages = 0usize;
+    let mut init_pages = crate::init_pages::InitPages::new();
     for segment in image.segments() {
         let flags = MapFlags {
             read: true,
@@ -590,6 +556,9 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
                 return Err(LoadError::Physmap);
             }
             m.map(vspace, va, frame, flags).map_err(LoadError::Obj)?;
+            if !init_pages.push(va, frame) {
+                return Err(LoadError::Image);
+            }
             if index == 0 && !loading_ranges().push(va, va + (pages as u64) * 4096) {
                 return Err(LoadError::Image);
             }
@@ -616,6 +585,9 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
         }
         m.map(vspace, stack_va, frame, MapFlags::RW_NX_USER)
             .map_err(LoadError::Obj)?;
+        if !init_pages.push(stack_va, frame) {
+            return Err(LoadError::Image);
+        }
         if stack_pages == 0 && !loading_ranges().push(USER_STACK_GUARD_TOP, USER_STACK_TOP) {
             return Err(LoadError::Image);
         }
@@ -637,6 +609,9 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
     let ipc_va = crate::ipc_buffer::USER_IPC_BUFFER_VA;
     m.map(vspace, ipc_va, ipc_frame, MapFlags::RW_NX_USER)
         .map_err(LoadError::Obj)?;
+    if !init_pages.push(ipc_va, ipc_frame) {
+        return Err(LoadError::Image);
+    }
     if !loading_ranges().push(ipc_va, ipc_va + 4096) {
         return Err(LoadError::Image);
     }
@@ -705,6 +680,7 @@ pub fn load_init_slot(bytes: &[u8], untyped: CapId, slot: usize) -> Result<Loade
         flags_ok,
         high_half_unmapped,
         guard_unmapped,
+        pages: init_pages,
     })
 }
 

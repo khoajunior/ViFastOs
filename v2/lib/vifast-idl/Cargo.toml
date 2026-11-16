@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "vifast-idl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "KT-69: stub IDL tối thiểu (encode/decode MessageInfo + MR) sinh từ .vidl — no_std"
+
+[dependencies]

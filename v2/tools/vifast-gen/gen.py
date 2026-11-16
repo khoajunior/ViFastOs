@@ -115,6 +115,12 @@ def gen_rs(doc: dict) -> str:
         for num in ids:
             out.append(f'    ("{methods_of[str(num)]["name"]}", {num}),')
         out.append("];")
+        # KT-69/D2-102(c): **hằng số method theo tên** sinh từ spec để U-mode/kernel không chép
+        # tay số (`FRAME_MAP = 0`, …). U-mode dùng `vifast-abi` rlib thay vì literal.
+        for num in ids:
+            method_name = methods_of[str(num)]["name"].upper()
+            out.append("#[rustfmt::skip]")
+            out.append(f"pub const {obj_name.upper()}_{method_name}: u32 = {num};")
     # KT-58: kích thước/căn lề object từ `[object_size]` (QD §3.9) — core `no_std` dùng
     # hằng sinh, không hardcode 48/64/4096 trong `vifast-core`.
     osz = doc.get("object_size") or {}

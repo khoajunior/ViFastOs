@@ -181,6 +181,8 @@ fn build_rig(
         Ok(loaded) => loaded,
         Err(error) => {
             *stage = error.name();
+            let mut w = PlatformWriter(&PLATFORM);
+            let _ = writeln!(w, "# capa: load server err={:?}", error);
             return None;
         }
     };
@@ -270,8 +272,8 @@ fn build_rig(
 }
 
 /// Một tác vụ U-mode tuần tự (giữ trapframe để chạy tiếp sau `Yield`).
-struct Task {
-    loaded: user::LoadedInit,
+struct Task<'a> {
+    loaded: &'a user::LoadedInit,
     tf: TrapFrame,
     tcb: ObjId,
     /// Ô bảng dải user của **chính** tác vụ này (`LOAD_SLOT_S`/`LOAD_SLOT_C`).
@@ -280,8 +282,8 @@ struct Task {
     code: u64,
 }
 
-impl Task {
-    fn new(loaded: user::LoadedInit, tcb: ObjId, slot: usize) -> Self {
+impl<'a> Task<'a> {
+    fn new(loaded: &'a user::LoadedInit, tcb: ObjId, slot: usize) -> Self {
         let mut tf = TrapFrame::zeroed();
         tf.x[REG_SP] = user::USER_STACK_TOP;
         tf.sepc = loaded.entry;
@@ -297,7 +299,7 @@ impl Task {
 }
 
 /// Chạy round-robin server ↔ client tới khi **cả hai** `Exit` (hoặc hết bước).
-fn run_pair(rig: &Rig, server: user::LoadedInit, client: user::LoadedInit) -> (u64, u64, usize) {
+fn run_pair(rig: &Rig, server: &user::LoadedInit, client: &user::LoadedInit) -> (u64, u64, usize) {
     let mut tasks = [
         Task::new(server, rig.tcb_s, LOAD_SLOT_S),
         Task::new(client, rig.tcb_c, LOAD_SLOT_C),
@@ -317,7 +319,7 @@ fn run_pair(rig: &Rig, server: user::LoadedInit, client: user::LoadedInit) -> (u
                 task.exited = true;
                 continue;
             }
-            let stop = user::run_task(&task.loaded, &mut task.tf);
+            let stop = user::run_task(task.loaded, &mut task.tf);
             task.tf = user::saved_tf();
             match stop {
                 Stop::Yield => core_bridge::with_machine(|m| task_ready(m, task.tcb)),
@@ -398,7 +400,7 @@ pub fn capalloc_phase(
         .unwrap_or(true);
 
     // ---- chạy HAI tiến trình U-mode thật (capalloc server + client).
-    let (server_code, client_code, steps) = run_pair(&rig, server, client);
+    let (server_code, client_code, steps) = run_pair(&rig, &server, &client);
 
     // ---- đo **sau** pha U-mode: cap/PTE/PA thật; không tin lời chương trình.
     let after = core_bridge::with_machine(|m| {
@@ -594,6 +596,17 @@ pub fn capalloc_phase(
         "capalloc bat bien",
         "ro cap/slot hoac bat bien do",
     );
+    // KT-69: trả **hai VSpace** của rig về object layer sau khi đã đo xong TAP 20..24 — arena
+    // 64 KiB còn chỗ cho pha IDL + ring (hai VSpace nữa). Đây là dọn tài nguyên sau đo, không
+    // đổi bất kỳ điều kiện TAP nào ở trên (không nới ngưỡng).
+    // KT-69: xoá cap tạm trong cspace gốc (25..28) để pha ring dùng lại — cspace gốc 32 slot.
+    core_bridge::with_machine(|m| {
+        for slot in TMP_TCB_S..=TMP_SC_C {
+            let _ = m.delete(SlotRef::new(root, slot));
+        }
+    });
+    server.release();
+    client.release();
 }
 
 // ---------------------------------------------------------------------------------------------

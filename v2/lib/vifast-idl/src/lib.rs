@@ -1,0 +1,157 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//! `vifast-idl` — **stub IDL tối thiểu** của ViFastOs v2 (KT-69).
+//!
+//! Nguồn: [`idl/ring.vidl`](../idl/ring.vidl) — một interface, N method (tham số vô hướng + tối
+//! đa **một** `Frame`/buffer cap), kiểu trả vô hướng. `src/generated.rs` do
+//! `v2/tools/vifast-gen/gen_idl.py` sinh; `./v2/bin/vifast-idl --check` nằm trong `v2 check` nên
+//! sửa tay bị bắt (cùng luật D2-11 với `spec/abi.toml`).
+//!
+//! # Vì sao **không** nằm trong `spec/abi.toml`
+//!
+//! `spec/abi.toml` là nguồn sự thật của **ABI lõi** (16 syscall, mã lỗi, object, chữ ký method
+//! kernel). Interface dịch vụ như `ringchan` không phải ABI lõi, và KT-69 **không** mở `spec/`
+//! (D2-99). Vì vậy method id sinh **tuần tự từ tệp IDL** — generator ghi rõ nguồn số trong tệp
+//! sinh và trong `v2/docs/k6-idl.md`; không có chỗ nào giả vờ đó là số spec (D2-102c).
+//!
+//! # Stub sinh ra **thuần** encode/decode
+//!
+//! Không `unsafe`, không `ecall`, không phụ thuộc crate: encode `(MessageInfo, MR0..MR3)` và
+//! decode ngược lại, kiểm **arity chính xác** (D2-104) và tràn kiểu (u32 > `u32::MAX` ⇒ từ chối).
+//! Chương trình U-mode ghép stub với shim `vifast_user_abi` để gửi/nhận qua Endpoint; nhờ tách
+//! như vậy stub test được trên host và không kéo asm vào lib.
+//!
+//! Cap (`Frame`/buffer) **không** đi trong MR: `MessageInfo.caps` + CPTR trong header IPC buffer
+//! (`spec/abi.toml` dòng 58, KT-67b). Stub chỉ mang `caps` count trong `MessageInfo`.
+#![cfg_attr(not(test), no_std)]
+
+mod generated;
+
+pub use generated::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tệp sinh phải tự khai nguồn số + **không** có `unsafe`/syscall/todo (KT-69).
+    #[test]
+    fn generated_khong_unsafe_va_khai_nguon_so() {
+        let text = include_str!("generated.rs");
+        assert!(text.contains("SINH TỰ ĐỘNG"), "thiếu header sinh tự động");
+        assert!(
+            text.contains("spec/abi.toml` KHÔNG có bảng method"),
+            "thiếu ghi chú nguồn số method (D2-102c)"
+        );
+        // Chỉ xét **mã**, không xét chú thích (header nói về chữ "unsafe").
+        let code: String = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!code.contains("unsafe"), "stub sinh KHÔNG được có unsafe");
+        assert!(!code.contains("asm!"), "stub sinh KHÔNG được có asm");
+        assert!(!code.contains("todo!("), "stub sinh không được bỏ dở");
+        assert!(!code.contains("unimplemented!("));
+    }
+
+    #[test]
+    fn hang_interface_va_method_dung_idl() {
+        assert_eq!(IFACE_NAME, "ringchan");
+        assert_eq!(IFACE_VERSION, 1);
+        assert_eq!(METHOD_COUNT, 3);
+        // Method id tuần tự từ IDL, không phải số ABI lõi.
+        assert_eq!(METHOD_ATTACH, 0);
+        assert_eq!(METHOD_SYNC, 1);
+        assert_eq!(METHOD_FINISH, 2);
+        assert_eq!(arity(METHOD_ATTACH), Some(1));
+        assert_eq!(arity(METHOD_SYNC), Some(2));
+        assert_eq!(arity(METHOD_FINISH), Some(3));
+        assert_eq!(cap_count(METHOD_ATTACH), Some(1));
+        assert_eq!(cap_count(METHOD_SYNC), Some(0));
+        assert_eq!(cap_count(METHOD_FINISH), Some(0));
+        assert_eq!(cap_count(99), None);
+        // Reply bit nằm trong 20 bit label, trên các method id nhỏ.
+        assert_eq!(REPLY_BIT & !LABEL_MASK, 0);
+        // Bit reply là bit 19 của label; method id nhỏ hơn 2^19. Clippy thấy hằng nên cho phép
+        // lint "assertion hằng" — đây là **pin hợp đồng** có chủ đích của stub sinh.
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(METHOD_COUNT <= REPLY_BIT);
+        }
+    }
+
+    /// Encode/decode roundtrip **mọi** method + kiểm `length`/`caps` trong `MessageInfo`.
+    #[test]
+    fn roundtrip_moi_method() {
+        let (info, mr) = encode_attach(8);
+        assert_eq!(info & 0xF_FFFF, u64::from(METHOD_ATTACH));
+        assert_eq!((info >> INFO_CAPS_SHIFT) & 0x7, 1, "attach mang 1 cap");
+        assert_eq!((info >> INFO_LENGTH_SHIFT) & 0x7F, 1);
+        assert_eq!(
+            decode(info as u32 & LABEL_MASK, 1, &mr),
+            Some(Request::Attach { slots: 8 })
+        );
+
+        let (info, mr) = encode_sync(3, 0x1122_3344_5566_7788);
+        assert_eq!((info >> INFO_CAPS_SHIFT) & 0x7, 0);
+        assert_eq!(
+            decode(METHOD_SYNC, 2, &mr),
+            Some(Request::Sync {
+                phase: 3,
+                count: 0x1122_3344_5566_7788
+            })
+        );
+
+        let (info, mr) = encode_finish(0, 40, 39);
+        assert_eq!((info >> INFO_LENGTH_SHIFT) & 0x7F, 3);
+        assert_eq!(
+            decode(METHOD_FINISH, 3, &mr),
+            Some(Request::Finish {
+                err: 0,
+                sent: 40,
+                got: 39
+            })
+        );
+    }
+
+    /// Arity **chính xác** (D2-104) + label reply không decode như request + label lạ.
+    #[test]
+    fn decode_tu_choi_arity_va_label_sai() {
+        let (_, mr) = encode_sync(1, 2);
+        assert_eq!(
+            decode(METHOD_SYNC, 1, &mr),
+            None,
+            "thiếu MR phải bị từ chối"
+        );
+        assert_eq!(decode(METHOD_SYNC, 3, &mr), None, "thừa MR phải bị từ chối");
+        assert_eq!(decode(METHOD_SYNC | REPLY_BIT, 2, &mr), None);
+        assert_eq!(decode(77, 0, &mr), None);
+        // u32 tràn kiểu: MR0 = 2^32 ⇒ từ chối, không cắt ngầm.
+        let mut wide = [0u64; 4];
+        wide[0] = 1 << 32;
+        assert_eq!(decode(METHOD_ATTACH, 1, &wide), None);
+        assert_eq!(decode(METHOD_FINISH, 3, &wide), None);
+    }
+
+    /// Reply: encode/decode đúng kiểu trả, sai label/length bị từ chối.
+    #[test]
+    fn reply_roundtrip() {
+        let (info, mr) = encode_attach_reply(0);
+        assert_eq!(info as u32 & LABEL_MASK, METHOD_ATTACH | REPLY_BIT);
+        assert_eq!(
+            decode_attach_reply(METHOD_ATTACH | REPLY_BIT, 1, &mr),
+            Some(0)
+        );
+        assert_eq!(decode_attach_reply(METHOD_ATTACH, 1, &mr), None);
+
+        let (info, mr) = encode_finish_reply(0xdead_beef);
+        assert_eq!(
+            decode_finish_reply(info as u32 & LABEL_MASK, 1, &mr),
+            Some(0xdead_beef)
+        );
+        assert_eq!(decode_finish_reply(METHOD_FINISH | REPLY_BIT, 0, &mr), None);
+        assert_eq!(
+            decode_reply(METHOD_FINISH | REPLY_BIT, 1, &mr),
+            Some((METHOD_FINISH, 0xdead_beef))
+        );
+    }
+}

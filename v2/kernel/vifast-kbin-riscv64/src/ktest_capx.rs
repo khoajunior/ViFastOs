@@ -377,8 +377,14 @@ pub fn capx_phase(
         && objmem_ok;
     // **KT-68** — trả `VSpace`/PageTable của **hai** chương trình về object layer sau khi đã đo
     // xong TAP 19 (arena 64 KiB; pha capalloc cần PageTable cho hai chương trình khác).
-    let _ = aobj::machine().revoke(memsrv.vspace);
-    let _ = aobj::machine().revoke(client.vspace);
+    // KT-69: xoá cap tạm trong cspace gốc (20..24) — cspace gốc chỉ 32 slot.
+    core_bridge::with_machine(|m| {
+        for slot in TMP_FRAME..=TMP_SC_B {
+            let _ = m.delete(SlotRef::new(root, slot));
+        }
+    });
+    memsrv.release();
+    client.release();
     if ok {
         PLATFORM.put_str("ok 19 - ipc capx hai tien trinh\n");
     } else {
