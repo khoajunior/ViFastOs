@@ -343,7 +343,10 @@ fn rights_arg(raw: u64) -> Result<u8, u64> {
 /// | `Delete` (4) | `slot` trong CNode target | — | — | — |
 /// | `Revoke` (5) | `slot?` (bỏ trống ⇒ mọi slot) | — | — | — |
 ///
-/// `Copy/Mint` bỏ `MR2` (`length ≤ 2`) ⇒ giữ quyền/badge nguồn; `Mint` bỏ `MR3` ⇒ giữ badge
+/// **Arity là CHÍNH XÁC** (D2-104): `Copy` = 2 hoặc 3; `Mint` = 2, 3 hoặc 4; `Move` = 2;
+/// `Delete` = 1; `Revoke` = 0 hoặc 1. `length` **khác** các giá trị đó (thiếu **hoặc** thừa)
+/// ⇒ `InvalidArgument` (5), có đếm — không bỏ qua tham số dư (hai bên sẽ hiểu khác nhau về cùng
+/// một message). `Copy/Mint` bỏ `MR2` ⇒ giữ quyền/badge nguồn; `Mint` bỏ `MR3` ⇒ giữ badge
 /// nguồn. `badge = 0` có mặt ⇒ **xoá** badge (ngữ nghĩa `Machine::mint`). Cap CNode được gọi
 /// phải có `RIGHT_WRITE` (model F3, oracle `vifast-model::invoke_*`); thiếu ⇒
 /// `InsufficientRights` (3). Đích phải nằm trong **CNode target** (không phải "CNode bất kỳ"
@@ -367,14 +370,26 @@ fn cnode(
         .cspace
         .ok_or(KError::InvalidCapability.id() as u64)?;
     let target = c.obj;
+    // D2-104: arity **chính xác** theo `spec/[method_signature]` (optional chỉ ở cuối) —
+    // kiểm **trước** khi đổi CPTR để tham số dư không bao giờ chạm máy trạng thái.
+    let arity_ok = match method {
+        CNODE_COPY => len == 2 || len == 3,
+        CNODE_MINT => (2..=4).contains(&len),
+        CNODE_MOVE => len == 2,
+        CNODE_DELETE => len == 1,
+        CNODE_REVOKE => len <= 1,
+        // `Mutate` (3) / `Rotate` (6): chưa cài ⇒ 18 ở nhánh dưới, không phải lỗi arity.
+        _ => true,
+    };
+    if !arity_ok {
+        bump(&DENIED);
+        return Err(KError::InvalidArgument.id() as u64);
+    }
     // Nguồn ở CSpace **caller**, đích ở CNode **target** (model F3: `check_dst_in_cnode`).
     let src = SlotRef::new(cspace, slot_arg(args[0])?);
     let dst = SlotRef::new(target, slot_arg(args[1])?);
     match method {
         CNODE_COPY => {
-            if len < 2 {
-                return Err(KError::InvalidArgument.id() as u64);
-            }
             let rights = if len >= 3 {
                 Some(rights_arg(args[2])?)
             } else {
@@ -386,9 +401,6 @@ fn cnode(
             Ok((0, 0))
         }
         CNODE_MINT => {
-            if len < 2 {
-                return Err(KError::InvalidArgument.id() as u64);
-            }
             // `rights?:` thiếu ⇒ giữ quyền nguồn (phải đọc trước khi `mint` kiểm lại).
             let rights = if len >= 3 {
                 rights_arg(args[2])?
@@ -403,18 +415,12 @@ fn cnode(
             Ok((0, 0))
         }
         CNODE_MOVE => {
-            if len < 2 {
-                return Err(KError::InvalidArgument.id() as u64);
-            }
             m.move_cap(src, dst).map_err(|e| e.id() as u64)?;
             bump(&CNODE_MOVED);
             bump(&ALLOWED);
             Ok((0, 0))
         }
         CNODE_DELETE => {
-            if len < 1 {
-                return Err(KError::InvalidArgument.id() as u64);
-            }
             // `Delete` nhận `MR0 = slot` (spec `params = ["cnode","slot"]`), không dùng `MR1`.
             let target_slot = SlotRef::new(target, slot_arg(args[0])?);
             m.delete(target_slot).map_err(|e| e.id() as u64)?;

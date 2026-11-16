@@ -59,8 +59,12 @@ bằng cap CNode client mà nó được chuyển.
 | `Delete` | `slot` (target) | — | — | — | 0 |
 | `Revoke` | `slot?` (bỏ trống ⇒ mọi slot) | — | — | — | số cap bị xoá |
 
-- `rights?`/`badge?` vắng mặt được mã hoá bằng `length` (≤ 2 ⇒ giữ nguyên nguồn; `badge = 0` có
-  mặt ⇒ **xoá** badge — ngữ nghĩa `Machine::mint`).
+- **Arity là CHÍNH XÁC** (D2-104, `spec/[method_signature]`): `Copy` = 2|3, `Mint` = 2|3|4,
+  `Move` = 2, `Delete` = 1, `Revoke` = 0|1. `length` **khác** các giá trị đó — thiếu **hoặc**
+  thừa MR — ⇒ `InvalidArgument` (5) + đếm; không bỏ qua tham số dư (hai bên sẽ hiểu khác nhau về
+  cùng một message). Kiểm arity **trước** khi đổi CPTR nên ca thừa không chạm máy trạng thái.
+- `rights?`/`badge?` vắng mặt được mã hoá bằng `length` (2 ⇒ giữ nguyên nguồn; 3 ⇒ quyền;
+  4 ⇒ quyền + badge; `badge = 0` có mặt ⇒ **xoá** badge — ngữ nghĩa `Machine::mint`).
 - `Mint` badge chỉ cho `Endpoint`/`Notification`; object khác ⇒ `InvalidArgument` (5).
 - `Move`: đích có cap ⇒ **xoá đích trước** (D2-44), con của cap đích reparent lên ông; `src ==
   dst` ⇒ `IllegalOperation` (17); cap giữ nguyên `CapId`/cha MDB/quyền/badge (không tạo cap mới).
@@ -113,7 +117,7 @@ Sau mỗi thao tác (kiểm trong TAP + test host):
 | `ok 20 - capalloc cap vong` | hai ELF U-mode riêng (`capa_server.elf` + `capa_client.elf`), hai cspace: client gửi cap CNode của mình → server cấp Frame vào slot rảnh (4 lần thử: 3 × 7 + 1 thành công) → client map/ghi/đọc/unmap → cây con 2 tầng (Revoke trả **2**) → `Delete` trả slot → cấp lại **cùng slot** → map lại, kernel đọc **physmap** đúng giá trị thứ hai → server `Revoke` cap nguồn xoá **xuyên CNode**; `cap_transfer_installed` +1 |
 | `ok 21 - capalloc mint copy move` | `Mint` badge `0xabc` + quyền `R\|W`; badge trên Frame ⇒ 5; `Copy` giữ quyền/badge + cha MDB; `Move` xoá nguồn, giữ `CapId`, đích bận bị xoá trước + con reparent lên ông |
 | `ok 22 - capalloc revoke cay delete reparent` | cây 2 tầng: `Revoke` trả **2** (con + cháu), cap trong slot và nhánh khác **sống**; `Delete` reparent MDB; `Revoke` cap nguồn xoá bản sao ở CNode client (xuyên CNode) |
-| `ok 23 - capalloc ca am` | ô rỗng ⇒ 8; đích bận ⇒ 7; quyền vượt nguồn ⇒ 3; cap CNode chỉ READ ⇒ 3; slot ngoài bảng ⇒ 19; `Mutate`/`Rotate`/object khác ⇒ 18 (có đếm); thiếu/thừa MR ⇒ 5; CPTR cũ sau `Delete` ⇒ 8; cap chết ngoài slot `alive=0` |
+| `ok 23 - capalloc ca am` | ô rỗng ⇒ 8; đích bận ⇒ 7; quyền vượt nguồn ⇒ 3; cap CNode chỉ READ ⇒ 3; slot ngoài bảng ⇒ 19; `Mutate`/`Rotate`/object khác ⇒ 18 (có đếm); **arity chính xác**: thiếu (`length=1`) và **thừa cho từng method** (Copy 4; Mint 5; Move 3/4; Delete 2/3/4; Revoke 2/3/4 — 10 ca) đều ⇒ 5, không chạm trạng thái; CPTR cũ sau `Delete` ⇒ 8; cap chết ngoài slot `alive=0` |
 | `ok 24 - capalloc bat bien` | `check_caps`/`check_bytes`/`check_ipc`/`check_objmem` = 1; `slot_rfree` **s = 12→12, c = 12→12**; `live_cap_count` trở về mốc; `cap_transfer` **installed +1, failed +0**; `cap_high` tăng (ID không tái dùng) |
 
 Mỗi dòng `# capa:` bắt buộc được liệt kê trong `v2/test/boot/ktest.sh`
@@ -124,6 +128,7 @@ Mỗi dòng `# capa:` bắt buộc được liệt kê trong `v2/test/boot/ktest
 
 - **Host** (`cargo test --manifest-path v2/kernel/Cargo.toml -p vifast-core --lib`): trước khi
   cài, nhánh `CNode.*` trả `NotSupported` ⇒ **9 test capalloc đỏ** (so mã lỗi 18 với kỳ vọng);
+  KT-68b thêm 10 ca **thừa arity** vào test host (D2-104) — vẫn đỏ-trước vì trước KT-68 trả 18;
   log `JOURNAL/kt68-do-truoc-host.log`.
 - **QEMU**: cùng bản tạm đó ⇒ TAP 20..24 **đỏ** (`not ok`), log
   `JOURNAL/kt68-do-truoc-qemu.log`. Sau khi cài: 24/24 xanh (log `kt68-xanh-user-smp1.log`).

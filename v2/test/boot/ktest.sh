@@ -535,7 +535,7 @@ EOF
 ^# capa: pre empty_client=1 src_alive=1 walk_before=0 post caps=1 ipc=1 bytes=1 obj=1$
 ^# capa: mint badge=0xabc rights=0x3 badge_frame=1 copy_rights=0x3 move_src_empty=1 same_cap=1 parent_ep=1 cleanup=1 caps=1$
 ^# capa: revoke slot=6 deleted=2 subtree=1 sibling=1 live_before=[0-9]+ live_after=[0-9]+ delete_reparent=1 cross_cnode=1 src_alive=1 caps=1 revokes=[0-9]+$
-^# capa: am empty=1 occupied=1 rights=1 range=1 ro_cnode=1 mutate=1 rotate=1 other=1 denied=1 short=1 long=1 stale=1 dead_alive=1 caps=1$
+^# capa: am empty=1 occupied=1 rights=1 range=1 ro_cnode=1 mutate=1 rotate=1 other=1 denied=1 short=1 long=1 arity=10 stale=1 dead_alive=1 caps=1$
 ^# capa: rfree s=12->12 c=12->12 live=[0-9]+->[0-9]+ cap_high=[0-9]+->[0-9]+ installed\+=1 failed\+=0$
 ^# capa: invariants caps=1 ipc=1 bytes=1 obj=1 frames=[0-9]+$
 ^# ktest-user: taps=24 ok=1$

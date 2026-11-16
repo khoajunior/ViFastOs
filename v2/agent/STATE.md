@@ -2994,3 +2994,18 @@ in budget từng ảnh). Không nới ngưỡng nào.
 **Nợ** (chi tiết `docs/k6-capalloc.md` §8): `CNode.Mutate`/`Rotate` chưa cài; không có
 `GetFreeSlot` (quét tuyến tính); `n_caps` high-water (ID cap không tái dùng) → chu kỳ dài chạm
 `MAX_CAPS`; capalloc một hart; `capa_server` là chương trình test (KT-69 IDL sẽ thay stub).
+
+### KT-68b — vá DRIFT reviewer (2026-11-16, sau `[KT-68]`)
+
+- **Arity invocation CHÍNH XÁC (D2-104)**: `CNode.Copy` 2|3, `Mint` 2|3|4, `Move` 2, `Delete` 1,
+  `Revoke` 0|1; `len` thiếu **hoặc thừa** ⇒ `InvalidArgument` 5 + đếm, kiểm **trước** khi đổi
+  CPTR (`invoke.rs` ~373–388). Host +10 ca thừa (`capalloc_tests.rs` ~642, "không side effect"),
+  QEMU TAP23 +10 ca (`arity=10`, regex `ktest.sh:538`), docs `k6-capalloc.md` §3/§6/§7,
+  `k3b-core.md` §16.2.
+- **Bằng chứng clippy**: 4 tổ hợp `CLIPPY_EXIT=0` ghi mã trong `JOURNAL/kt68b-clippy-kernel.log`;
+  log 101 lần đầu của KT-68 đã bị ghi đè ⇒ **ghi rõ "không trích được"**, không dựng lại.
+- **Nit**: tách ô debug `LOAD_SLOT_S=0`/`LOAD_SLOT_C=3` (`Task.slot`); bỏ field `SelfRig.u`
+  (dead-code); `kt68-do-truoc-qemu.log` CRLF → LF.
+- **Đo lại**: matrix **12/12**, gate **PASS 661/87** (L1 925 ms), core **42**, clippy **4/4**;
+  ảnh sản phẩm **sha256 `f6318b5d…` không đổi** ⇒ soak 0/1000 của KT-68 vẫn đúng artifact.
+  Delta + log: `JOURNAL/kt68b-journal.md`.

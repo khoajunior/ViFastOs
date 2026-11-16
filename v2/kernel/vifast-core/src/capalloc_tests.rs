@@ -72,7 +72,6 @@ struct SelfRig {
     m: Machine,
     tcb: ObjId,
     c: ObjId,
-    u: ObjId,
     self_cap: SlotRef,
     ep: u32,
 }
@@ -104,7 +103,6 @@ fn rig_self() -> SelfRig {
         m,
         tcb,
         c,
-        u,
         self_cap: SlotRef::new(c, 0),
         ep,
     }
@@ -641,6 +639,29 @@ fn cnode_ca_am_ma_loi() {
         ),
         Err(KError::InvalidArgument.id() as u64)
     );
+    // D2-104 — arity **chính xác**: thừa MR cho **từng** method cũng ⇒ 5 (không bỏ qua).
+    // (Copy 2|3, Mint 2|3|4, Move 2, Delete 1, Revoke 0|1.)
+    for (method, len) in [
+        (invoke::CNODE_COPY, 4),
+        (invoke::CNODE_MINT, 5),
+        (invoke::CNODE_MOVE, 3),
+        (invoke::CNODE_MOVE, 4),
+        (invoke::CNODE_DELETE, 2),
+        (invoke::CNODE_DELETE, 3),
+        (invoke::CNODE_DELETE, 4),
+        (invoke::CNODE_REVOKE, 2),
+        (invoke::CNODE_REVOKE, 3),
+        (invoke::CNODE_REVOKE, 4),
+    ] {
+        assert_eq!(
+            invoke_on(&mut r.m, r.tcb, r.self_cap, method, len, [1, 4, 0, 0]),
+            Err(KError::InvalidArgument.id() as u64),
+            "method {method} len {len}"
+        );
+    }
+    // Các ca thừa **không** được chạm máy trạng thái: EP slot 1 sống, đích 4 vẫn rỗng.
+    assert!(r.m.cap_at(r.c, 1).is_ok());
+    assert_eq!(r.m.cap_at(r.c, 4), Err(KError::SlotEmpty));
     // Slot đích ngoài bảng CNode (16 slot) ⇒ 19.
     assert_eq!(
         invoke_on(

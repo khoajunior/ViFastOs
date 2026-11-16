@@ -56,8 +56,10 @@ const TMP_TCB_C: usize = 26;
 const TMP_SC_S: usize = 27;
 const TMP_SC_C: usize = 28;
 
-/// Slot 3 của bảng dải user (`MAX_PROCS = 4`; slot 1/2 đã dùng ở KT-67a/67b).
-const LOAD_SLOT: usize = 3;
+/// Ô bảng dải user **riêng cho hai chương trình** (`MAX_PROCS = 4`; slot 1/2 đã dùng ở
+/// KT-67a/67b) — nit reviewer KT-68: cùng slot sẽ dùng chung ô debug `RANGE_SLOTS`.
+const LOAD_SLOT_S: usize = 0;
+const LOAD_SLOT_C: usize = 3;
 /// VA client map Frame; giá trị client ghi lần **hai** (kernel đọc physmap); cỡ Frame 4 KiB.
 const VA_MAP: u64 = 0x4100_0000;
 const MAGIC2: u64 = 0x8877_6655_4433_2211;
@@ -175,7 +177,7 @@ fn build_rig(
 ) -> Option<(Rig, user::LoadedInit, user::LoadedInit)> {
     // ---- nạp HAI chương trình U-mode (mỗi đứa một VSpace; slot dải 3 dùng chung vì cùng layout).
     *stage = "load server";
-    let server = match user::load_init_slot(CAPA_SERVER_ELF, load_untyped, LOAD_SLOT) {
+    let server = match user::load_init_slot(CAPA_SERVER_ELF, load_untyped, LOAD_SLOT_S) {
         Ok(loaded) => loaded,
         Err(error) => {
             *stage = error.name();
@@ -183,7 +185,7 @@ fn build_rig(
         }
     };
     *stage = "load client";
-    let client = match user::load_init_slot(CAPA_CLIENT_ELF, load_untyped, LOAD_SLOT) {
+    let client = match user::load_init_slot(CAPA_CLIENT_ELF, load_untyped, LOAD_SLOT_C) {
         Ok(loaded) => loaded,
         Err(error) => {
             *stage = error.name();
@@ -272,12 +274,14 @@ struct Task {
     loaded: user::LoadedInit,
     tf: TrapFrame,
     tcb: ObjId,
+    /// Ô bảng dải user của **chính** tác vụ này (`LOAD_SLOT_S`/`LOAD_SLOT_C`).
+    slot: usize,
     exited: bool,
     code: u64,
 }
 
 impl Task {
-    fn new(loaded: user::LoadedInit, tcb: ObjId) -> Self {
+    fn new(loaded: user::LoadedInit, tcb: ObjId, slot: usize) -> Self {
         let mut tf = TrapFrame::zeroed();
         tf.x[REG_SP] = user::USER_STACK_TOP;
         tf.sepc = loaded.entry;
@@ -285,6 +289,7 @@ impl Task {
             loaded,
             tf,
             tcb,
+            slot,
             exited: false,
             code: u64::MAX,
         }
@@ -293,7 +298,10 @@ impl Task {
 
 /// Chạy round-robin server ↔ client tới khi **cả hai** `Exit` (hoặc hết bước).
 fn run_pair(rig: &Rig, server: user::LoadedInit, client: user::LoadedInit) -> (u64, u64, usize) {
-    let mut tasks = [Task::new(server, rig.tcb_s), Task::new(client, rig.tcb_c)];
+    let mut tasks = [
+        Task::new(server, rig.tcb_s, LOAD_SLOT_S),
+        Task::new(client, rig.tcb_c, LOAD_SLOT_C),
+    ];
     user::enable_multitask(true);
     let mut steps = 0usize;
     while steps < 500 && !tasks.iter().all(|task| task.exited) {
@@ -302,7 +310,7 @@ fn run_pair(rig: &Rig, server: user::LoadedInit, client: user::LoadedInit) -> (u
                 continue;
             }
             steps += 1;
-            user::set_active_slot(LOAD_SLOT);
+            user::set_active_slot(task.slot);
             user::bind_core_tcb(task.tcb);
             let entered = core_bridge::with_machine(|m| set_running(m, task.tcb));
             if !entered {
@@ -894,6 +902,36 @@ fn tap23(fails: &mut usize, rig: &Rig) {
             5,
             [S_EP_REQ as u64, 11, 0, 0],
         ) == Err(KError::InvalidArgument.id() as u64);
+        // D2-104 — arity **chính xác**: thừa MR cho **từng** method ⇒ 5 (không bỏ qua).
+        // Copy 2|3, Mint 2|3|4, Move 2, Delete 1, Revoke 0|1.
+        let extra_cases: [(u32, u8); 10] = [
+            (CNODE_COPY, 4),
+            (CNODE_MINT, 5),
+            (CNODE_MOVE, 3),
+            (CNODE_MOVE, 4),
+            (CNODE_DELETE, 2),
+            (CNODE_DELETE, 3),
+            (CNODE_DELETE, 4),
+            (CNODE_REVOKE, 2),
+            (CNODE_REVOKE, 3),
+            (CNODE_REVOKE, 4),
+        ];
+        let mut arity_hits = 0u8;
+        for (method, len) in extra_cases {
+            if kinvoke(
+                m,
+                rig.tcb_s,
+                rig.s,
+                method,
+                len,
+                [S_EP_REQ as u64, 11, 0, 0],
+            ) == Err(KError::InvalidArgument.id() as u64)
+            {
+                arity_hits += 1;
+            }
+        }
+        // Không ca thừa nào được chạm máy trạng thái: đích 11 còn rỗng, EP slot 1 còn sống.
+        let arity_ok = arity_hits == 10 && m.cap_at(rig.s, 11) == Err(KError::SlotEmpty);
         // Dọn cap READ-only rồi CPTR cũ ⇒ SlotEmpty (8) — "cap chết" ở mức ABI.
         let freed = kinvoke(m, rig.tcb_s, rig.s, CNODE_DELETE, 1, [10, 0, 0, 0]) == Ok((0, 0));
         let stale = invoke::dispatch(
@@ -927,7 +965,7 @@ fn tap23(fails: &mut usize, rig: &Rig) {
             let mut w = PlatformWriter(&PLATFORM);
             let _ = writeln!(
                 w,
-                "# capa: am empty={} occupied={} rights={} range={} ro_cnode={} mutate={} rotate={} other={} denied={} short={} long={} stale={} dead_alive={} caps={}",
+                "# capa: am empty={} occupied={} rights={} range={} ro_cnode={} mutate={} rotate={} other={} denied={} short={} long={} arity={} stale={} dead_alive={} caps={}",
                 empty as u8,
                 occupied as u8,
                 rights as u8,
@@ -939,6 +977,7 @@ fn tap23(fails: &mut usize, rig: &Rig) {
                 denied_ok as u8,
                 short as u8,
                 long as u8,
+                arity_hits,
                 stale as u8,
                 dead_ok as u8,
                 caps_ok as u8
@@ -955,6 +994,7 @@ fn tap23(fails: &mut usize, rig: &Rig) {
             && denied_ok
             && short
             && long
+            && arity_ok
             && freed
             && stale
             && dead_ok

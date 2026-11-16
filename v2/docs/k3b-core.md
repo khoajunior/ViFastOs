@@ -1409,6 +1409,8 @@ Rotate=6`. `Mutate`/`Rotate` **chưa cài** ⇒ giữ `NotSupported` (18) + có 
 - `Machine::move_cap` port D2-44 từ sim: `dst` có cap ⇒ `delete(dst)` trước (con reparent lên
   ông), `src == dst` ⇒ `IllegalOperation` (17), cap giữ `CapId`/cha/quyền/badge.
 - Lỗi: 3/5/7/8/17/18/19 theo bảng chung; `caps > 0` trên invocation ⇒ 18 (D2-99(g), có đếm).
+- **Arity CHÍNH XÁC** (D2-104): `Copy` 2|3, `Mint` 2|3|4, `Move` 2, `Delete` 1, `Revoke` 0|1;
+  `length` thiếu **hoặc thừa** ⇒ `InvalidArgument` (5) + đếm, kiểm **trước** khi đổi CPTR.
 - Bộ đếm `invoke::stats()` thêm `copy/mint/moved/delete/revoke` (TAP `# capa:` đọc).
 
 ### 16.3 capalloc U-mode (`capa_server`/`capa_client`, ảnh `ktest-user`)
