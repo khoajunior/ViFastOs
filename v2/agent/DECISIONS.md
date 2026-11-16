@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-103`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-104`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-103: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-104: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -175,3 +175,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-102** **Luật dòng evidence** (vá lần thứ **ba** của cùng một lỗi: KT-67b `pre` literal, KT-68 `parent/subtree/sibling/cross_cnode/src_alive` literal, KT-67a `method=0/0/1` literal): mọi dòng `# <tag>:` in ra log phải lấy **giá trị từ biến đo** (`writeln!`/`format!` với biến), **không** được là chuỗi hằng viết sẵn. (a) Hằng **thiết kế** được phép xuất hiện nhưng phải mang nhãn `const:…` để người đọc phân biệt (ví dụ `policy=copy`); (b) mã lỗi phải in qua **cùng** hàm render với code (`user::sys_err`), không viết số; (c) method id in qua **hằng sinh từ spec** (`invoke::METHOD_*`), không viết số; (d) reviewer **phải** grep **mọi** tiền tố evidence (`# capa:`, `# inv:`, `# capx:`, `# mem:`, `# stack:`, …) tìm literal và **từ chối** nếu có; (e) nếu test vẫn kiểm bằng biến (TAP đúng) thì lỗi này **không** làm sai kết quả, nhưng làm **log không phải bằng chứng** ⇒ vẫn là DRIFT, phải sửa; (f) cho phép vá **giữa lúc review** nếu delta **cơ học** (chỉ đổi cách in), có chạy lại matrix + clippy liên quan, và lead tự kiểm bằng grep sau khi vá — nhưng phải báo **delta file:dòng** để confirm chỉ kiểm phần thay đổi.
 
 - **D2-103** **KT-68 DONE — capalloc**: cấp/thu hồi capability theo **cây MDB** qua invocation `CNode` — **id sinh từ spec** (`0 Copy, 1 Mint, 2 Move, 3 Mutate, 4 Delete, 5 Revoke, 6 Rotate`; `Mutate`/`Rotate` giữ `NotSupported`). Hai ELF U-mode, 2 cspace: client gửi cap CNode của chính nó, server quét slot rỗng, cấp Frame, client map/ghi/đọc; `Revoke` đúng **cây con**, `Delete` **reparent**, cấp lại **cùng slot**, `Revoke` **xuyên CNode**. Bất biến đo: `slot_rfree` 12→12, `live_cap` 46→46 ⇒ **không rò**; `cap_high` 47→64 là **high-water do `spec/abi.toml:27` `id_reuse="never"`**, không phải rò cap. TAP `ktest-user` **24**, matrix **12/12**, conformance **61/61 + 5/5**, gate **661/87**, soak **0/1000** (`f6318b5d`), clippy 4/4 `EXIT=0`, `size_of` **188.872** không đổi. Vá luôn cờ chết `v2/test/conformance/run.sh --boot` (đường dẫn `v2/v2/test/...`). **Bài học**: mô tả task của tôi từng ghi sai thứ tự method id (`Revoke(4)`/`Delete(5)`); **spec thắng mô tả task**.
+
+- **D2-104** **Arity của invocation là CHÍNH XÁC, không phải tối thiểu**: mỗi method có đúng `n` tham số trong `spec/[method_signature]`; `len` (số MR dùng) **khác** `n` — thiếu **hoặc thừa** — đều trả `InvalidArgument` **5**, kèm đếm. Lý do: nhận MR thừa làm hai bên hiểu khác nhau về cùng một message (client tưởng đã truyền field mới, kernel bỏ qua) và làm test “thiếu/thừa ⇒ 5” của KT-68 **không thật**. Sửa ở KT-68b cho `CNode.Copy/Mint/Move/`Delete`/`Revoke`; các method khác áp cùng luật khi cài. Test phải có **cả** ca thiếu **và** thừa cho từng method (không chỉ `len=1` và `len=5`).
