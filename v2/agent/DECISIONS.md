@@ -2,7 +2,7 @@
 
 Người ghi: **Agent 0**. Agent 2 **không** sửa tệp này; cần đổi thì ghi `BLOCKED.md` + đề xuất.
 Nguồn: `docs/QUYET-DINH-sau-review.md` (QD) §2.3, §4, §8 và `review/src/ViFastOs-dossier.md` §19.1.
-Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-100`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
+Không gian tên đã chốt (QD §2.1): quyết định v1 giữ `D-01..D-08` (**chỉ áp v1**); quyết định v2 là **`D2-01..D2-101`**. Số cũ `D-09..D-27` **hết hiệu lực**, không dùng lại.
 
 ---
 
@@ -25,7 +25,7 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 
 ---
 
-## Phần II — D2-01..D2-100: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
+## Phần II — D2-01..D2-101: quyết định v2 (D2-01..28 chép QD §8; D2-29..46 bổ sung 2026-11-12)
 
 - **D2-01** v1 lưu trữ ở `v1-archive`, sổ lỗi mang sang (mục 6).
 - **D2-02** không sửa mò (D11 cũ).
@@ -169,3 +169,5 @@ Ghi chú: D11 (không sửa mò) → **D2-02**; D18 (hồi quy thì revert) → 
 - **D2-99** **Quy ước gọi invocation** (Agent 0 chốt — D2-35 nói đổi chữ ký phải qua Agent 0, KT-67a đã tự đặt layout nên đây là quyết định hợp thức hoá, **không** phải “đã có trong spec”): (a) syscall **0 `Call`** trên cap **không** Endpoint ⇒ invocation, `method` = label trong `MessageInfo`; (b) **tham số** MR0..MR3, **trả** trong `a1` (`value`), lỗi theo bảng mã chung; (c) `Untyped.Retype` = **1.0**: MR0 = **slot đích (CPTR trong cspace của caller)**, MR1 = type id, MR2 = size_bits, MR3 = flags; trả `a1` = slot; **lưu ý**: spec hiện ghi `params=["cap","type","size_bits","flags"]`, `returns=[]` ⇒ **KT-67b phải cập nhật** `[method_signature."Untyped.Retype"]` thêm `dst` + `returns=["slot"]` (Agent 0 cho phép đúng một lần, D2-22); (d) `Frame.Map` = **11.0**: MR0 = VSpace cap, MR1 = VA, MR2 = flags; `Frame.Unmap` = **11.1**: MR0 = VSpace cap, MR1 = VA; **KT-67b phải thêm hai `[method_signature."Frame.Map"/"Frame.Unmap"]`** vào spec (đúng một lần); (e) **quyền**: invocation kiểm **cả** quyền trên cap đối tượng gốc **và** quyền **write** trên VSpace cap — thiếu ⇒ `InsufficientRights`; (f) `Frame.Unmap` **phải kiểm Frame tại VA khớp cap Frame** (không được unmap VA bất kỳ chỉ vì có VSpace cap); sai ⇒ lỗi, **không** im lặng; (g) `caps>0` trên invocation ⇒ **18** (không phải 5) và **có đếm**, để “mọi cặp ngoài whitelist ⇒ 18” đúng tuyệt đối.
 
 - **D2-100** **Cách đo L1 của cổng — sửa lỗi phương pháp**: `v2 gate --fast` in `# L1: OK (<wall>)` bằng **wall time cả lệnh `cargo test`**, nên **bao gồm biên dịch** nếu nguồn đổi giữa bước L0 và L1 (đo được: `spec/` sửa 13:27:59 → `generated.rs` 13:30:50 → L1 13:31:34–13:34:28 ⇒ 173,935 ms, so với 891–1.282 ms khi cây ấm). Hệ quả: (a) **cấm** đọc số L1 của cổng làm số đo hiệu năng khi cây vừa đổi nguồn; (b) số L1 dùng để kết luận phải đo trên **cây ấm** (compile trước, hoặc hai lần: lần 1 gồm build, lần 2 thuần chạy) và ghi rõ lần nào; (c) quy tắc AGENTS §6 “L1 > 60 s ⇒ giảm seed” **chỉ** áp cho **thời gian chạy thuần**, không áp cho wall có biên dịch — nhưng **không** vì thế mà bỏ qua: nếu lần đo thuần vẫn > 60 s thì **đúng là** phải xử lý theo luật cũ; (d) khi báo cáo, ghi **cả hai** số (wall cổng + chạy thuần) nếu khác nhau quá 2×; (e) các gate T-INFRA trước đây (wall 280 s) giải thích được một phần bởi cùng artifact này — ghi nhận lại, không đổi ngưỡng nào.
+
+- **D2-101** **Sửa điều kiện D2-93(a)** sau khi `vifast-plat-user` có thêm `unsafe`: điều kiện đúng **không phải** “mọi `unsafe` phải nằm trong hàm gọi syscall” (quá hẹp, đã bị vi phạm bởi accessor IPC buffer + helper đọc/ghi user memory) mà là **“không có LỆNH ĐẶC QUYỀN”**: shim được phép `unsafe` cho (i) `ecall`, (ii) `read_volatile`/`write_volatile` trên **địa chỉ user** (IPC buffer của chính nó, VA do chương trình U-mode truyền). Lý do: shim chạy ở **U-mode** với page table của user ⇒ truy cập bộ nhớ không đặc quyền, không với tới kernel; ranh giới an ninh là **mức đặc quyền**, không phải cú pháp `unsafe`. **Cấm tuyệt đối** trong shim: `csrr/csrw/sfence/sret/mret/satp/wfi/Đọc-ghi CSR, truy cập vật lý/physmap`. Kiểm bằng disassembly (`llvm-objdump`) trong review, không chỉ grep. Điều kiện (b)/(c) của D2-93 giữ nguyên; ba chương trình U-mode nghiệp vụ vẫn **0 `unsafe`**.
