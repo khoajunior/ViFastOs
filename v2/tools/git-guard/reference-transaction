@@ -1,0 +1,203 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# vifast-guard / reference-transaction — KT-85b, thi hành D2-125.2 + vá A1-183.
+#
+# Vì sao có hook này: KT-85 chỉ cài `pre-commit` + `pre-push`; hai hook đó **chỉ** chạy
+# cho `git commit` / `git push`. A1-183 đã chứng minh lỗ hổng: lead `git cherry-pick` được
+# một commit vào `refs/heads/main` mà hook **không** chạy ⇒ luật "chỉ lead ghi nhánh chính"
+# bị vòng qua bằng cherry-pick, merge, reset, rebase, `git branch -f`, `git update-ref`, …
+#
+# `reference-transaction` là hook duy nhất của git nằm **dưới** mọi lệnh đổi ref (git ≥ 2.28):
+# commit, cherry-pick, merge, reset, rebase, branch -f, update-ref… đều kết thúc bằng một
+# "reference transaction". Chặn ở đây là chặn theo **bản chất** (cập nhật ref), không theo
+# **tên lệnh** — nên không còn đường vòng bằng lệnh khác.
+#
+# Luật (một câu): **cập nhật bất kỳ nhánh được bảo vệ nào khi VIFAST_ROLE != "lead" ⇒ TỪ CHỐI.**
+#
+#   * Nhánh bảo vệ: `refs/heads/main` + `refs/heads/master` **luôn** bảo vệ (không tắt được
+#     bằng biến môi trường), cộng thêm danh sách cấu hình `VIFAST_PROTECTED_REFS`
+#     (cách nhau bởi dấu cách/phẩy/hai chấm) — biến này chỉ **thêm** ref, không bớt được ref
+#     mặc định (fail-closed: nếu nó bớt được thì agent chỉ cần đặt biến rỗng là qua).
+#   * Nguồn vai DUY NHẤT: `VIFAST_ROLE` (cùng luật với pre-commit/pre-push: hook không đọc
+#     `.git/config`, không đọc tệp cấu hình nào).
+#   * Chỉ chặn ở hai trạng thái **đầu** của transaction là `preparing` và `prepared` —
+#     `committed`/`aborted` là thông báo **sau** khi ref đã đổi (hoặc đã huỷ), chặn ở đó vô
+#     nghĩa. (git đời mới — 2.54 trên máy này — có **bốn** trạng thái: preparing, prepared,
+#     committed, aborted; tài liệu git nói rõ mã thoát **chỉ** có tác dụng ở preparing/prepared.
+#     Vì vậy chỉ kiểm `prepared` là thiếu: phải kiểm cả `preparing`.)
+#   * Fail-closed: thiếu tham số trạng thái / trạng thái lạ ⇒ coi như `prepared`.
+#
+# Giao thức git (git ≥ 2.28): hook nhận $1 = `prepared` | `committed` | `aborted`;
+# stdin = mỗi dòng `<old-oid> SP <new-oid> SP <ref-name>`, đã sắp xếp theo tên ref.
+# Thoát khác 0 ở `prepared` ⇒ git **huỷ** cả transaction (không ref nào đổi).
+#
+# Quyền của NGƯỜI (không phải agent): hook này **không** có cờ --no-verify (git chỉ áp
+# `--no-verify` cho pre-commit/commit-msg/pre-push/prepare-commit-msg), nhưng người có quyền
+# trên máy vẫn tắt được bằng `git -c core.hooksPath=/dev/null …` hoặc gỡ hook. Đây là hàng
+# rào **chống nhầm**, không phải chống cố ý (D2-125.1); hàng rào thật là bảo vệ nhánh trên
+# GitHub (v2/docs/k6-git-guard.md §6).
+#
+# Bản gốc: v2/tools/git-guard/reference-transaction — cài bằng v2/tools/git-guard/install.sh
+# vào `<git-common-dir>/hooks/` nên áp cho **mọi** worktree của repo.
+
+set -u
+
+doc_hint='v2/docs/k6-git-guard.md'
+role="${VIFAST_ROLE-}"
+state="${1-}"
+extra_refs="${VIFAST_PROTECTED_REFS-}"
+
+# ------------------------------------------------------------------ đọc stdin
+# Phải đọc hết stdin: git ghi danh sách ref vào pipe; không đọc thì git có thể nhận EPIPE
+# và báo lỗi khó hiểu thay vì thông điệp từ chối của ta.
+refs=$(cat 2>/dev/null || true)
+
+# ------------------------------------------------------------------ chỉ chặn ở đầu transaction
+case "$state" in
+    committed | aborted)
+        # Ref đã đổi hoặc transaction đã huỷ — không có gì để chặn nữa.
+        exit 0
+        ;;
+    preparing | prepared) ;;
+    *)
+        # Thiếu tham số / trạng thái lạ (git mới thêm?) ⇒ fail-closed: vẫn kiểm như prepared.
+        ;;
+esac
+
+# ------------------------------------------------------------------ ref nào bị bảo vệ
+# Tắt glob: nội dung VIFAST_PROTECTED_REFS là danh sách tên ref, không phải mẫu glob.
+set -f
+
+is_protected() {
+    _ref="$1"
+    case "$_ref" in
+        refs/heads/main | refs/heads/master) return 0 ;;
+    esac
+    _save_ifs=$IFS
+    IFS=' ,:'
+    for _r in $extra_refs; do
+        if [ "$_ref" = "$_r" ]; then
+            IFS=$_save_ifs
+            return 0
+        fi
+    done
+    IFS=$_save_ifs
+    return 1
+}
+
+# Duyệt từng dòng stdin, gom các ref bảo vệ bị chạm. Tách trường bằng tham số mở rộng
+# của shell (không đổi IFS, không gọi lệnh ngoài) để chịu được nhiều khoảng trắng.
+hit=''
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    old_oid=${line%% *}
+    rest=${line#* }
+    new_oid=${rest%% *}
+    ref=${rest#* }
+    [ -n "${ref-}" ] || continue
+    if is_protected "$ref"; then
+        hit="$hit
+  $ref  ($old_oid → $new_oid)"
+    fi
+done <<EOF
+$refs
+EOF
+set +f
+
+# ------------------------------------------------------------------ cho qua: lead
+if [ "$role" = "lead" ]; then
+    if [ -n "$hit" ]; then
+        printf 'vifast-guard(reference-transaction): CHO QUA — VIFAST_ROLE=lead, cập nhật nhánh bảo vệ (KT-85b / D2-125.2)\n%s\n' "$hit" >&2
+    fi
+    exit 0
+fi
+
+# Không chạm nhánh bảo vệ ⇒ không có gì để nói (đừng làm ồn mọi lệnh git của agent).
+if [ -z "$hit" ]; then
+    exit 0
+fi
+
+# ------------------------------------------------------------------ từ chối (fail-closed)
+if [ -z "$role" ]; then
+    ly_do='chưa đặt VIFAST_ROLE (không có trong môi trường / rỗng) ⇒ fail-closed'
+    role_in='(chưa đặt)'
+else
+    ly_do="VIFAST_ROLE=\"$role\" khác \"lead\""
+    role_in="\"$role\""
+fi
+
+# Chẩn đoán: ai, ở đâu. Mọi lệnh git đều có fallback — hook không được chết vì lệnh phụ lỗi
+# (chết im lặng dễ bị hiểu là "cho qua").
+name=$(git config user.name 2>/dev/null || true)
+mail=$(git config user.email 2>/dev/null || true)
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+abs_git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ -z "$common_dir" ]; then
+    common_dir=$(git rev-parse --git-common-dir 2>/dev/null || true)
+    case "$common_dir" in
+        /*) ;;
+        '') ;;
+        *) common_dir="$top/$common_dir" ;;
+    esac
+fi
+if [ -z "$abs_git_dir" ]; then
+    abs_git_dir=$(git rev-parse --git-dir 2>/dev/null || true)
+    case "$abs_git_dir" in
+        /*) ;;
+        '') ;;
+        *) abs_git_dir="$top/$abs_git_dir" ;;
+    esac
+fi
+
+[ -n "$name" ] || name='(chưa cấu hình user.name)'
+[ -n "$mail" ] || mail='(chưa cấu hình user.email)'
+[ -n "$branch" ] || branch='(không xác định / detached HEAD)'
+[ -n "$top" ] || top='(không xác định)'
+
+loai='không xác định'
+if [ -n "$abs_git_dir" ] && [ -n "$common_dir" ]; then
+    if [ "$abs_git_dir" = "$common_dir" ]; then
+        loai='checkout chính'
+    else
+        loai='worktree liên kết'
+    fi
+fi
+
+{
+    printf '\n'
+    printf 'vifast-guard(reference-transaction): TỪ CHỐI — KT-85b / D2-125.2 (vá A1-183)\n'
+    printf '  Lý do       : %s\n' "$ly_do"
+    printf '  Vai hiện tại: VIFAST_ROLE=%s\n' "$role_in"
+    printf '  Trạng thái  : %s\n' "${state:-(thiếu tham số ⇒ coi như prepared)}"
+    printf '  Ref bị chạm :\n%s\n' "$hit"
+    printf '  Người gọi   : %s <%s>\n' "$name" "$mail"
+    printf '  Nhánh HEAD  : %s\n' "$branch"
+    printf '  Nơi chạy    : %s (%s)\n' "$top" "$loai"
+    printf '  Hook        : %s\n' "$0"
+    printf '\n'
+    printf '  Vì sao: A1-183 — lead đã cherry-pick được commit vào refs/heads/main mà\n'
+    printf '  pre-commit không hề chạy (hook đó chỉ chạy cho "git commit"). Merge, reset,\n'
+    printf '  rebase, "git branch -f", "git update-ref" đều đi đường này. Từ nay mọi cập\n'
+    printf '  nhật nhánh bảo vệ đều phải có VIFAST_ROLE=lead — không phụ thuộc tên lệnh.\n'
+    printf '\n'
+    printf '  Phải làm gì:\n'
+    printf '   1) Agent — KHÔNG đổi nhánh chính. Làm trong worktree riêng của task:\n'
+    printf '          git worktree add ../wt-<mã> -b task/<mã>\n'
+    printf '      commit/cherry-pick/merge **trên nhánh task**, rồi báo lead (Agent 1).\n'
+    printf '   2) Lead (Agent 1) — đặt biến rồi mới đổi nhánh chính:\n'
+    printf '          VIFAST_ROLE=lead git merge --no-ff task/<mã>\n'
+    printf '          VIFAST_ROLE=lead git cherry-pick <sha>\n'
+    printf '      (không --force, không viết lại lịch sử — D2-123 mục (4)(e)).\n'
+    printf '   3) Người thật — hook không có cờ --no-verify; quyền của người là\n'
+    printf '      "git -c core.hooksPath=/dev/null ..." hoặc gỡ hook. Hàng rào thật là bảo vệ\n'
+    printf '      nhánh trên GitHub (%s §6) — hàng rào này chỉ chống **nhầm** (D2-125.1).\n' "$doc_hint"
+    printf '\n'
+    printf '  Tài liệu: %s · cài/kiểm: v2/tools/git-guard/install.sh --check\n' "$doc_hint"
+    printf '  vifast-guard: RESULT=DENY hook=reference-transaction state=%s role=%s\n' \
+        "${state:-prepared}" "$role_in"
+    printf '\n'
+} >&2
+
+exit 1

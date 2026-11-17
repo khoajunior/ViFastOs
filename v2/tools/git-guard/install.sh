@@ -1,24 +1,36 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# v2/tools/git-guard/install.sh — cài/kiểm/gỡ hook chặn commit bằng máy (KT-85).
+# v2/tools/git-guard/install.sh — cài/kiểm/gỡ hook chặn commit bằng máy (KT-85 + KT-85b).
 #
-# Cài `pre-commit` + `pre-push` vào `<git-common-dir>/hooks/` — thư mục hook **chung** của
-# repo, nên hook áp cho **mọi** worktree (agent làm trong `../wt-<mã>` vẫn bị chặn; đó là
-# điều D2-123 mục (4) muốn). Bản gốc nằm trong repo, cài là **copy** (không symlink) để
-# xoá worktree không làm gãy hook.
+# Cài **bốn** hook vào `<git-common-dir>/hooks/` — thư mục hook **chung** của repo, nên hook
+# áp cho **mọi** worktree (agent làm trong `../wt-<mã>` vẫn bị chặn; đó là điều D2-123 mục (4)
+# muốn). Bản gốc nằm trong repo, cài là **copy** (không symlink) để xoá worktree không làm
+# gãy hook.
 #
-# Bất biến phải giữ (D2-123 mục (4), đề bài KT-85):
+#   pre-commit           (KT-85)   chặn `git commit` của vai không phải lead
+#   pre-push             (KT-85)   chặn `git push` của vai không phải lead
+#   commit-msg           (KT-85b)  bắt buộc nhãn [KT-##]/[ST-##] ở đầu subject
+#   reference-transaction (KT-85b) chặn MỌI cập nhật nhánh bảo vệ của vai không phải lead
+#                                  (phủ cherry-pick, merge, reset, rebase — vá A1-183)
+#
+# `reference-transaction` chỉ có từ git 2.28. Trên máy có git cũ hơn, script **không cài**
+# hook đó (cài cũng không bao giờ chạy), in `[SKIP]` kèm lý do và **báo rõ** để lead biết
+# lỗ hổng cherry-pick vẫn còn trên máy đó. Ba hook còn lại cài bình thường.
+#
+# Bất biến phải giữ (D2-123 mục (4), D2-125.2, đề bài KT-85/KT-85b):
 #   1. `core.hooksPath` **không** được trỏ chỗ khác — nếu trỏ chỗ khác thì hook của ta
 #      không bao giờ chạy mà không ai thấy; script **từ chối** cài và in cách sửa.
 #   2. Idempotent: chạy lại lần hai không đổi gì (so sha256 nội dung).
 #   3. `--check` chỉ đọc: kiểm hook đang cài **đúng** (tồn tại, có quyền chạy, nội dung
 #      trùng bản gốc) và in trạng thái; mã thoát 0 = đúng, 1 = lệch.
+#   4. `--uninstall` gỡ **cả bốn** hook (kể cả reference-transaction khi git đã hạ cấp).
 #
 # Dùng:
 #   v2/tools/git-guard/install.sh                 # cài (mặc định)
 #   v2/tools/git-guard/install.sh --check         # kiểm, không ghi
 #   v2/tools/git-guard/install.sh --uninstall     # gỡ (chỉ gỡ hook của ta)
 #   v2/tools/git-guard/install.sh --repo <dir>    # áp cho repo khác (dùng cho ca tự kiểm)
+#   v2/tools/git-guard/install.sh --print-support # in phiên bản git + hook nào cài được
 #   v2/tools/git-guard/install.sh --help
 #
 # Lưu ý quyền: hook **không** đặt VIFAST_ROLE và không ghi biến đó vào đâu. Chỉ Agent 1
@@ -27,13 +39,16 @@
 
 set -u
 
-HOOK_NAMES=(pre-commit pre-push)
+HOOK_NAMES=(pre-commit pre-push commit-msg reference-transaction)
+REF_HOOK='reference-transaction'
+REF_HOOK_MIN_MAJOR=2
+REF_HOOK_MIN_MINOR=28
 MARKER='vifast-guard'
 
 GUARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 { if ($0 ~ /^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"
 }
 
 die_usage() {
@@ -72,6 +87,52 @@ abs_common_dir() {
     printf '%s\n' "$d"
 }
 
+# ------------------------------------------------------------------ phiên bản git
+# `git version` → "2.54.0" (có thể kèm "(Apple Git-157)"). Không đọc được ⇒ coi như cũ
+# (fail-closed: thà báo thiếu hook còn hơn cài hook không bao giờ chạy).
+git_version_num() {
+    git --version 2>/dev/null |
+        sed -n 's/^git version \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p' |
+        head -n 1
+}
+
+# ref_tx_supported → 0 nếu git >= 2.28 (có hook reference-transaction).
+ref_tx_supported() {
+    local v major minor
+    v="$(git_version_num)"
+    if [ -z "$v" ]; then
+        return 1
+    fi
+    major="${v% *}"
+    minor="${v#* }"
+    if [ "$major" -gt "$REF_HOOK_MIN_MAJOR" ]; then
+        return 0
+    fi
+    if [ "$major" -eq "$REF_HOOK_MIN_MAJOR" ] && [ "$minor" -ge "$REF_HOOK_MIN_MINOR" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# hook_skipped <tên> → 0 nếu hook này KHÔNG cài được trên git hiện tại (in lý do qua biến).
+hook_skipped() {
+    if [ "$1" = "$REF_HOOK" ] && [ "$REF_SUPPORTED" -eq 0 ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Danh sách hook **cài được** trên git hiện tại (mỗi tên một dòng).
+supported_hook_names() {
+    local h
+    for h in "${HOOK_NAMES[@]}"; do
+        if hook_skipped "$h"; then
+            continue
+        fi
+        printf '%s\n' "$h"
+    done
+}
+
 # ------------------------------------------------------------------ tham số
 action='install'
 repo_override=''
@@ -81,6 +142,7 @@ while [ $# -gt 0 ]; do
         --check) action='check' ;;
         --install) action='install' ;;
         --uninstall) action='uninstall' ;;
+        --print-support) action='support' ;;
         --repo)
             [ $# -ge 2 ] || die_usage "--repo cần một thư mục"
             repo_override="$2"
@@ -117,13 +179,47 @@ COMMON_DIR="$(abs_common_dir "$REPO")"
 HOOKS_DIR="$COMMON_DIR/hooks"
 HOOKS_PATH="$(git -C "$REPO" config --get core.hooksPath 2>/dev/null || true)"
 
-echo "install.sh: KT-85 / D2-123 mục (4) — hook chặn commit bằng máy"
+# ------------------------------------------------------------------ git có hook reference-transaction?
+GIT_VER_RAW="$(git --version 2>/dev/null || echo '(không chạy được git version)')"
+GIT_VER_NUM="$(git_version_num)"
+REF_SUPPORTED=0
+if ref_tx_supported; then
+    REF_SUPPORTED=1
+fi
+
+if [ "$action" = "support" ]; then
+    echo "install.sh: $GIT_VER_RAW"
+    echo "  git version (số)          : ${GIT_VER_NUM:-(không đọc được)}"
+    echo "  cần tối thiểu cho hook    : ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR} (reference-transaction)"
+    if [ "$REF_SUPPORTED" -eq 1 ]; then
+        echo "  reference-transaction     : CÀI ĐƯỢC (git đủ mới)"
+    else
+        echo "  reference-transaction     : KHÔNG cài được — git cũ hơn ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR}"
+        echo "                              ⇒ cherry-pick/merge/reset vào nhánh chính KHÔNG bị hook chặn"
+        echo "                              ⇒ phải nâng git HOẶC dựa vào bảo vệ nhánh GitHub (§6 tài liệu)"
+    fi
+    echo "  hook sẽ cài               : $(supported_hook_names | tr '\n' ' ')"
+    exit 0
+fi
+
+echo "install.sh: KT-85 + KT-85b / D2-123 mục (4), D2-125.2 — hook chặn commit bằng máy"
 echo "  repo            : $REPO"
 echo "  git-common-dir  : $COMMON_DIR"
 echo "  hooks dir       : $HOOKS_DIR   (chung cho mọi worktree)"
 echo "  core.hooksPath  : ${HOOKS_PATH:-(chưa đặt — đúng, hook lấy từ git-common-dir/hooks)}"
 echo "  bản gốc         : $GUARD_DIR"
 echo "  VIFAST_ROLE     : ${VIFAST_ROLE:-(chưa đặt trong môi trường hiện tại)}"
+echo "  git             : $GIT_VER_RAW"
+if [ "$REF_SUPPORTED" -eq 1 ]; then
+    echo "  reference-transaction: cài được (git >= ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR})"
+else
+    echo "  reference-transaction: [SKIP] git < ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR} — KHÔNG có hook này,"
+    echo "                         không cài (cài cũng không chạy). Lỗ hổng A1-183 vẫn còn trên máy này:"
+    echo "                         cherry-pick/merge/reset vào nhánh chính KHÔNG bị chặn."
+    echo "                         ⇒ NÂNG GIT lên >= ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR} rồi chạy lại, hoặc dựa vào"
+    echo "                         bảo vệ nhánh GitHub (v2/docs/k6-git-guard.md §6)."
+    echo "                         Ba hook còn lại vẫn cài bình thường."
+fi
 echo "  chế độ          : $action"
 echo
 
@@ -271,12 +367,33 @@ uninstall_one() {
     echo "[ GỠ ] $name (đã xoá $dst)"
 }
 
+check_one_or_skip() {
+    if hook_skipped "$1"; then
+        echo "[SKIP] $1 — git < ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR} không có hook này; đây KHÔNG phải lỗi cài đặt"
+        echo "       ⇒ lỗ hổng A1-183 (cherry-pick/merge/reset vào nhánh chính) vẫn còn: NÂNG GIT hoặc bật"
+        echo "         bảo vệ nhánh trên GitHub (v2/docs/k6-git-guard.md §6)."
+        if [ -f "$HOOKS_DIR/$1" ]; then
+            echo "       (có tệp $HOOKS_DIR/$1 — git cũ sẽ bỏ qua; gỡ bằng --uninstall nếu không dùng)"
+        fi
+        return 0
+    fi
+    check_one "$1"
+}
+
+install_one_or_skip() {
+    if hook_skipped "$1"; then
+        echo "[SKIP] $1 — KHÔNG cài: git < ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR}, hook không tồn tại nên cài cũng không chạy"
+        return 0
+    fi
+    install_one "$1"
+}
+
 case "$action" in
     check)
-        for h in "${HOOK_NAMES[@]}"; do check_one "$h"; done
+        for h in "${HOOK_NAMES[@]}"; do check_one_or_skip "$h"; done
         ;;
     install)
-        for h in "${HOOK_NAMES[@]}"; do install_one "$h"; done
+        for h in "${HOOK_NAMES[@]}"; do install_one_or_skip "$h"; done
         ;;
     uninstall)
         for h in "${HOOK_NAMES[@]}"; do uninstall_one "$h"; done
@@ -288,7 +405,8 @@ echo
 if [ "$action" != "check" ] && [ "$hooks_path_ok" -eq 1 ]; then
     n_wt="$(git -C "$REPO" worktree list 2>/dev/null | wc -l | tr -d ' ')"
     echo "  Áp cho         : $n_wt worktree đang đăng ký (hook ở git-common-dir)"
-    echo "  Ca âm đầy đủ   : v2/tools/git-guard/neg-test.sh (ba ca: agent2 / chưa đặt / push)"
+    echo "  Ca âm đầy đủ   : v2/tools/git-guard/neg-test.sh      (KT-85: commit/push)"
+    echo "                   v2/tools/git-guard/neg-test-kt85b.sh (KT-85b: cherry-pick/merge/reset/commit-msg)"
     echo "  Kiểm lại       : v2/tools/git-guard/install.sh --check"
 fi
 echo
@@ -297,5 +415,9 @@ if [ "$fails" -ne 0 ]; then
     echo "install.sh: FAIL ($fails mục) — $action KHÔNG đạt"
     exit 1
 fi
-echo "install.sh: PASS — $action đạt (${HOOK_NAMES[*]})"
+echo "install.sh: PASS — $action đạt ($(supported_hook_names | tr '\n' ' '))"
+if [ "$REF_SUPPORTED" -eq 0 ]; then
+    echo "install.sh: CẢNH BÁO — git < ${REF_HOOK_MIN_MAJOR}.${REF_HOOK_MIN_MINOR}: KHÔNG có reference-transaction,"
+    echo "            lỗ hổng A1-183 (cherry-pick/merge/reset vào nhánh chính) CHƯA được vá trên máy này."
+fi
 exit 0
