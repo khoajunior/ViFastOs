@@ -1,12 +1,10 @@
 # run.sh: task=KT-77a mode=serial image=custom smp=1 negative=wrong-expect
 # run.sh: toml=/Users/mps/dvchd/ViFastOs/spec/v1-parity.toml
-# run.sh: image=v2/artifacts/39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57.bin qemu=/opt/homebrew/bin/qemu-system-riscv64 opensbi=/opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin
+# run.sh: image=v2/artifacts/07c34fc62b002ab7af6bf935b2457909be6ba16ac98e5241b55702870178a3d8.bin qemu=/opt/homebrew/bin/qemu-system-riscv64 opensbi=/opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin
 # run.sh: guard=/Users/mps/dvchd/ViFastOs/v2/test/boot/qemu_guard.sh (khong sua) boot_timeout=20s send_delay_ms=1200
-# parity: image_path=v2/artifacts/39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57.bin image_sha256=39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57 image_bytes=176768
-# parity: artifacts_bin=artifacts/39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57.bin co=0 (dong bang artifacts/<sha>.bin thuoc KT-84)
-WARNING: phép đo [before] KHÔNG HỢP LỆ (loadavg_1m=13.95>ncpu=12) — số THỜI GIAN không dùng để kết luận (D2-116/OD-K6-6)
-# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=13.95 loadavg_5m=9.26 loadavg_15m=6.54 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=loadavg_1m=13.95>ncpu=12
-# MEASUREMENT_INVALID tag=before ly_do=loadavg_1m=13.95>ncpu=12
+# parity: image_path=v2/artifacts/07c34fc62b002ab7af6bf935b2457909be6ba16ac98e5241b55702870178a3d8.bin image_sha256=07c34fc62b002ab7af6bf935b2457909be6ba16ac98e5241b55702870178a3d8 image_bytes=176768
+# parity: artifacts_bin=artifacts/07c34fc62b002ab7af6bf935b2457909be6ba16ac98e5241b55702870178a3d8.bin co=0 (dong bang artifacts/<sha>.bin thuoc KT-84)
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=5.33 loadavg_5m=6.62 loadavg_15m=6.02 ncpu=12 boot_done=0 verdict=OK
 # parity: spec_total=28 active=4 deferred=24 (nguon: /Users/mps/dvchd/ViFastOs/spec/v1-parity.toml)
 # parity: serial name=help payload_bytes=14 min_count=2 qemu_rc=124 log=v2/agent/JOURNAL/kt77b-logs/kt77a-serial-1-help-serial-custom-smp1-neg-wrong-expect.log
 not ok 1 - help: byte da vao shell (co 9 dong 'shell: ?') nhung expect khong khop sau 2000 ms (^# shell: echo KHONG-BAO-GIO$)
@@ -18,6 +16,6 @@ not ok 3 - ps: byte da vao shell (co 9 dong 'shell: ?') nhung expect khong khop 
 not ok 4 - kill: byte da vao shell (co 9 dong 'shell: ?') nhung expect khong khop sau 2000 ms (^# shell: echo KHONG-BAO-GIO$)
 # parity: total=28 ok=0 deferred=24 active=4 (active_da_chay=4)
 # parity: not_ok=4 timeout=0 khong_co_shell=0 qemu_rc=124
-# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=4.43 loadavg_5m=6.83 loadavg_15m=6.09 ncpu=12 boot_done=4 verdict=OK
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=6.14 loadavg_5m=6.25 loadavg_15m=5.96 ncpu=12 boot_done=4 verdict=OK
 # parity: qemu_con_sot_total=0 qemu_cua_script=0
 # parity: KET_LUAN=not_ok (exit 3)

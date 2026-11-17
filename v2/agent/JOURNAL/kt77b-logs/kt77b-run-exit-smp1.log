@@ -70,12 +70,12 @@ TAP version 13
 # obj: arena=0x804f8000-0x80508000 bytes=65536 untyped=2 window=0x40000000 pa0=0x82000000 pa1=0x80000000 physmap=1 healthy=1
 # mmu: satp=0x80000000000804e8 mode=8 root=0x804e8000 tables=9 used=36864 arena=0x804e8000-0x804f8000 kernel_end=0x804e8000
 # mmu map: high=0xffffffc040000000 physmap=0xffffffc000000000 guard=0x80400000-0x80401000 guard_none=1 alias=1
-# hart=0 timebase_hz=10000000 tick_hz=100 time=3312040 stvec=0x802000a0 direct=true
+# hart=0 timebase_hz=10000000 tick_hz=100 time=1442940 stvec=0x802000a0 direct=true
 # core: product addr=0x8022a080 bytes=189384 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
 # plic: base=0xc000000 ndev=95 hart=0 ctx=1 threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0
 # uart irq: irqs=8 claims=8 completes=8 balanced=1 spurious=0 unexpected=0 last_irq=10 last_iir=0x2 ier_off=1 plic_enable=0
-# timer arm: now=3597300 first_deadline=3697300 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
-# timer: ticks=1 delta_ns=31850000 late=1 missed=2 non_monotonic=0 last=3915800 deadline=3997300 sret_sie=1
+# timer arm: now=1701910 first_deadline=1801910 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+# timer: ticks=1 delta_ns=171384000 late=1 missed=16 non_monotonic=0 last=3415750 deadline=3501910 sret_sie=1
 # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
 ok 1 - k3 boot
 # k3 shell: handoff product-shell=1
@@ -104,5 +104,4 @@ shell>
 # sys: nr=14 err=0 value=0 tcb=14 state=BlockedOnSend src=core
 # u-mode exit: code=0 faultkind=Exit{0} tcb=14 state=BlockedOnSend
 # proc: recv exit pid=14 code=0
-# product halt: shell_exit=0 fault_seen=1 events=6 ps_replies=1 ps_n=3 kill_suspend=1 proc_up=1 rx_windows=296 rx_irqs=0 rx_bytes=32 rx_late=32 ring_used=0 ring_head=2 ring_tail=2 ring_ok=1
-cat: /tmp/kt77b-payload.txt: No such file or directory
+# product halt: shell_exit=0 fault_seen=1 events=6 ps_replies=1 ps_n=3 kill_suspend=1 proc_up=1 rx_windows=366 rx_irqs=1 rx_bytes=32 rx_late=0 ring_used=0 ring_head=2 ring_tail=2 ring_ok=1

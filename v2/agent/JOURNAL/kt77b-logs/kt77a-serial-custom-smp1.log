@@ -4,8 +4,7 @@
 # run.sh: guard=/Users/mps/dvchd/ViFastOs/v2/test/boot/qemu_guard.sh (khong sua) boot_timeout=20s send_delay_ms=1200
 # parity: image_path=v2/artifacts/c1072d72d9a50809a2d5f236088b12569b09dc03b0a87d13c113040e9dc4b998.bin image_sha256=c1072d72d9a50809a2d5f236088b12569b09dc03b0a87d13c113040e9dc4b998 image_bytes=82552
 # parity: artifacts_bin=artifacts/c1072d72d9a50809a2d5f236088b12569b09dc03b0a87d13c113040e9dc4b998.bin co=0 (dong bang artifacts/<sha>.bin thuoc KT-84)
-# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=13.67 loadavg_5m=9.04 loadavg_15m=6.42 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=loadavg_1m=13.67>ncpu=12
-# MEASUREMENT_INVALID tag=before ly_do=loadavg_1m=13.67>ncpu=12
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=6.20 loadavg_5m=6.84 loadavg_15m=6.09 ncpu=12 boot_done=0 verdict=OK
 # parity: spec_total=28 active=4 deferred=24 (nguon: /Users/mps/dvchd/ViFastOs/spec/v1-parity.toml)
 
 OpenSBI v1.8.1
@@ -79,12 +78,12 @@ TAP version 13
 # obj: arena=0x804f8000-0x80508000 bytes=65536 untyped=2 window=0x40000000 pa0=0x82000000 pa1=0x80000000 physmap=1 healthy=1
 # mmu: satp=0x80000000000804e8 mode=8 root=0x804e8000 tables=9 used=36864 arena=0x804e8000-0x804f8000 kernel_end=0x804e8000
 # mmu map: high=0xffffffc040000000 physmap=0xffffffc000000000 guard=0x80400000-0x80401000 guard_none=1 alias=1
-# hart=0 timebase_hz=10000000 tick_hz=100 time=1911270 stvec=0x802000a0 direct=true
+# hart=0 timebase_hz=10000000 tick_hz=100 time=1284970 stvec=0x802000a0 direct=true
 # core: product addr=0x80213000 bytes=189384 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
 # plic: base=0xc000000 ndev=95 hart=0 ctx=1 threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0
 # uart irq: irqs=8 claims=8 completes=8 balanced=1 spurious=0 unexpected=0 last_irq=10 last_iir=0x2 ier_off=1 plic_enable=0
-# timer arm: now=2220230 first_deadline=2320230 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
-# timer: ticks=1 delta_ns=140708000 late=1 missed=13 non_monotonic=0 last=3627310 deadline=3720230 sret_sie=1
+# timer arm: now=1388170 first_deadline=1488170 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+# timer: ticks=1 delta_ns=102250000 late=1 missed=9 non_monotonic=0 last=2410670 deadline=2488170 sret_sie=1
 # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
 ok 1 - k3 boot
 # k3 halt
@@ -162,12 +161,12 @@ TAP version 13
 # obj: arena=0x804f8000-0x80508000 bytes=65536 untyped=2 window=0x40000000 pa0=0x82000000 pa1=0x80000000 physmap=1 healthy=1
 # mmu: satp=0x80000000000804e8 mode=8 root=0x804e8000 tables=9 used=36864 arena=0x804e8000-0x804f8000 kernel_end=0x804e8000
 # mmu map: high=0xffffffc040000000 physmap=0xffffffc000000000 guard=0x80400000-0x80401000 guard_none=1 alias=1
-# hart=0 timebase_hz=10000000 tick_hz=100 time=1450010 stvec=0x802000a0 direct=true
+# hart=0 timebase_hz=10000000 tick_hz=100 time=3883200 stvec=0x802000a0 direct=true
 # core: product addr=0x80213000 bytes=189384 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
 # plic: base=0xc000000 ndev=95 hart=0 ctx=1 threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0
 # uart irq: irqs=8 claims=8 completes=8 balanced=1 spurious=0 unexpected=0 last_irq=10 last_iir=0x2 ier_off=1 plic_enable=0
-# timer arm: now=1770930 first_deadline=1870930 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
-# timer: ticks=1 delta_ns=134118000 late=1 missed=12 non_monotonic=0 last=3112110 deadline=3170930 sret_sie=1
+# timer arm: now=4126200 first_deadline=4226200 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+# timer: ticks=1 delta_ns=196424000 late=1 missed=18 non_monotonic=0 last=6090440 deadline=6126200 sret_sie=1
 # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
 ok 1 - k3 boot
 # k3 halt
@@ -245,12 +244,12 @@ TAP version 13
 # obj: arena=0x804f8000-0x80508000 bytes=65536 untyped=2 window=0x40000000 pa0=0x82000000 pa1=0x80000000 physmap=1 healthy=1
 # mmu: satp=0x80000000000804e8 mode=8 root=0x804e8000 tables=9 used=36864 arena=0x804e8000-0x804f8000 kernel_end=0x804e8000
 # mmu map: high=0xffffffc040000000 physmap=0xffffffc000000000 guard=0x80400000-0x80401000 guard_none=1 alias=1
-# hart=0 timebase_hz=10000000 tick_hz=100 time=1350690 stvec=0x802000a0 direct=true
+# hart=0 timebase_hz=10000000 tick_hz=100 time=1341130 stvec=0x802000a0 direct=true
 # core: product addr=0x80213000 bytes=189384 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
 # plic: base=0xc000000 ndev=95 hart=0 ctx=1 threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0
 # uart irq: irqs=8 claims=8 completes=8 balanced=1 spurious=0 unexpected=0 last_irq=10 last_iir=0x2 ier_off=1 plic_enable=0
-# timer arm: now=1586540 first_deadline=1686540 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
-# timer: ticks=1 delta_ns=32173000 late=1 missed=2 non_monotonic=0 last=1908270 deadline=1986540 sret_sie=1
+# timer arm: now=1593250 first_deadline=1693250 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+# timer: ticks=1 delta_ns=209127000 late=1 missed=19 non_monotonic=0 last=3684520 deadline=3693250 sret_sie=1
 # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
 ok 1 - k3 boot
 # k3 halt
@@ -328,12 +327,12 @@ TAP version 13
 # obj: arena=0x804f8000-0x80508000 bytes=65536 untyped=2 window=0x40000000 pa0=0x82000000 pa1=0x80000000 physmap=1 healthy=1
 # mmu: satp=0x80000000000804e8 mode=8 root=0x804e8000 tables=9 used=36864 arena=0x804e8000-0x804f8000 kernel_end=0x804e8000
 # mmu map: high=0xffffffc040000000 physmap=0xffffffc000000000 guard=0x80400000-0x80401000 guard_none=1 alias=1
-# hart=0 timebase_hz=10000000 tick_hz=100 time=1366890 stvec=0x802000a0 direct=true
+# hart=0 timebase_hz=10000000 tick_hz=100 time=1345630 stvec=0x802000a0 direct=true
 # core: product addr=0x80213000 bytes=189384 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
 # plic: base=0xc000000 ndev=95 hart=0 ctx=1 threshold=0 priority_uart=1 enable_ctx=1 enable_mmode=0 claim_idle=0
 # uart irq: irqs=8 claims=8 completes=8 balanced=1 spurious=0 unexpected=0 last_irq=10 last_iir=0x2 ier_off=1 plic_enable=0
-# timer arm: now=1606060 first_deadline=1706060 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
-# timer: ticks=1 delta_ns=15154000 late=0 missed=0 non_monotonic=0 last=1757600 deadline=1806060 sret_sie=1
+# timer arm: now=1596370 first_deadline=1696370 tick_ticks=100000 tick_hz=100 timebase_hz=10000000 sie_stie=1 sstatus_sie=1
+# timer: ticks=1 delta_ns=194673000 late=1 missed=18 non_monotonic=0 last=3543100 deadline=3596370 sret_sie=1
 # smp: boot=0 harts=1 present=0x1 online=0x1 started=0x0 absent=0xfe timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
 ok 1 - k3 boot
 # k3 halt
@@ -341,7 +340,6 @@ ok 1 - k3 boot
 not ok 4 - kill: khong thay shell trong log (qemu_rc=0)
 # parity: total=28 ok=0 deferred=24 active=4 (active_da_chay=4)
 # parity: not_ok=4 timeout=0 khong_co_shell=4 qemu_rc=0
-# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=13.67 loadavg_5m=9.04 loadavg_15m=6.42 ncpu=12 boot_done=4 verdict=KHONG_HOP_LE ly_do=loadavg_1m=13.67>ncpu=12
-# MEASUREMENT_INVALID tag=after ly_do=loadavg_1m=13.67>ncpu=12
-# parity: qemu_con_sot_total=3 qemu_cua_script=0
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=6.03 loadavg_5m=6.79 loadavg_15m=6.08 ncpu=12 boot_done=4 verdict=OK
+# parity: qemu_con_sot_total=2 qemu_cua_script=0
 # parity: KET_LUAN=khong_co_shell (exit 5)

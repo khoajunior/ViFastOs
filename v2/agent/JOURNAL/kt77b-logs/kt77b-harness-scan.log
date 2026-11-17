@@ -1,5 +1,5 @@
-# kt77b-harness-scan: image=v2/artifacts/39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57.bin sha256=39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57 bytes=176768
-# kt77b-harness-scan: markers=11 (chuỗi do mã test phát ra; ảnh canonical đã strip)
+# kt77b-harness-scan: image=v2/artifacts/07c34fc62b002ab7af6bf935b2457909be6ba16ac98e5241b55702870178a3d8.bin sha256=07c34fc62b002ab7af6bf935b2457909be6ba16ac98e5241b55702870178a3d8 bytes=176768
+# kt77b-harness-scan: markers=15 (chuỗi do mã test phát ra; ảnh canonical đã strip)
 # scan product: hits=0
 ok 1 - anh san pham khong chua ma harness (hits=0)
 # kt77b-harness-scan: negative=v2/artifacts/81d8d0ed8c927e0031b9cc2891dccd60352b0ba0de4c5923544c810949e1b8d4.bin sha256=81d8d0ed8c927e0031b9cc2891dccd60352b0ba0de4c5923544c810949e1b8d4 bytes=205376
@@ -9,4 +9,9 @@ ok 1 - anh san pham khong chua ma harness (hits=0)
 # marker 'not ok' hits=19
 # scan negative: hits=22
 ok 2 - ca am: anh co harness bi bat (hits=22 > 0)
-# kt77b-harness-scan: KET_LUAN=ok (product=0, negative>0)
+# kt77b-harness-scan: feature-graph product=product-shell harness=ktest,user (crate vifast-plat-riscv64)
+# feat product: ktest=0 umode=1
+# feat harness: ktest=1
+ok 3 - probe gate: cau hinh san pham KHONG bat 'ktest' (probe khong duoc bien dich), co 'umode'
+ok 4 - ca am cua probe gate: cau hinh anh test BAT 'ktest' (ktest=1 > 0)
+# kt77b-harness-scan: KET_LUAN=ok (product=0, negative>0, probe_gate=ok)

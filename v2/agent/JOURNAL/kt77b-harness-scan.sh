@@ -14,6 +14,16 @@
 #   "# core: link" bằng chứng core của ảnh test (sản phẩm in `# core: product`)
 #   ktest-<x>     tên ảnh test trong thông điệp
 #
+# **`probe` (D2-123(1))** — không dùng literal `probe` trần (PLIC in sẵn
+# `plic: probe khong khoi phuc priority irq` ⇒ dương tính giả). Kiểm hai lớp:
+#   (a) chuỗi **đủ điều kiện** `vifast_plat_riscv64::probe`, `probe::on_trap`,
+#       `probe_fault_entry`, `src/probe.rs` — chỉ hiện khi ảnh còn symtab (ảnh canonical đã strip
+#       nên thường 0);
+#   (b) **feature-graph** (luôn kiểm được trên ảnh stripped): `cargo tree -e features` của crate
+#       arch phải **không** có `ktest` cho cấu hình sản phẩm (thiếu `ktest` ⇒ không biên dịch
+#       `probe`, `trap_dispatch` không có nhánh probe), và **phải** có `ktest` cho cấu hình ảnh
+#       test (ca âm của bộ đếm này).
+#
 # Luật (OD-K6-5 luật 3): mọi bộ đếm báo 0 **phải** có ca âm làm nó khác 0 — vì vậy script **bắt
 # buộc** một `--negative <ảnh-ktest>` và tự đỏ nếu ca âm không bắt được marker nào.
 #
@@ -62,6 +72,11 @@ MARKERS=(
     'ktest-con'
     'ktest-exec'
     'ktest-guard'
+    # Lớp (a): chuỗi đủ điều kiện của `probe` (symbol/đường dẫn module) — xem đầu tệp.
+    'vifast_plat_riscv64::probe'
+    'probe::on_trap'
+    'probe_fault_entry'
+    'src/probe.rs'
 )
 
 sha_of() { shasum -a 256 "$1" | awk '{print $1}'; }
@@ -107,8 +122,47 @@ else
     fails=$((fails + 1))
 fi
 
+# ---------------------------------------------------------------- lớp (b): feature-graph `probe`
+FEAT_PRODUCT="${FEAT_PRODUCT:-product-shell}"
+FEAT_HARNESS="${FEAT_HARNESS:-ktest,user}"
+feat_tree() { # $1 = danh sách feature của crate kbin
+    (cd "$ROOT/v2/kernel" && RUSTUP_TOOLCHAIN="${VIFAST_REPRO_TOOLCHAIN:-1.99.1}" \
+        cargo tree -p vifast-kbin-riscv64 --features "$1" --target riscv64gc-unknown-none-elf \
+        -e features -i vifast-plat-riscv64 --locked --offline 2>/dev/null) || true
+}
+feat_count() { # $1 = feature; trả số dòng `vifast-plat-riscv64 feature "<x>"`
+    LC_ALL=C grep -a -F -c "vifast-plat-riscv64 feature \"$1\"" "$2" 2>/dev/null || true
+}
+
+echo "# kt77b-harness-scan: feature-graph product=$FEAT_PRODUCT harness=$FEAT_HARNESS (crate vifast-plat-riscv64)"
+PT="$(mktemp "${TMPDIR:-/tmp}/kt77b-feat-p.XXXXXX")"
+HT="$(mktemp "${TMPDIR:-/tmp}/kt77b-feat-h.XXXXXX")"
+feat_tree "$FEAT_PRODUCT" >"$PT"
+feat_tree "$FEAT_HARNESS" >"$HT"
+p_ktest="$(feat_count ktest "$PT")"
+p_umode="$(feat_count umode "$PT")"
+h_ktest="$(feat_count ktest "$HT")"
+case "$p_ktest" in '' | *[!0-9]*) p_ktest=0 ;; esac
+case "$p_umode" in '' | *[!0-9]*) p_umode=0 ;; esac
+case "$h_ktest" in '' | *[!0-9]*) h_ktest=0 ;; esac
+echo "# feat product: ktest=$p_ktest umode=$p_umode"
+echo "# feat harness: ktest=$h_ktest"
+if [ "$p_ktest" -eq 0 ] && [ "$p_umode" -gt 0 ]; then
+    echo "ok 3 - probe gate: cau hinh san pham KHONG bat 'ktest' (probe khong duoc bien dich), co 'umode'"
+else
+    echo "not ok 3 - probe gate: cau hinh san pham bat 'ktest' (probe vao anh) hoac thieu 'umode' (ktest=$p_ktest umode=$p_umode)"
+    fails=$((fails + 1))
+fi
+if [ "$h_ktest" -gt 0 ]; then
+    echo "ok 4 - ca am cua probe gate: cau hinh anh test BAT 'ktest' (ktest=$h_ktest > 0)"
+else
+    echo "not ok 4 - ca am cua probe gate: cau hinh anh test KHONG bat 'ktest' (bo dem khong the khac 0)"
+    fails=$((fails + 1))
+fi
+rm -f "$PT" "$HT" 2>/dev/null
+
 if [ "$fails" -eq 0 ]; then
-    echo "# kt77b-harness-scan: KET_LUAN=ok (product=0, negative>0)"
+    echo "# kt77b-harness-scan: KET_LUAN=ok (product=0, negative>0, probe_gate=ok)"
     exit 0
 fi
 echo "# kt77b-harness-scan: KET_LUAN=FAIL (fails=$fails)"

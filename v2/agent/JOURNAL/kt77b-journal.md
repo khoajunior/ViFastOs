@@ -51,3 +51,50 @@ review), dừng trong hạn (không rơi về (b)).
 `v2/agent/JOURNAL/kt77b-logs/` (build canonical ×2, budget, parity 3 cấu hình hart, ba ca âm,
 detector, boot tới exit ở 1/2/4 hart, regress ktest-proc, v2 check, gate --fast) +
 `v2/agent/JOURNAL/kt77b-harness-scan.sh` + `v2/docs/k6-product-shell.md`.
+
+## Vòng vá reviewer KT-77b (2026-11-17, sau DRIFT) — KHÔNG commit (A1-177)
+
+**Mục 1 — sha phải sinh từ cây đã commit.**
+- Build `product-shell` từ **commit `12fbff3e`**, cây `v2/kernel` sạch (`git status` trống):
+  **hai lần, hai `CARGO_TARGET_DIR` tạm khác nhau ⇒ cùng `sha256=07c34fc6…`**, `size=176768`,
+  `build=6e90c73c43f9b4aa` (khớp sha reviewer tự build). Ảnh copy vào
+  `v2/artifacts/07c34fc6….bin`; mọi log parity/negative mới đều in `image_sha256=07c34fc6…`.
+- Ảnh không shell cùng cây: `c1072d72…`, 82552 B (không đổi byte). Ảnh test canonical (ca âm
+  detector): `81d8d0ed…`, 205376 B, `build=862591498553d445` (khớp lần build trước ⇒ cùng cây).
+- **Nhãn**: `39ca3cc6…` = **bản trước commit, KHÔNG dùng làm bằng chứng/matrix/soak**
+  (khác `07c34fc6` đúng vùng panic-location như reviewer chỉ).
+- **Phát hiện thêm (nợ KT-79/85)**: build cùng commit ở **đường dẫn khác** (`git worktree
+  ~/kt77b-head-wt`) cho `c65ee0f6…` — cùng size, cùng `.text` digest, khác `.rodata`; chuỗi khác
+  là `/Users/mps/kt77b-head-wt/v2/kernel/vifast-kbin-riscv64/init/procsrv_user.rs` ⇒ `build.rs`
+  gọi `$RUSTC` trực tiếp cho ELF U-mode nên **không** nhận `--remap-path-prefix`. Đã ghi vào
+  docs §10 + §2.
+- Log build WIP bị KT-77c làm bẩn (`2a1bbe55…`, `169ff6cb…`, `62e86bd8…`) ⇒ **đã xoá**, không dùng.
+
+**Mục 2 — literal dòng evidence (D2-102).** `proc_rt.rs`: thêm `const INPUT_MODE`, `const INJECT_COUNT`,
+`const RX_PATH`; dòng `# product shell:` in `const:input_mode=…`/`const:inject=…`; dòng
+`# product rx:` in `const:rx_path=…` (không còn literal `input=serial no-inject=1`/`path=…`).
+Biên dịch kiểm bằng `CARGO_TARGET_DIR=/tmp/kt77b-patch-check` (không đụng ảnh phát hành). **Chưa
+commit** ⇒ ảnh bằng chứng vẫn là `07c34fc6` (bản trước vá); sau commit phải build lại.
+
+**Mục 3 — ca âm shell tắt sạch.** Ba lần chạy: `qemu_con_sot_total` lần lượt 2/3/2 nhưng
+`qemu_cua_script=0`, `verdict=OK` before+after cả ba lần ⇒ QEMU sót là của **tab khác** đang đo
+song song, không phải script này. Log dùng: `kt77b-neg-shell-off.log` (exit 5); hai lần trước giữ
+ở `kt77b-neg-shell-off-r2.log`/`-r3.log` (có dòng đếm QEMU toàn máy khác không).
+
+**Mục 4 — `probe` (D2-123(1)).** `kt77b-harness-scan.sh` thêm hai lớp: (a) chuỗi đủ điều kiện
+`vifast_plat_riscv64::probe`, `probe::on_trap`, `probe_fault_entry`, `src/probe.rs` (chỉ hiện khi
+còn symtab); (b) **feature-graph** `cargo tree -e features -i vifast-plat-riscv64`: sản phẩm có
+`ktest=0 umode=1` (probe không biên dịch), ca âm `ktest=1`. Kết quả: product `hits=0`, ảnh test
+`hits=22`, probe gate `ok` cả hai phía. Không dùng literal `probe` trần (PLIC in sẵn
+`plic: probe khong khoi phuc priority irq`).
+
+**Mục 5 — metric ngưỡng.** Docs §8 thêm một câu: `.data+.bss` (cổng ảnh, QD §3.5) ≠ "bộ nhớ tĩnh"
+OD-K6-2 (`size_of::<Machine>()`, core, không đổi).
+
+**Chạy lại bằng chứng trên ảnh mới `07c34fc6…`:** parity serial 1/2/4 hart `KET_LUAN=ok`
+(smp4 còn `qemu_con_sot_total=0 qemu_cua_script=0`); boot-tới-exit 1/2/4 hart (halt `shell_exit=0`,
+`fault_seen=1` = `Exit{0}`); ca âm sai expect `exit 3`; budget đo lại; detector 4/4 `ok`.
+
+**Xung đột tiềm ẩn (báo lead):** KT-77c đang sửa **cùng crate** (`Cargo.toml`, `main.rs`,
+`proc_abi.rs`, `proc_rt.rs`, `proc_fs.rs` mới, plat `lib.rs`/`mmu.rs`). Tôi chỉ sửa **dòng evidence +
+ba hằng** trong `proc_rt.rs`; nếu KT-77c ghi đè, cần ghép lại — hiện vá vẫn còn trong tệp.

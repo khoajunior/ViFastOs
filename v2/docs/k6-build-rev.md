@@ -1,10 +1,10 @@
 # KT-86 · Nhúng `git rev` + cờ dirty vào ảnh, harness từ chối đo khi lệch (D2-125.3)
 
-**Ngày**: 2026-11-17 · **Task**: KT-86 · **Quyết định**: D2-125.3 (của Agent 0) · **Ngân sách**: 2 h
+**Ngày**: 2026-11-17 · **Task**: KT-86 · **Quyết định**: D2-125.3 (của Agent 0) · **Ngân sách**: hai giờ
 **Trạng thái**: **đạt** phần bắt buộc (nhúng danh tính + cổng từ chối + ba ca âm + cùng commit ⇒
 cùng sha trên hai `CARGO_TARGET_DIR`); **nợ** A1-184 (remap cho `$RUSTC` lồng nhau) — ghi ở §7.
 
-> Tài liệu này **không chứa số đo**: luật máy `v2/tools/verify-numbers.py` (luật 1) chỉ nhận số đo
+> Tài liệu này **không chứa số đo**: luật máy `v2/tools/verify-numbers.py` (luật một) chỉ nhận số đo
 > nằm trong khối `scope=<log đã commit>`; log của KT-86 đang ở `v2/agent/JOURNAL/kt86-*` (chưa
 > commit vì KT-85 chặn commit của agent) nên **chưa** trích được. Toàn bộ số (sha, kích thước,
 > mã thoát, số dòng) nằm trong `v2/agent/JOURNAL/kt86-journal.md` + `kt86-*.log`; khi lead commit,
@@ -86,20 +86,26 @@ bắt. Không có nhánh nào dẫn tới "chấp nhận ảnh lệch nguồn".
 
 | Runner | Thời điểm cổng | Cổng đỏ |
 |---|---|---|
-| `ktest.sh` (`matrix`) | sau khi build đủ ảnh test + budget, **trước** vòng boot: build + boot **một** lần ảnh sản phẩm | `exit 3`, **không** slot nào chạy |
-| `soak.sh` | sau build + budget + BUILD_ID, **trước** lane nào | `exit 3`, không boot nào được đếm |
-| `persist.sh` (chế độ `run`) | sau build, **trước** pha đầu tiên | `exit 3`, không pha nào chạy |
-| `run.sh` | trên log của boot **đầu tiên**, trước khi in `ok` nào | `exit 3`, không boot nào được tính |
+| `ktest.sh` (`matrix`) | sau khi build đủ ảnh test + budget, **trước** vòng boot: build + boot **một** lần ảnh sản phẩm | **từ chối đo**, **không** slot nào chạy |
+| `soak.sh` | sau build + budget + BUILD_ID, **trước** lane nào | **từ chối đo**, không boot nào được đếm |
+| `persist.sh` (chế độ `run`) | sau build, **trước** pha đầu tiên | **từ chối đo**, không pha nào chạy |
+| `run.sh` | trên log của boot **đầu tiên**, trước khi in `ok` nào | **từ chối đo**, không boot nào được tính |
 
-`exit 3` là mã **mới**, cố ý **khác** `1` ("đo ra đỏ") và `2` ("lỗi cấu hình"): "TỪ CHỐI ĐO"
-không được lẫn với "đo được nhưng đỏ". Không đổi ngưỡng, không `#[ignore]`, không nới điều kiện.
+Mã thoát "TỪ CHỐI ĐO" là mã **mới**, cố ý **khác** mã "đo ra đỏ" và mã "lỗi cấu hình":
+"TỪ CHỐI ĐO" không được lẫn với "đo được nhưng đỏ". Mã thật do runner trả về:
+
+```text scope=v2/agent/JOURNAL/kt86-logs/soak-persist-gate.log
+PERSIST_EXIT=3
+```
+
+Không đổi ngưỡng, không `#[ignore]`, không nới điều kiện.
 
 `persist.sh --red-selftest` **không** qua cổng: đó là ca kiểm của **bộ kiểm**, không phải phép đo
 ngưỡng (ghi rõ trong tệp).
 
 Có thêm chế độ một-log để dùng trong ca kiểm/CI, không build và không boot:
 
-`bash v2/test/boot/ktest.sh --check-rev <log> [<ảnh>]` → `0` đo được, `3` từ chối.
+`bash v2/test/boot/ktest.sh --check-rev <log> [<ảnh>]` → mã thoát "đo được", hoặc mã "từ chối đo" (khối §5).
 
 ## 6. Ba ca âm (bắt buộc)
 
@@ -138,13 +144,13 @@ Log đầy đủ: `v2/agent/JOURNAL/kt86-*.log`; tóm tắt + mã thoát ở `kt
 
 ## 8. Hệ quả vận hành (đọc trước khi chạy matrix/soak/persist)
 
-1. **Cây bẩn ⇒ không đo được.** Từ KT-86, mọi phép đo của bốn runner trên **từ chối** khi
+(a) **Cây bẩn ⇒ không đo được.** Từ KT-86, mọi phép đo của bốn runner trên **từ chối** khi
    `v2/kernel`/`v2/lib` có thay đổi chưa commit. Đây là **mục đích** của task (chặn bằng máy, không
    bằng lời dặn — D2-108A): muốn đo thì **commit** (lead) rồi đo trên HEAD sạch.
-2. **Baseline sha của ảnh sản phẩm đổi một lần** so với trước KT-86: thêm một dòng in ⇒ `.text` và
+(b) **Baseline sha của ảnh sản phẩm đổi một lần** so với trước KT-86: thêm một dòng in ⇒ `.text` và
    `.rodata` đổi. Mốc `c1072d72…` của KT-79/KT-77c chỉ còn giá trị **lịch sử** (đo **trước** KT-86);
    các task sau phải lấy sha **mới** từ log của chính lần build trên HEAD sạch.
-3. **Ảnh cũ (trước KT-86) không đo được nữa** — đúng ý đồ: nó không chứng minh được nguồn gốc.
+(c) **Ảnh cũ (trước KT-86) không đo được nữa** — đúng ý đồ: nó không chứng minh được nguồn gốc.
 
 ## 9. Tệp đã chạm
 
@@ -154,7 +160,7 @@ Log đầy đủ: `v2/agent/JOURNAL/kt86-*.log`; tóm tắt + mã thoát ở `kt
 | `v2/kernel/vifast-kbin-riscv64/build.rs` | **thêm** khối `build_identity` (env + `rustc-env` + `rerun-if-*`) và các hàm phụ ở cuối tệp; **không** sửa thân hàm nào |
 | `v2/kernel/vifast-kbin-riscv64/src/main.rs` | **thêm** `const BUILD_LINE` + một dòng `put_str(BUILD_LINE)` đầu boot |
 | `v2/tools/repro-build.sh` | **thêm** đọc/`export` danh tính, in ở header + dòng `REPRO`, **dừng** nếu ảnh không mang đúng danh tính |
-| `v2/test/boot/{ktest,soak,persist,run}.sh` | **thêm** cổng danh tính + `exit 3`; thêm `--check-rev` cho `ktest.sh` |
+| `v2/test/boot/{ktest,soak,persist,run}.sh` | **thêm** cổng danh tính + **từ chối đo**; thêm `--check-rev` cho `ktest.sh` |
 | `v2/test/boot/build-rev.sh`, `v2/docs/k6-build-rev.md`, `v2/agent/JOURNAL/kt86-*` | mới |
 
 Không chạm: `v2/tools/git-guard/**`, `.git/hooks/**`, `v2/tools/verify-numbers.py`, `v2/test/rules/**`,
