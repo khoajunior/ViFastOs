@@ -1,0 +1,118 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# vifast-guard / pre-push — KT-85, thi hành D2-123 mục (4)(b) + (d).
+#
+# Chặn push **bằng máy** từ vai không phải lead. Cùng luật với pre-commit:
+#   * Nguồn vai DUY NHẤT: biến môi trường VIFAST_ROLE (hook không đọc config/tệp).
+#   * Fail-closed: chưa đặt / rỗng / khác "lead" ⇒ TỪ CHỐI (push không chạy).
+#   * VIFAST_ROLE=lead ⇒ CHO QUA.
+#   * Áp cả cho `git push --dry-run` (git vẫn gọi hook) — nên ca âm không cần remote thật.
+#
+# Git truyền vào: $1 = tên remote, $2 = URL; stdin = các dòng
+#   <local ref> SP <local sha> SP <remote ref> SP <remote sha>
+# (stdin chỉ để in ra cho log — hook không sửa gì, không gọi git push, không động index).
+#
+# Bản gốc: v2/tools/git-guard/pre-push — cài bằng v2/tools/git-guard/install.sh vào
+# `<git-common-dir>/hooks/` nên áp cho mọi worktree.
+
+set -u
+
+doc_hint='v2/docs/k6-git-guard.md'
+role="${VIFAST_ROLE-}"
+remote_name="${1-}"
+remote_url="${2-}"
+[ -n "$remote_name" ] || remote_name='(không rõ)'
+[ -n "$remote_url" ] || remote_url='(không rõ)'
+
+# Đọc stdin của git (không bắt buộc phải đọc, nhưng đọc để in ref vào log từ chối).
+refs=$(cat 2>/dev/null || true)
+
+# ---------------------------------------------------------------- cho qua: lead
+if [ "$role" = "lead" ]; then
+    printf 'vifast-guard(pre-push): CHO QUA — VIFAST_ROLE=lead, remote=%s (KT-85 / D2-123.4)\n' \
+        "$remote_name" >&2
+    exit 0
+fi
+
+# ---------------------------------------------------------------- từ chối (fail-closed)
+if [ -z "$role" ]; then
+    ly_do='chưa đặt VIFAST_ROLE (không có trong môi trường / rỗng) ⇒ fail-closed'
+    role_in='(chưa đặt)'
+else
+    ly_do="VIFAST_ROLE=\"$role\" khác \"lead\""
+    role_in="\"$role\""
+fi
+
+name=$(git config user.name 2>/dev/null || true)
+mail=$(git config user.email 2>/dev/null || true)
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+top=$(git rev-parse --show-toplevel 2>/dev/null || true)
+abs_git_dir=$(git rev-parse --absolute-git-dir 2>/dev/null || true)
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ -z "$common_dir" ]; then
+    common_dir=$(git rev-parse --git-common-dir 2>/dev/null || true)
+    case "$common_dir" in
+        /*) ;;
+        '') ;;
+        *) common_dir="$top/$common_dir" ;;
+    esac
+fi
+if [ -z "$abs_git_dir" ]; then
+    abs_git_dir=$(git rev-parse --git-dir 2>/dev/null || true)
+    case "$abs_git_dir" in
+        /*) ;;
+        '') ;;
+        *) abs_git_dir="$top/$abs_git_dir" ;;
+    esac
+fi
+
+[ -n "$name" ] || name='(chưa cấu hình user.name)'
+[ -n "$mail" ] || mail='(chưa cấu hình user.email)'
+[ -n "$branch" ] || branch='(không xác định)'
+[ -n "$top" ] || top='(không xác định)'
+loai='không xác định'
+if [ -n "$abs_git_dir" ] && [ -n "$common_dir" ]; then
+    if [ "$abs_git_dir" = "$common_dir" ]; then
+        loai='checkout chính'
+    else
+        loai='worktree liên kết'
+    fi
+fi
+
+if [ -n "$refs" ]; then
+    ref_lines=$(printf '%s\n' "$refs" | head -n 8 | sed 's/^/    /')
+else
+    ref_lines='    (stdin không có dòng ref nào — push rỗng hoặc --dry-run không gửi ref)'
+fi
+
+{
+    printf '\n'
+    printf 'vifast-guard(pre-push): TỪ CHỐI PUSH — KT-85 / D2-123 mục (4)(b),(d)\n'
+    printf '  Lý do      : %s\n' "$ly_do"
+    printf '  Vai hiện tại: VIFAST_ROLE=%s\n' "$role_in"
+    printf '  Người push  : %s <%s>\n' "$name" "$mail"
+    printf '  Nhánh       : %s\n' "$branch"
+    printf '  Nơi push    : %s (%s)\n' "$top" "$loai"
+    printf '  Remote      : %s  →  %s\n' "$remote_name" "$remote_url"
+    printf '  Ref sẽ push :\n%s\n' "$ref_lines"
+    printf '  Hook        : %s\n' "$0"
+    printf '\n'
+    printf '  Vì sao: D2-123 mục (4)(b) — chỉ Agent 1 đẩy được lên nhánh chính; agent không\n'
+    printf '  push từ vai của mình. Cùng luật với pre-commit (A1-177, A1-180).\n'
+    printf '\n'
+    printf '  Phải làm gì:\n'
+    printf '   1) Agent — KHÔNG push. Làm trong worktree riêng của task:\n'
+    printf '          git worktree add ../wt-<mã> -b task/<mã>\n'
+    printf '      commit xong thì báo lead (Agent 1) merge/push.\n'
+    printf '   2) Lead (Agent 1) — đặt biến rồi push:\n'
+    printf '          VIFAST_ROLE=lead git -C ../wt-<mã> push origin <nhánh>\n'
+    printf '      (không bao giờ `--force` lên nhánh chính — D2-123 mục (4)(e): giữ nguyên\n'
+    printf '      ba commit cũ, không viết lại lịch sử).\n'
+    printf '   3) Người thật — `git push --no-verify` bỏ qua hook: quyền của người.\n'
+    printf '\n'
+    printf '  Tài liệu: %s · cài/kiểm: v2/tools/git-guard/install.sh --check\n' "$doc_hint"
+    printf '  vifast-guard: RESULT=DENY hook=pre-push role=%s\n' "$role_in"
+    printf '\n'
+} >&2
+
+exit 1
