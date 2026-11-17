@@ -105,3 +105,32 @@ ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
 ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
 ok - luat 8: cases=13 (6233 ms)
 # verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=25 legacy=21 laws=1,2,3,7,8
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 100 lỗi E1_* khi chạy `v2 check-rules --law 1` (số đo trong prose + khối scope= chép kèm tiền tố `số-dòng:`); chuyển số vào khối scope= rồi xoá ngoại lệ
+ok - luat 1: docs_checked=4 pre_existing=1 (16 ms)
+ok - luat 2: pairs=72 pending=4 (253 ms)
+ok - luat 3: counters=2 used=2 (46 ms)
+ok - luat 7: extractions=3 (16 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6231 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
+# kt80 preflight (worktree /tmp/wt-kt80, commit throwaway 7bf0d36b) — cùng code + tài liệu, ĐÃ commit
+# verify-numbers: root=/tmp/wt-kt80 docs=25 legacy=21 laws=1,2,3,7,8
+ok - luat 1: docs_checked=4 pre_existing=1 (33 ms)
+ok - luat 2: pairs=78 pending=0 (758 ms)
+ok - luat 3: counters=2 used=2 (69 ms)
+ok - luat 7: extractions=3 (19 ms)
+ok - luat 8: cases=13 (6223 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=7208 law_wall_ms={1:33,2:758,3:69,7:19,8:6223}

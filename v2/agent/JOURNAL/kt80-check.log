@@ -1,15 +1,14 @@
 # kt80 check (chạy lại: ./v2/bin/v2 check)
-CHECK_EXIT=1
-CHECK_WALL_MS=37641
-== v2 check (HEAD 6f8f63a5) ==
+CHECK_EXIT=0
+CHECK_WALL_MS=39923
+== v2 check (HEAD 9c811c02) ==
 --- fmt
 --- fmt: OK
 --- clippy
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
 --- clippy: OK
 --- luật cấu trúc R1..R5
-R3 v2/test/rules/verify-script-regressions.txt: tệp không có cú pháp chú thích cần sidecar .license
---- luật cấu trúc: FAIL
+--- luật cấu trúc: OK
 --- self-test luật
 TAP version 13
 1..6
@@ -22,111 +21,11 @@ ok 6 - case hợp lệ (đối chứng dương) thì PASS
 # 6/6 case đúng kỳ vọng
 --- self-test luật: OK
 --- luật máy K6 (KT-80: 1,2,3,7,8)
-# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
-not ok - luat 1: v2/docs/k6-parity.md:85: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1.log`: 147: ok 1 - help
-not ok - luat 1: v2/docs/k6-parity.md:86: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1.log`: 148: ok 2 - echo
-not ok - luat 1: v2/docs/k6-parity.md:87: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1.log`: 149: ok 3 - ps
-not ok - luat 1: v2/docs/k6-parity.md:88: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1.log`: 150: ok 4 - kill
-not ok - luat 1: v2/docs/k6-parity.md:89: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1.log`: 151: # parity: total=26 ok=4 deferred=22 active=4 (active_da_chay=4)
-not ok - luat 1: v2/docs/k6-parity.md:96: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-ktest-proc-smp1.log`: 150: ok 1 - help (khop=3 >= 2, waited_ms=0)
-not ok - luat 1: v2/docs/k6-parity.md:97: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-ktest-proc-smp1.log`: 291: ok 2 - echo (khop=1 >= 1, waited_ms=0)
-not ok - luat 1: v2/docs/k6-parity.md:98: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-ktest-proc-smp1.log`: 436: ok 3 - ps (khop=2 >= 2, waited_ms=0)
-not ok - luat 1: v2/docs/k6-parity.md:99: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-ktest-proc-smp1.log`: 578: ok 4 - kill (khop=1 >= 1, waited_ms=0)
-not ok - luat 1: v2/docs/k6-parity.md:100: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-ktest-proc-smp1.log`: 579: # parity: total=26 ok=4 deferred=22 active=4 (active_da_chay=4)
-not ok - luat 1: v2/docs/k6-parity.md:101: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-ktest-proc-smp1.log`: 583: # parity: KET_LUAN=ok (exit 0)
-not ok - luat 1: v2/docs/k6-parity.md:115: E1_SCOPE_FORBIDDEN `scope=kt77a-serial-ktest-proc-smp1-neg-wrong-expect.log` là log ca âm/mutation — D2-112c cấm làm nguồn; dùng `scope-red=`
-not ok - luat 1: v2/docs/k6-parity.md:122: E1_SCOPE_FORBIDDEN `scope=kt77a-serial-ktest-proc-smp1-neg-no-send.log` là log ca âm/mutation — D2-112c cấm làm nguồn; dùng `scope-red=`
-not ok - luat 1: v2/docs/k6-parity.md:131: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-product-smp1.log`: 89: not ok 1 - help: khong thay shell trong log (qemu_rc=0)
-not ok - luat 1: v2/docs/k6-parity.md:132: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-product-smp1.log`: 343: # parity: KET_LUAN=khong_co_shell (exit 5)
-not ok - luat 1: v2/docs/k6-parity.md:145: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-1-help-serial-ktest-proc-smp1.log`: 91: # shell: help cmds=6
-not ok - luat 1: v2/docs/k6-parity.md:146: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-1-help-serial-ktest-proc-smp1.log`: 93: # shell: help cmds=6
-not ok - luat 1: v2/docs/k6-parity.md:147: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-1-help-serial-ktest-proc-smp1.log`: 95: # shell: help cmds=6
-not ok - luat 1: v2/docs/k6-parity.md:148: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt77a-serial-1-help-serial-ktest-proc-smp1.log`: 118: # con uart: irqs=41 bytes=55 const:script_bytes=45 lines=6 inject_ok=0 drops=0 timeouts=0 head=42 tail=42 used=0 em
-not ok - luat 1: v2/docs/k6-parity.md:16: E1_NUMBER_OUTSIDE số '25' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:16: E1_NUMBER_OUTSIDE số '175' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:16: E1_NUMBER_OUTSIDE số '26' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:21: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:22: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:23: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:23: E1_NUMBER_OUTSIDE số '3470' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:24: E1_NUMBER_OUTSIDE số '4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:25: E1_NUMBER_OUTSIDE số '5' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:26: E1_NUMBER_OUTSIDE số '6' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:27: E1_NUMBER_OUTSIDE số '7' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:28: E1_NUMBER_OUTSIDE số '8' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:29: E1_NUMBER_OUTSIDE số '9' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:30: E1_NUMBER_OUTSIDE số '10' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:31: E1_NUMBER_OUTSIDE số '11' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:32: E1_NUMBER_OUTSIDE số '12' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:33: E1_NUMBER_OUTSIDE số '13' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:34: E1_NUMBER_OUTSIDE số '14' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:35: E1_NUMBER_OUTSIDE số '15' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:36: E1_NUMBER_OUTSIDE số '16' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:37: E1_NUMBER_OUTSIDE số '17' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:38: E1_NUMBER_OUTSIDE số '18' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:39: E1_NUMBER_OUTSIDE số '19' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:40: E1_NUMBER_OUTSIDE số '20' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:41: E1_NUMBER_OUTSIDE số '21' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:42: E1_NUMBER_OUTSIDE số '22' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:43: E1_NUMBER_OUTSIDE số '23' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:44: E1_NUMBER_OUTSIDE số '24' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:45: E1_NUMBER_OUTSIDE số '25' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:46: E1_NUMBER_OUTSIDE số '26' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:48: E1_NUMBER_OUTSIDE số '4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:49: E1_NUMBER_OUTSIDE số '22' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:70: E1_NUMBER_OUTSIDE số '50' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:71: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:72: E1_NUMBER_OUTSIDE số '999' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:74: E1_NUMBER_OUTSIDE số '20' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:75: E1_NUMBER_OUTSIDE số '0' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:75: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:75: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:75: E1_NUMBER_OUTSIDE số '4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:75: E1_NUMBER_OUTSIDE số '5' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:82: E1_NUMBER_OUTSIDE số '4/4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:92: E1_NUMBER_OUTSIDE số '4/4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:92: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:92: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:92: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:93: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:93: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:104: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:107: E1_NUMBER_OUTSIDE số '3/3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:107: E1_NUMBER_OUTSIDE số '5' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:112: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:113: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:113: E1_NUMBER_OUTSIDE số '2000' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:120: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:120: E1_NUMBER_OUTSIDE số '4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:127: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:128: E1_NUMBER_OUTSIDE số '5' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:137: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:137: E1_NUMBER_OUTSIDE số '6' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:138: E1_NUMBER_OUTSIDE số '16550' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:141: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:141: E1_NUMBER_OUTSIDE số '4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:151: E1_NUMBER_OUTSIDE số '2' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:151: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:152: E1_NUMBER_OUTSIDE số '0' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:155: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:155: E1_NUMBER_OUTSIDE số '4/26' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:155: E1_NUMBER_OUTSIDE số '22' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:157: E1_NUMBER_OUTSIDE số '4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:160: E1_NUMBER_OUTSIDE số '5' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:162: E1_NUMBER_OUTSIDE số '437.672' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:163: E1_NUMBER_OUTSIDE số '188.552' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:173: E1_NUMBER_OUTSIDE số '0' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:174: E1_NUMBER_OUTSIDE số '0' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:180: E1_NUMBER_OUTSIDE số '22' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:181: E1_NUMBER_OUTSIDE số '2/4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:181: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:181: E1_NUMBER_OUTSIDE số '1/2/4' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:182: E1_NUMBER_OUTSIDE số '3' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: v2/docs/k6-parity.md:183: E1_NUMBER_OUTSIDE số '5' ngoài khối `scope=` (phải là số đo trích từ log)
-not ok - luat 1: 100 lỗi (docs_checked=4)
-ok - luat 2: pairs=72 pending=0 (409 ms)
-ok - luat 3: counters=2 used=0 (67 ms)
-# note - luat 3: bộ đếm khai mà chưa dùng: isolation_bad, qemu_ppid1
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=25 legacy=21 laws=1,2,3,7,8
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 100 lỗi E1_* khi chạy `v2 check-rules --law 1` (số đo trong prose + khối scope= chép kèm tiền tố `số-dòng:`); chuyển số vào khối scope= rồi xoá ngoại lệ
+ok - luat 1: docs_checked=4 pre_existing=1 (41 ms)
+ok - luat 2: pairs=72 pending=4 (421 ms)
+ok - luat 3: counters=2 used=2 (70 ms)
 ok - luat 7: extractions=3 (22 ms)
 ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
 ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
@@ -141,9 +40,9 @@ ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
 ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
 ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
 ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
-ok - luat 8: cases=13 (6519 ms)
-# verify-numbers: ok=4 fail=1 wall_ms=7165 law_wall_ms={1:40,2:409,3:67,7:22,8:6519}
---- luật máy K6 (KT-80: 1,2,3,7,8): FAIL
+ok - luat 8: cases=13 (6697 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=7359 law_wall_ms={1:41,2:421,3:70,7:22,8:6697}
+--- luật máy K6 (KT-80: 1,2,3,7,8): OK
 --- spec/abi.toml
 abi-check: PASS (/Users/mps/dvchd/ViFastOs/spec/abi.toml)
 --- abi spec: OK
@@ -199,4 +98,4 @@ ok IDL đổi mà stub không đổi bị bắt
 --- build (L0 compile)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
 --- build (L0 compile): OK
-v2 check: 2 bước FAIL
+v2 check: PASS (L1 chạy trong gate --fast)

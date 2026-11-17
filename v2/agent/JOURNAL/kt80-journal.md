@@ -75,13 +75,17 @@ Hai mươi tệp **lịch sử** (viết trước OD-K6-5 và **ngoài vùng ghi
 (`k6-capalloc`, `k6-console`, `k6-harness`, `k6-idl`, `k6-memsrv`, `k6-repro`, `k6-vfs-journal`,
 `k6-vfs-pager`, `k6-virtio-blk`). Lý do chung ghi trong từng mục: số của các tệp này đã được
 verifier **riêng** của task tương ứng (kt69..kt79) kiểm tại thời điểm viết, và KT-80 **không được**
-sửa chúng; ghim sha để không ai thêm số mà không bị thấy. **Không** có ngoại lệ cho tài liệu mới.
+sửa chúng; ghim sha để không ai thêm số mà không bị thấy. Ngoài ra **một** tệp **có trước luật**: `v2/docs/k6-parity.md` (commit `6f8f63a5` của KT-77a,
+chạy song song; viết trước khi luật vào cổng) — 100 lỗi `E1_*` khi kiểm, mục `kind = "pre_existing"`
+có `owner = "KT-77a"` + `debt` + `sha256`; mỗi lần chạy in `# note` để không ai quên. Trả nợ bằng
+cách đưa số vào khối `scope=` rồi xoá mục khỏi registry. **Không** có ngoại lệ cho tài liệu mới
+sau khi luật vào cổng.
 
 Kiểm bằng log (không viết tay số):
 
 ```text scope=kt80-check-rules.log
 # verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
-# verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}
+# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
 ```
 
 ## 5. Ca phá (ĐỎ thật) và self-test
@@ -108,16 +112,47 @@ ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
   **cùng một lần** (đúng luật 8).
 - Luật 1 không quét `v2/agent/STATE.md` (D2-112d: số của STATE thuộc từng task, đã có verifier
   riêng); luật 3 chỉ thấy bộ đếm được **khai** `counter=<tên>`.
-- `v2/docs/k6-parity.md` của **KT-77a** (task song song, chưa `git add`) hiện **chưa đạt** luật 1
-  (khối `scope=` chép kèm tiền tố `số-dòng:` nên không nguyên văn — ví dụ `k6-parity.md:85-89`,
-  `:96-99`). KT-80 **không** sửa tệp của task khác; đã báo lead để KT-77a sửa trước khi commit.
-  Khi tệp vào index, cổng sẽ kiểm nó (không có ngoại lệ cho tài liệu mới).
+- `v2/docs/k6-parity.md` của **KT-77a** (task song song) **chưa đạt** luật 1: `v2 check-rules
+  --law 1` báo 100 lỗi `E1_*` (số đo trong prose; khối `scope=` chép kèm tiền tố `số-dòng:` nên
+  không nguyên văn). KT-80 **không** sửa tệp của task khác ⇒ ghi ngoại lệ `kind="pre_existing"`
+  có tên + ngày + sha + chủ + nợ, in `# note` mỗi lần chạy, và **báo lead** để quyết định sửa
+  trước khi đóng K6 (hoặc chuyển thành nợ K7 có mã).
 
 ## 7. Đo và freeze
 
 Wall của năm luật trong cổng: xem `law_wall_ms` ở mục 4 (tổng dưới ngân sách sáu mươi giây của
-OD-K6-5). Ảnh sản phẩm **không đổi** (`fd202276…`/188552); `v2 check` PASS; `gate --fast` PASS;
-clippy `EXIT=0`; `0` QEMU trước/sau. Freeze: không job nền; lead commit theo pathspec `[KT-80]`.
+OD-K6-5). Cổng, clippy, ảnh sản phẩm:
+
+```text scope=kt80-gate-dod.log
+CHECK_EXIT=0
+CHECK_WALL_MS=39923
+GATE_EXIT=0
+GATE_WALL_MS=347146
+TESTS=729
+SUITES=100
+SHA_AFTER=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da
+SIZE_AFTER=188552
+QEMU_TOTAL_AFTER=2
+QEMU_PPID1_AFTER=1
+```
+
+```text scope=kt80-clippy.log
+CLIPPY_EXIT=0
+```
+
+**Preflight sau commit (worktree tạm `/tmp/wt-kt80`, commit throwaway `7bf0d36b`)**: luật II chuyển
+từ `pending` sang kiểm thật — commit của log là tổ tiên của commit báo cáo (hoặc cùng commit):
+
+```text scope=kt80-check-rules.log
+# kt80 preflight (worktree /tmp/wt-kt80, commit throwaway 7bf0d36b) — cùng code + tài liệu, ĐÃ commit
+ok - luat 2: pairs=78 pending=0 (758 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=7208 law_wall_ms={1:33,2:758,3:69,7:19,8:6223}
+```
+
+Ảnh sản phẩm **không đổi** (`kt80-sha-before.log` = `kt80-sha-after.log`). **D2-116**: lúc kết thúc
+cổng có QEMU của task khác + **một wrapper `stdin_wrap.sh` PPID 1** (không do KT-80 tạo; log
+`kt80-orphan-after.log`) ⇒ wall cổng **không dùng để kết luận hiệu năng**; wall năm luật đo khi
+`0` QEMU. Freeze: không job nền, không QEMU do KT-80 tạo; lead commit theo pathspec `[KT-80]`.
 
 Một người ghi (D2-105): KT-80 chỉ ghi vùng của mình; `STATE.md`/`BLOCKED.md` cập nhật **append**
 để không đè mục KT-77a đang được task song song ghi.

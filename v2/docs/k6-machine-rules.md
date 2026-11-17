@@ -137,17 +137,40 @@ Bước cổng gọi `check-rules` (nhãn bước trong log cổng là `luật m
 (đã có trong danh sách đích), luật I kiểm luôn tài liệu này:
 
 ```text scope=kt80-check-rules.log
-# verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}
+# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
 ```
 
 Ngân sách OD-K6-5 cho cả năm luật là **sáu mươi giây**; số đo thực tế nằm trong khối trên. Luật
 VIII chiếm phần lớn wall vì nó chạy mười ba ca phá, mỗi ca một tiến trình riêng trên bản copy.
+Wall này đo khi **không** có QEMU ngoài (`kt80-orphan.log` rỗng trước cổng).
+
+Cổng đầy đủ (`v2 check` + `gate --fast`), clippy và ảnh sản phẩm:
+
+```text scope=kt80-gate-dod.log
+CHECK_EXIT=0
+CHECK_WALL_MS=39923
+GATE_EXIT=0
+TESTS=729
+SUITES=100
+SHA_AFTER=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da
+SIZE_AFTER=188552
+```
+
+```text scope=kt80-clippy.log
+CLIPPY_EXIT=0
+```
+
+Ảnh sản phẩm **không đổi** trước/sau (`kt80-sha-before.log`, `kt80-sha-after.log`). Lưu ý D2-116(c):
+lúc kết thúc cổng có QEMU **của task khác** (một wrapper `stdin_wrap.sh` mồ côi) ⇒ **wall của cổng
+không dùng để kết luận hiệu năng**; năm luật thì đo riêng ở khối trên khi đã kiểm **không còn** QEMU (`kt80-orphan.log` rỗng).
 
 ## 8. Ngoại lệ và giới hạn đã biết
 
-- **Số ngoại lệ lịch sử**: xem `legacy=` trong khối `scope=` của mục §7 và danh sách có tên trong
-  `v2/test/rules/numbers-policy.toml`. Tất cả vì hai lý do đã ghi: viết **trước** OD-K6-5 và
-  **ngoài vùng ghi** của KT-80 (D2-105a). Không có ngoại lệ nào cho tài liệu **mới**.
+- **Số ngoại lệ**: `legacy=` trong khối `scope=` của mục §7. Hai mươi tệp **lịch sử** (viết trước
+  OD-K6-5, ngoài vùng ghi KT-80) và **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, commit
+  `6f8f63a5` của KT-77a, chạy song song KT-80). Mục thứ hai in `# note` mỗi lần chạy, có chủ + nợ
+  ghi trong registry (`kind = "pre_existing"`, `owner`, `debt`) — trả nợ bằng cách đưa số vào khối
+  `scope=` rồi xoá mục. Không có ngoại lệ nào cho tài liệu **mới** sau khi luật đã vào cổng.
 - **Giới hạn kế thừa của bộ tách số** (giữ tương thích kt76, đã ghi ở `numeric_tokens`): token số
   **đứng riêng** mới bị bắt; giá trị dính sau `key=` (ví dụ `writes=0`) được coi là định danh
   trường evidence. Các ca phá đã đăng ký ở luật VIII không dựa vào giới hạn này; muốn siết tiếp

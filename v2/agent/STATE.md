@@ -3666,15 +3666,18 @@ QEMU: `qemu_ppid1=0 qemu_foreign=0` trước/sau mọi lần đo (`kt77a-infra.l
   có ca âm khác không; bản trích tiêu chí đủ **cột**; ca phá cũ là **ca hồi quy** (`--self-test`).
 - **Registry:** `v2/test/rules/{numbers-policy,counters,criteria}.toml`,
   `v2/test/rules/verify-script-regressions.txt`. **Ca phá:** `v2/test/rules/selfbreak.sh`.
-- **Ngoại lệ (báo lead):** **hai mươi** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80) ghim
-  `sha256` trong `[[legacy]]`; **không** có ngoại lệ cho tài liệu mới.
+- **Ngoại lệ (báo lead):** **hai mươi** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80) +
+  **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, commit `6f8f63a5` của KT-77a, có chủ + nợ
+  `kind="pre_existing"`), tất cả ghim `sha256` trong `[[legacy]]`; **không** có ngoại lệ cho tài
+  liệu mới sau khi luật vào cổng.
 - **Tài liệu:** [`docs/k6-machine-rules.md`](../docs/k6-machine-rules.md) + `docs/k3b-core.md` §27;
   nhật ký `JOURNAL/kt80-journal.md`.
 - **Phối hợp (D2-105a):** `STATE.md`/`BLOCKED.md` ghi **append** (mục KT-77a ở trên do task song
   song thêm); **không** chạm `v2/test/parity/**`, `spec/v1-parity.toml`.
-- **Ghi nhận cho lead:** `v2/docs/k6-parity.md` (KT-77a, chưa `git add`) **chưa đạt** luật 1 — khối
-  `scope=` chép kèm tiền tố `số-dòng:` nên không nguyên văn (`k6-parity.md:85-89`, `:96-99`);
-  KT-80 không sửa tệp của task khác.
+- **Ghi nhận cho lead:** `v2/docs/k6-parity.md` (KT-77a, commit `6f8f63a5`) **chưa đạt** luật 1 —
+  `v2 check-rules --law 1` báo 100 lỗi `E1_*` (số đo trong prose; khối `scope=` chép kèm tiền tố
+  `số-dòng:`). KT-80 không sửa tệp của task khác; đã ghi ngoại lệ có tên+ngày+sha+chủ+nợ để lead
+  quyết định (sửa trước khi đóng K6, hoặc chuyển thành nợ K7 có mã).
 
 Số đo (nguyên văn trong khối `scope=`, không viết tay):
 

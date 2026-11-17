@@ -2087,11 +2087,19 @@ registry: `v2/test/rules/{numbers-policy,counters,criteria}.toml` +
 Bằng chứng (chạy lại được; log trong repo):
 
 ```text scope=kt80-check-rules.log
-# verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}
+# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
 ```
 
 ```text scope=kt80-selfbreak.log
 # selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi
+```
+
+```text scope=kt80-gate-dod.log
+GATE_EXIT=0
+TESTS=729
+SUITES=100
+SHA_AFTER=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da
+SIZE_AFTER=188552
 ```
 
 **Ngoại lệ**: chỉ tài liệu **lịch sử** (viết trước OD-K6-5, ngoài vùng ghi KT-80) — danh sách có
