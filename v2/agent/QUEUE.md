@@ -185,11 +185,11 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-75 | **K6** `test-persist` 7 pha trên virtio-blk | KT-74 | 3 h | DONE | 1ea24908; 7/7 pha reboot QEMU that (10 PID); ca am flush dung tang; host doc lap; gate 729/100 |
 | KT-76 | **K6** cổng: `K6-DOD` "tương đương v1" + soak + L1 400k | KT-75 | 3 h | DONE | 2f34b09c; K6-DOD trung thuc: 8/8 tieu chi do duoc DAT, S1 shell anh san pham KHONG DAT => K6 KHONG DAT; L1 400k 4 cau hinh song song |
 
-| KT-77a | **K6** `spec/v1-parity.toml` + script kịch bản serial | KT-76 | 3 h | READY | lệnh shell v1 + `file:dòng`; chạy được trên ảnh test có shell |
+| KT-77a | **K6** `spec/v1-parity.toml` + script kịch bản serial | KT-76 | 3 h | DONE | de55b786; 28 mục (4 active/24 deferred-K7) mỗi mục có `source=file:dòng`; runner dùng nguyên `qemu_guard.sh`; 3 ca âm (exit 3/4/5); doc tuân luật 1 (không ngoại lệ) |
 | KT-77b | **K6** user mode + shell vào **ảnh sản phẩm** | KT-78, KT-77a | 3 h | BLOCKED | 6 tiêu chí OD-K6-2; ngân sách 2x3h rồi rơi về (b) |
 | KT-78 | **K6** harness QEMU: process group + timeout + dọn con | KT-76 | 3 h | DONE | 8664d69f; process group thật (perl setpgrp, kill -- -PGID); guard_selftest cases=10 ok=10 gồm ca âm iso-bad + override từ ngoài; gate 729/100; matrix 21/21; soak 0/1000 |
 | KT-79 | **K6** build tái lập byte (P20) | KT-76 | 3 h | DONE | a6cdcdcd; **OD-K6-3 CÔNG NHẬN ĐẠT ĐỦ** (D2-122.1): macOS + Linux `ps@ps` × 2 đường dẫn = `c1072d72`; ca âm đỏ; nguyên nhân bằng diff byte |
-| KT-80 | **K6** 8 luật máy vào cổng (OD-K6-5) | KT-76 | 3 h | READY | mỗi luật 1 ca phá làm đỏ cổng |
+| KT-80 | **K6** 8 luật máy vào cổng (OD-K6-5) | KT-76 | 3 h | REVIEW | 47e18d9e+d7dacd60; 5 luật chạy trong `v2 check`/`gate --fast` (wall 9,8 s); 13 ca hồi quy; **DRIFT còn 4 mục** (luật 1 không bắt `key=value`, owner 20 legacy, nhãn D2-122, ca luật 3 chiều 2) |
 | KT-84 | **K6** đo trên ảnh ĐÓNG BĂNG (D2-122.6) | KT-80 | 3 h | BLOCKED | `target-task/<mã>` mỗi task; copy ảnh vào `artifacts/<sha256>.bin`; mọi phép đo trỏ tệp này; ca âm ghi đè target |
 
 **APPROVED 2026-11-17 Agent 0** — **D2-122**: (1) **KT-79 CÔNG NHẬN đạt đủ OD-K6-3** (2 máy × 2 đường dẫn = `c1072d72`), đóng KT-79; (2) **B1 chọn (B)**: ảnh sản phẩm = pipeline canonical, áp dụng ngay, xuất **2 tệp cùng lần build** (ảnh phát hành strip + ELF đủ symbol), `fd202276` chỉ giữ làm log “trước canonical, không dùng làm bằng chứng v2.0”; (3) `check-repro` vào **mỗi** gate (2 đường dẫn) + định kỳ `ps@ps`; (4) host Windows → nợ **v2.1**; (5) công nhận A1-173/A1-174/A1-175; (6) **sửa cấu trúc**: `CARGO_TARGET_DIR=<repo>/target-task/<mã>` mỗi task + đo trên `artifacts/<sha256>.bin` (⇒ **KT-84**); (7) thứ tự KT-77b → soak/matrix/persist trên ảnh canonical có shell → KT-82.
