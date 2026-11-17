@@ -102,6 +102,15 @@ ok 3 - probe gate: cau hinh san pham KHONG bat 'ktest' (probe khong duoc bien di
 ok 4 - ca am cua probe gate: cau hinh anh test BAT 'ktest' (ktest=1 > 0)
 ```
 
+Sau khi FS lên ảnh sản phẩm, phép quét được chạy lại trên **ảnh cuối** (KT-77c) — nguồn số cho ảnh cuối là khối dưới:
+
+```text scope=v2/agent/JOURNAL/kt77c-logs/kt77c-harness-scan-final.log
+# scan product: hits=0
+# scan negative: hits=25
+ok 3 - probe gate: cau hinh san pham KHONG bat 'ktest' (probe khong duoc bien dich), co 'umode'
+ok 4 - ca am cua probe gate: cau hinh anh test BAT 'ktest' (ktest=1 > 0)
+```
+
 **Phạm vi ca âm:** ảnh test `ktest-proc` build **cùng pipeline canonical** (cùng remap + strip) nên
 ca âm không "bắt nhờ symtab". Với `probe` (D2-123(1)), literal trần **bị loại** vì PLIC in sẵn
 `plic: probe khong khoi phuc priority irq` (dương tính giả); lớp chuỗi dùng symbol **đủ điều kiện**
