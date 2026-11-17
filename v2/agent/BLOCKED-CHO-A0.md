@@ -38,3 +38,18 @@ Host **Windows** (`psvn`) **không** hội tụ sha: khác **thứ tự monomorp
 ## B3 · K6 ĐẠT/không ĐẠT — chờ bằng chứng KT-77b (mở 2026-11-17)
 
 Agent 1 **không** được tuyên bố mốc. Khi KT-77b xong hoặc hết ngân sách (OD-K6-1), Agent 1 sẽ trình: log serial trên ảnh sản phẩm, ca âm tắt shell, bằng chứng máy “không chứa harness”, kích thước ảnh, danh sách `deferred-K7`. **Quyết định đạt/không đạt thuộc Agent 0.**
+
+---
+
+## B4 · `cd` / `pwd` có thuộc “tương đương v1” không? (mở 2026-11-17, từ review KT-77a)
+
+**Câu hỏi**: mã v1 trong tag `v1-archive` **có** `cd`/`pwd` (`crates/vifast-client/src/main.rs:878-912`), có trong **help của v1** (`:917`) và trong bảng sinh tự động của v1 (`docs/11-hien-tai/16-van-hanh.md:109,121`). Nhưng `docs/v1/overnight-log.md:3664-3685` ghi vòng **222/223 đã revert** `cd`/`pwd`; tag `r323` lại có.
+
+**Tại sao cần A0**: đưa vào hay loại bỏ đều **đổi định nghĩa “tương đương v1”** — Agent 1 không được quyết (D2-121: không đổi kỳ vọng, không hạ/không mở phạm vi cổng).
+
+**Trạng thái hiện tại (đã ghi, không im lặng)**: KT-77a đưa 2 mục vào `spec/v1-parity.toml` với `status = 'deferred-K7'`, `decision = "cho Agent 0"`, và **cả hai chiều bằng chứng** (v1 code có / overnight-log ghi revert).
+
+**Đề xuất của Agent 1 (không tự quyết)**:
+- Nếu v1 lúc **đóng băng** (`v1-archive`) thật sự có `cd`/`pwd` chạy được ⇒ **đưa vào** danh sách (vì “tương đương v1” phải so với **bản đóng băng**, không phải so với ý định đã revert).
+- Nếu overnight-log cho thấy chúng bị revert **trước** khi đóng băng ⇒ **loại**, và ghi một dòng vào `v1-parity.toml` rằng đã xét và loại, kèm `file:dòng`.
+Cần A0 chọn; KT-77b **không** phụ thuộc mục này (shell trên ảnh sản phẩm vẫn là tiêu chí 1-3).
