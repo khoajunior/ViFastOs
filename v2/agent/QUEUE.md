@@ -188,7 +188,7 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-77a | **K6** `spec/v1-parity.toml` + script kịch bản serial | KT-76 | 3 h | READY | lệnh shell v1 + `file:dòng`; chạy được trên ảnh test có shell |
 | KT-77b | **K6** user mode + shell vào **ảnh sản phẩm** | KT-78, KT-77a | 3 h | BLOCKED | 6 tiêu chí OD-K6-2; ngân sách 2x3h rồi rơi về (b) |
 | KT-78 | **K6** harness QEMU: process group + timeout + dọn con | KT-76 | 3 h | READY | OD-K6-6; ca âm: giết cha ⇒ 0 QEMU sau 5 s |
-| KT-79 | **K6** build tái lập byte (P20) | KT-76 | 3 h | READY | OD-K6-3 + D2-120/A.3: 2 đường dẫn **và** máy thứ hai `psvn`; cùng sha = đạt đủ |
+| KT-79 | **K6** build tái lập byte (P20) | KT-76 | 3 h | REVIEW | a6cdcdcd; macOS + Linux `ps@ps`, mỗi máy 2 đường dẫn ⇒ `c1072d72`/82552; **đề nghị A0 xác nhận OD-K6-3** (đạt trên bản canonical stripped, ảnh phát hành `fd202276` chưa) — xem `BLOCKED-CHO-A0.md` B1 |
 | KT-80 | **K6** 8 luật máy vào cổng (OD-K6-5) | KT-76 | 3 h | READY | mỗi luật 1 ca phá làm đỏ cổng |
 | KT-81 | **K6** thiết bị giả nghiêm ngặt + bảng tài nguyên | KT-80 | 3 h | BLOCKED | bắt lại 2 lỗi driver cũ ở mô hình |
 | KT-82 | **K6** văn bản đóng K6 (a hoặc b) + caveat P20 | KT-77b | 3 h | BLOCKED | ba trạng thái đóng/hoãn/mở; số từ bảng KT-83 (D2-120/A.2) |
