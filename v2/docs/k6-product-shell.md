@@ -35,7 +35,7 @@ Mọi số đo dưới đây nằm trong khối ```` ```text scope=… ```` trí
 băng artifact thuộc KT-84).
 
 Hai lần build **độc lập** (hai `CARGO_TARGET_DIR` tạm khác nhau) cho **cùng sha** — đây là bằng
-chứng tái lập của lần build này, không thay cho KT-79 (KT-79 mới là task chứng minh 2 máy):
+chứng tái lập của lần build này, không thay cho KT-79 (KT-79 mới là task chứng minh **hai** máy):
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-build-shell-canonical.log
 REPRO machine=Darwin-arm64 root=/Users/mps/dvchd/ViFastOs sha256=39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57 size=176768 wall_s=13 build=6e90c73c43f9b4aa text=106764 image=/private/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/vifast-repro-target.2P3GZI/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
@@ -59,8 +59,8 @@ yêu cầu hai tệp cùng lần build) — phần đó thuộc **KT-84**, ghi �
 
 `src/main.rs` giữ **nguyên** các pha K3 (MMU, object layer, core, PLIC/UART IRQ, timer, SMP) rồi:
 
-- in `ok 1 - k3 boot` (dòng bằng chứng cũ, không đổi);
-- nếu feature `product-shell` **bật**: in `# k3 shell: handoff product-shell=1` rồi gọi
+- in dòng TAP `ok … k3 boot` (dòng bằng chứng cũ, không đổi);
+- nếu feature `product-shell` **bật**: in dòng `# k3 shell: handoff …` rồi gọi
   `proc_rt::run(...)` — **không** in `# k3 halt`, vì shell phải sống để nhận kịch bản serial;
 - nếu feature **tắt**: giữ **nguyên** `# k3 halt` + `halt(0)` (ca âm; ảnh đúng sha baseline).
 
@@ -86,7 +86,7 @@ Runtime mở **cửa sổ RX ngắn khi đang ở S-mode** rồi đóng trước
 trap từ U-mode **không** đổi `satp` về root kernel, mà handler đọc ring qua **physmap** — physmap
 (root index trên hai trăm) **không** map trong VSpace user (`copy_kernel_low_root` chỉ chép nửa
 thấp), nên ngắt đến đúng lúc đang chạy U-mode sẽ page-fault fatal. Đây là **nợ K7** (§10), không
-phải phụ thuộc harness; byte đến khi cửa sổ đóng nằm ở FIFO 16550 rồi được vét cạn.
+phải phụ thuộc harness; byte đến khi cửa sổ đóng nằm ở FIFO của UART rồi được vét cạn.
 
 Bằng chứng một boot sạch có `exit` (halt hẳn, không bị timeout): shell exit, procsrv nhận
 `Exit`, ring rỗng và hợp lệ:
@@ -100,7 +100,7 @@ Bằng chứng một boot sạch có `exit` (halt hẳn, không bị timeout): s
 
 Shell U-mode in `shell>` **thành dòng riêng** sau `# shell: up` và sau mỗi dòng lệnh. Vì sao
 không in tiền tố cùng dòng như v1: `expect` của `spec/v1-parity.toml` neo theo dòng
-(`^# shell: help cmds=6$`), nên nếu prompt dính cùng dòng thì kịch bản sẽ trượt oan.
+(dạng `^# shell: …$`), nên nếu prompt dính cùng dòng thì kịch bản sẽ trượt oan.
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77a-serial-1-help-serial-custom-smp4.log
 # shell: up cmds=help/echo/ps/wait/kill/exit
@@ -111,7 +111,7 @@ shell>
 ## 6. Kịch bản parity trên ảnh sản phẩm (một/hai/bốn hart)
 
 Runner `v2/test/parity/run.sh --mode serial --image v2/artifacts/<sha>.bin --smp N` (dùng
-**nguyên** guard KT-78). Mỗi cấu hình hart: **bốn trên bốn** mục `active`, `qemu_con_sot_total=0`.
+**nguyên** guard KT-78). Mỗi cấu hình hart: **bốn trên bốn** mục `active`, không còn QEMU sót sau khi script dọn.
 Số `khop` lớn hơn `min_count` vì `v2/test/parity/stdin_wrap.sh:32-43` **cố ý** bơm payload lặp
 trong cửa sổ ngắn (thiết kế của KT-77a, không phải lỗi của runtime).
 
@@ -136,8 +136,8 @@ ok 4 - kill (khop=8 >= 1, waited_ms=0)
 # parity: KET_LUAN=ok (exit 0)
 ```
 
-Số hart **thật** trong log boot (không phải hằng trong tài liệu): `harts=1`, `harts=2`, `harts=4`
-và `started` tương ứng; bốn hart có ba hart thứ cấp được `hart_start`:
+Số hart **thật** trong log boot (không phải hằng trong tài liệu) — khối dưới là dòng của cấu hình
+bốn hart; ba hart thứ cấp được `hart_start`:
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-run-exit-smp4.log
 # smp: boot=1 harts=4 present=0xf online=0xf started=0xd absent=0xf0 timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
@@ -179,7 +179,6 @@ not ok 1 - help: byte da vao shell (co 9 dong 'shell: ?') nhung expect khong kho
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-budget.log
 # image=product-shell path=artifacts/39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57.bin file=176768 data+bss=203232 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
-# data+bss-sections: .data=7832 .bss=195400
 ```
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-run-exit-smp1.log
@@ -220,20 +219,20 @@ PANIC: u-mode fault scause=0xc stval=0x40002000 sepc=0x40002000 sstatus=0x800000
 
 **Chưa xong / nợ (ghi để lead không đọc nhầm là đã đủ OD-K6-2):**
 
-1. **Tiêu chí hai mới đạt phần `active`**: `ls`, `cat` (ghi/đọc tệp), `exec`, và đặc biệt
+- **Tiêu chí hai mới đạt phần `active`**: `ls`, `cat` (ghi/đọc tệp), `exec`, và đặc biệt
    **đọc lại tệp sau reboot** cần ảnh đĩa persist + FS **trong ảnh sản phẩm** — hiện `vblk`/FS
    chỉ có trong ảnh test, và `spec/v1-parity.toml` đánh các mục đó `deferred-K7`. Kịch bản
    `active` **không** sửa được (spec đóng băng cho KT-77b).
-2. **Tiêu chí bốn** (ma trận + soak nghìn lần) chưa chạy trong task này; log ở §6 chỉ là
+- **Tiêu chí bốn** (ma trận + soak nghìn lần) chưa chạy trong task này; log ở §6 chỉ là
    một/hai/bốn hart cho ảnh sản phẩm — lead sắp bước đo riêng.
-3. **Ngắt RX thường trực chưa an toàn khi ở U-mode** (trap từ U-mode không đổi `satp`): nợ K7,
+- **Ngắt RX thường trực chưa an toàn khi ở U-mode** (trap từ U-mode không đổi `satp`): nợ K7,
    sẽ đóng bằng cách cho trap từ U-mode khôi phục root kernel **trước** khi dispatch ngắt, rồi bỏ
    cửa sổ S-mode.
-4. **ELF đủ symbol** của ảnh có shell: chờ **KT-84** (D2-122 yêu cầu hai tệp cùng lần build).
-5. **Ảnh test đổi `.text`** vì `shell.elf` thêm prompt và `proc_demo` đổi nguồn hằng số; ma trận
+- **ELF đủ symbol** của ảnh có shell: chờ **KT-84** (D2-122 yêu cầu hai tệp cùng lần build).
+- **Ảnh test đổi `.text`** vì `shell.elf` thêm prompt và `proc_demo` đổi nguồn hằng số; ma trận
    và các log `ktest-*` cũ phải chạy lại (TAP kỳ vọng **không** đổi — §10), việc đó thuộc bước đo
    của lead (vùng `v2/test/boot/**` là của KT-78, task này **không** chạm).
-6. **`user` không còn kéo `ktest`**: một số mục `pub(crate)` của crate arch (ví dụ
+- **`user` không còn kéo `ktest`**: một số mục `pub(crate)` của crate arch (ví dụ
    `user::ranges_save`) chỉ được `exec` dùng, nên khi build `product-shell` trình biên dịch cảnh
    báo "never used". Không phải lỗi; dọn bằng `#[cfg(feature = "exec")]` ở lần chạm tệp sau.
 

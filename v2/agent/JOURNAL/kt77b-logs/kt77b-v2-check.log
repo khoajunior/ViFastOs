@@ -1,8 +1,8 @@
-== v2 check (HEAD fe0ecf9b) ==
+== v2 check (HEAD 795df046) ==
 --- fmt
 --- fmt: OK
 --- clippy
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.40s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
 --- clippy: OK
 --- luật cấu trúc R1..R5
 --- luật cấu trúc: OK
@@ -18,16 +18,16 @@ ok 6 - case hợp lệ (đối chứng dương) thì PASS
 # 6/6 case đúng kỳ vọng
 --- self-test luật: OK
 --- luật máy K6 (KT-80: 1,2,3,7,8)
-# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=23 laws=1,2,3,7,8
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=25 legacy=23 laws=1,2,3,7,8
 # note - luat 1: ngoại lệ 'có trước luật' [v2/agent/reports/K6-DOD.md] chủ KT-76: 26 số dạng key=value ở prose (siết luật 1 theo phản biện KT-80); chuyển vào khối scope= khi mở lại
 # note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-exec.md] chủ KT-74: 3 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
 # note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-persist.md] chủ KT-75: 28 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
 # note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 4 số dạng key=value ở prose (qemu_foreign/qemu_ppid1/inject_ok); KT-77a sửa khi mở lại
 # note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
-ok - luat 1: docs_checked=1 pre_existing=4 excluded=1 (921 ms)
-ok - luat 2: pairs=78 pending=0 (1391 ms)
-ok - luat 3: counters=2 used=2 (69 ms)
-ok - luat 7: extractions=3 (24 ms)
+ok - luat 1: docs_checked=2 pre_existing=4 excluded=1 (1303 ms)
+ok - luat 2: pairs=89 pending=0 (1678 ms)
+ok - luat 3: counters=2 used=2 (73 ms)
+ok - luat 7: extractions=3 (25 ms)
 ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
 ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
 ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
@@ -43,8 +43,8 @@ ok - self-test assign-key-value: ĐỎ đúng mã E1_NUMBER_ASSIGNED
 ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
 ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
 ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
-ok - luat 8: cases=15 (7774 ms)
-# verify-numbers: ok=5 fail=0 wall_ms=10285 law_wall_ms={1:921,2:1391,3:69,7:24,8:7774}
+ok - luat 8: cases=15 (7838 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=11035 law_wall_ms={1:1303,2:1678,3:73,7:25,8:7838}
 --- luật máy K6 (KT-80: 1,2,3,7,8): OK
 --- spec/abi.toml
 abi-check: PASS (/Users/mps/dvchd/ViFastOs/spec/abi.toml)
