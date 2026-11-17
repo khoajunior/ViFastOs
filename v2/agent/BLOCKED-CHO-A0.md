@@ -53,3 +53,24 @@ Agent 1 **không** được tuyên bố mốc. Khi KT-77b xong hoặc hết ngâ
 - Nếu v1 lúc **đóng băng** (`v1-archive`) thật sự có `cd`/`pwd` chạy được ⇒ **đưa vào** danh sách (vì “tương đương v1” phải so với **bản đóng băng**, không phải so với ý định đã revert).
 - Nếu overnight-log cho thấy chúng bị revert **trước** khi đóng băng ⇒ **loại**, và ghi một dòng vào `v1-parity.toml` rằng đã xét và loại, kèm `file:dòng`.
 Cần A0 chọn; KT-77b **không** phụ thuộc mục này (shell trên ảnh sản phẩm vẫn là tiêu chí 1-3).
+
+---
+
+## B5 · Cổng `# build: rev` quá chặt khi hai dòng cùng commit vào `main` (mở 2026-11-17, bằng chứng KT-88)
+
+**Hiện tượng (có log)**: KT-88 build ảnh `38714b79…` ở HEAD `d40f1e63a61d`; boot smp=1 **ACCEPT**; 4 phút sau dòng ViScript commit 3 lần (`7adcbf6e`, `4e903d94`, `ffe75569`) vào **cùng `main`** ⇒ smp=2 **`REFUSE reason=rev-mismatch`**, smp=4 cũng vậy. Toàn bộ ảnh bị từ chối.
+
+**Nhưng mã kernel KHÔNG đổi**: `git diff d40f1e63..HEAD -- v2/kernel v2/lib` = **rỗng**; `git status -- v2/kernel v2/lib` sạch (`dirty=0`). Ba commit kia chỉ chạm `viscript/`, `docs/`, `v2/agent/`.
+
+**Vấn đề**: cổng so `rev` trong ảnh với **12 hex đầu HEAD hiện tại**. Ý định của D2-125.3 là "ảnh phải khớp **mã kernel đã commit**", không phải "không ai được commit bất cứ đâu". Với hai dòng sản phẩm dùng chung `main`, điều kiện hiện tại làm **mọi phép đo dài bị vô hiệu** bởi commit không liên quan — và tệ hơn: nó buộc phép đo cuối K6 phải **đóng băng `main` cho cả hai dòng**, điều không bền vững.
+
+**Đề nghị của Agent 1 (need A0 — đổi phương pháp đo thuộc quyền A0, D2-121)**:
+Chấp nhận khi **cả hai** đúng:
+1. `image_rev` **là tổ tiên** của HEAD (`git merge-base --is-ancestor <image_rev> HEAD`), và
+2. `git diff <image_rev>..HEAD -- v2/kernel v2/lib` **rỗng**.
+
+Như vậy: ảnh cũ + mã kernel đã đổi ⇒ **vẫn bị từ chối** (đúng ý đồ); ảnh cũ + chỉ dòng khác commit ⇒ **được đo** (đúng ý định). Không nới ngưỡng nào, không bỏ kiểm `dirty`, không bỏ kiểm `image-mismatch`.
+
+**Không tự sửa cổng**: Agent 1 giữ nguyên `build-rev.sh`; nếu A0 duyệt thì giao task riêng (kèm **ca hồi quy**: (i) sửa 1 dòng kernel ở HEAD sau ⇒ phải TỪ CHỐI; (ii) chỉ commit `docs/` ⇒ phải ACCEPT; (iii) ảnh không phải tổ tiên ⇒ TỪ CHỐI) và **cả hai dòng** phải ghi vào luật.
+
+**Tình trạng hiện tại**: người dùng đã đồng ý **đóng băng `main` cả hai dòng ~60 phút** để KT-88 đo đúng một lần ở HEAD `ffe75569e0b2` (D2-123.3). Biện pháp tạm, không phải giải pháp.
