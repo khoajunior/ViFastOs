@@ -185,7 +185,17 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-75 | **K6** `test-persist` 7 pha trên virtio-blk | KT-74 | 3 h | DONE | 1ea24908; 7/7 pha reboot QEMU that (10 PID); ca am flush dung tang; host doc lap; gate 729/100 |
 | KT-76 | **K6** cổng: `K6-DOD` "tương đương v1" + soak + L1 400k | KT-75 | 3 h | DONE | 2f34b09c; K6-DOD trung thuc: 8/8 tieu chi do duoc DAT, S1 shell anh san pham KHONG DAT => K6 KHONG DAT; L1 400k 4 cau hinh song song |
 
-| KT-77 | **K6** đưa U-mode + shell vào **ảnh sản phẩm** (đóng S1) | KT-76 | 3 h | READY | shell thật trên ảnh boot; giữ trần 262.144; TAP |
+| KT-77a | **K6** `spec/v1-parity.toml` + script kịch bản serial | KT-76 | 3 h | READY | lệnh shell v1 + `file:dòng`; chạy được trên ảnh test có shell |
+| KT-77b | **K6** user mode + shell vào **ảnh sản phẩm** | KT-78, KT-77a | 3 h | BLOCKED | 6 tiêu chí OD-K6-2; ngân sách 2x3h rồi rơi về (b) |
+| KT-78 | **K6** harness QEMU: process group + timeout + dọn con | KT-76 | 3 h | READY | OD-K6-6; ca âm: giết cha ⇒ 0 QEMU sau 5 s |
+| KT-79 | **K6** build tái lập byte (P20) | KT-76 | 3 h | READY | OD-K6-3; 2 máy x 2 đường dẫn = 1 sha + ca âm |
+| KT-80 | **K6** 8 luật máy vào cổng (OD-K6-5) | KT-76 | 3 h | READY | mỗi luật 1 ca phá làm đỏ cổng |
+| KT-81 | **K6** thiết bị giả nghiêm ngặt + bảng tài nguyên | KT-80 | 3 h | BLOCKED | bắt lại 2 lỗi driver cũ ở mô hình |
+| KT-82 | **K6** văn bản đóng K6 (a hoặc b) + caveat P20 | KT-77b | 3 h | BLOCKED | số do script sinh; reviewer duyệt |
+| KT-83 | **K6** mở K7 "Đóng lỗi v1" + chốt bảng 7 lỗi | KT-82 | 3 h | BLOCKED | trạng thái + `file:dòng` từng lỗi |
+
+**APPROVED 2026-11-17 Agent 0** — quyết định cổng K6 `OD-K6-1..8` tại [`reports/QUYET-DINH-A0-K6-2026-11-17.md`](reports/QUYET-DINH-A0-K6-2026-11-17.md) (sha256 `0361fb7e…`), ghi thành **D2-119**. Kèm: (i) `spec/v1-parity.toml` **tạo mới** được phép ở KT-77a (không đổi ABI); (ii) đính chính của lead: số lỗi v1 đã đóng là **2/7** (N4, N6), **1/7 hoãn K5'** (N5), **4/7 mở** (N1/N2/N3/N7) — KT-83 chốt lại trước khi văn bản đóng K6 dùng con số.
+| KT-77 | ~~**K6** đưa U-mode + shell vào ảnh sản phẩm~~ → **tách thành KT-77a/77b** (D2-119) | — | — | DONE | superseded |
 
 
 APPROVED 2026-11-12 Agent 0
@@ -204,7 +214,7 @@ APPROVED 2026-11-12 Agent 0
 
 **Thứ tự hiện tại — phase K1a' (vòng 2):**
 1. **K1b DONE** (KT-18..KT-23; 3/4 + push migration chuyển K1c theo D2-49a).
-2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a DONE** (invocation, gate 661/87); **KT-67b DONE** (cap giữa 2 tiến trình thật, gate 661/87); **KT-68 DONE** (capalloc, gate 661/87); **KT-69 DONE** (IDL + ring, gate 675/92); **KT-70 DONE** (pager + page cache, gate 689/95); **KT-71 DONE** (journal + fsck, gate 703/96); **KT-72 DONE** (virtio-blk, gate 718/99); **KT-73 DONE** (console + UART IRQ, gate 726/99); **KT-74 DONE** (SetTls + exec, gate 726/99); **KT-75 DONE** (persist qua reboot thật, gate 729/100); **KT-76 DONE** (cổng K6; gate 729/100; **K6 KHÔNG ĐẠT** vì S1 — D2-118); **KT-77 READY** (U-mode + shell vào ảnh sản phẩm).
+2. **K3 DONE** (D2-82): KT-44..57 DONE, soak 0/1000, TAP 100 %, gate 574, K3-DOD. **K3b DONE** (D2-86): core chạy trên nhân thật (TAP 43..52), soak 0/1000, gate 598. **K3.5** (D2-87): KT-62/63/64 DONE (gate 642, TAP 60); **KT-64a DONE** (sim đồng bộ, parity 18/18 + 4/4); **KT-65 DONE** (procsrv+shell thật, TAP 24, gate 649); **KT-66 DONE** — **K3.5 DONE** (D2-94). **K6** (D2-95): KT-67..76; **KT-67 DONE** (alloc + bridge, gate 661/87); **KT-67a DONE** (invocation, gate 661/87); **KT-67b DONE** (cap giữa 2 tiến trình thật, gate 661/87); **KT-68 DONE** (capalloc, gate 661/87); **KT-69 DONE** (IDL + ring, gate 675/92); **KT-70 DONE** (pager + page cache, gate 689/95); **KT-71 DONE** (journal + fsck, gate 703/96); **KT-72 DONE** (virtio-blk, gate 718/99); **KT-73 DONE** (console + UART IRQ, gate 726/99); **KT-74 DONE** (SetTls + exec, gate 726/99); **KT-75 DONE** (persist qua reboot thật, gate 729/100); **KT-76 DONE** (cổng K6; gate 729/100; **K6 KHÔNG ĐẠT** vì S1 — D2-118); **Agent 0 chốt cổng K6** (D2-119, `reports/QUYET-DINH-A0-K6-2026-11-17.md`): **OD-K6-1** hướng (a) có giới hạn 2x3h rồi tự rơi về (b); **KT-78/79/80 READY**, **KT-77a READY**, KT-77b/81/82/83 BLOCKED theo thứ tự KT-78 → KT-77a → KT-77b → KT-82.
 3. Thứ tự K3: A(44→45→46→{47∥48∥49}→50→51) ∥ B(52→53) ∥ C(54); 55/56; 57 cuối, chạy một mình.
 4. Push migration + SMP 1/2/4/8 thuộc K1c (D2-53 Q1/Q2); `nightly --l1` 100k ở KT-29/KT-30.
 5. Không đụng `spec/`/`vifast-model`; parity 10k hồi quy; ViScript do tab riêng.
