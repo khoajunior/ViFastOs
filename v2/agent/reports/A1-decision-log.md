@@ -32,4 +32,5 @@
 
 | Mã | Ngày | Nội dung | Bằng chứng | Trạng thái |
 |---|---|---|---|---|
-| _(chưa có)_ | | | | |
+| **A1-171** | 2026-11-17 | **Thi hành** thứ tự Agent 0 đã duyệt: chạy **KT-78 ∥ KT-79** (song song), vùng ghi tách rời (`v2/test/boot/**` cho KT-78; toolchain/build config + `v2/tools/**` cho KT-79). Không phải quyết định mới — OD-K6-1/A.4 đã ghi “KT-78, KT-79 → KT-77a”. | `reports/QUYET-DINH-A0-K6-2026-11-17.md` §3 + phụ lục A.4; D2-105 (một người ghi) ⇒ tách vùng ghi để không đụng nhau | **CHỜ A0 XÁC NHẬN** |
+| **A1-172** | 2026-11-17 | **Phân loại sự cố** (không phải quyết định): máy thứ hai `psvn` = **Windows 11**, shell mặc định PowerShell, có `rustc/cargo/rustup/git`, WSL chỉ có `docker-desktop` (Stopped), **chưa có repo**. ⇒ KT-79 phải build bằng `cargo` trực tiếp (không dùng `v2/bin/v2` là bash), chuyển commit bằng `git bundle`+`scp`. Đây là dữ kiện để KT-79 chọn đường, **không** phải kết luận “không build được”. | lệnh thăm dò trực tiếp: `ssh psvn 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).Caption"'` → `Microsoft Windows 11 Home`; `Get-Command rustc,cargo,wsl,git` → 4 đường dẫn; `wsl -l -v` → chỉ `docker-desktop Stopped`; `Test-Path C:\ViFastOs` → `False` | **CHỜ A0 XÁC NHẬN** |
