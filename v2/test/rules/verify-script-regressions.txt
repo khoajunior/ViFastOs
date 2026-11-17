@@ -22,6 +22,9 @@
 #   criteria-drop-column  : D2-118(B) — bản trích cắt một cột vẫn được coi là "đủ"
 #   log-after-report      : OD-K6-5 #2 — báo cáo commit trước log vẫn xanh
 #   legacy-changed        : ngoại lệ theo tên nhưng nội dung đổi (thêm số) vẫn được miễn
+#   untracked-doc-skipped : KT-87 — tài liệu đích từng = index ⇒ bản nháp chưa `git add` lọt cổng
+#   staged-doc-skipped    : KT-87 — tệp mới chỉ `git add` phải bị quét như bản sẽ commit
+#   legacy-untracked      : KT-87 — `[[legacy]]` trỏ tệp chưa commit phải ĐỎ rõ, không miễn im lặng
 union-haystack | 1 | E1_NOT_VERBATIM | union-haystack | số của log khác được trích dưới scope= sai
 heading-number | 1 | E1_NUMBER_OUTSIDE | heading-number | tiêu đề "## 98765" (số năm chữ số)
 heading-not-reset | 1 | E1_NUMBER_OUTSIDE | heading-not-reset | cờ heading không reset (lỗi KT-75)
@@ -39,3 +42,7 @@ pre-existing-expired | 1 | E1_EXPIRED | pre-existing-expired | ngoại lệ `pre
 criteria-drop-column | 7 | E7_COLUMN_MISMATCH | criteria-drop-column | bản trích bỏ một cột
 log-after-report | 2 | E2_ORDER | log-after-report | commit báo cáo TRƯỚC commit log
 legacy-changed | 1 | E1_LEGACY_SHA | legacy-changed | ngoại lệ lịch sử bị sửa nội dung
+untracked-doc-skipped | 1 | E1_NUMBER_OUTSIDE | untracked-doc-skipped | tài liệu MỚI chưa `git add` có số ở prose từng được bỏ qua (KT-85/KT-86/KT-77c: cổng xanh trước commit, đỏ sau — KT-87)
+staged-doc-skipped | 1 | E1_NUMBER_OUTSIDE | staged-doc-skipped | tài liệu mới chỉ `git add` (chưa commit) vẫn phải bị quét y như bản sẽ commit
+legacy-untracked | 1 | E1_LEGACY_UNTRACKED | legacy-untracked | ngoại lệ `[[legacy]]` trỏ tệp chưa commit — sha chỉ ghim bản đã commit nên phải ĐỎ rõ, không miễn
+legacy-staged | 1 | E1_LEGACY_STAGED | legacy-staged | mục `[[legacy]]` trỏ tệp mới chỉ `git add` (chưa commit) — chưa có sha HEAD để ghim, phải ĐỎ rõ

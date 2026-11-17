@@ -1,13 +1,19 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # KT-80 / OD-K6-5 luật 1, 2, 3 — chính sách "số phải có nguồn" cho dòng OS v2.
 #
-# [targets]        tệp đích bị quét (glob so với gốc repo).
-# [[legacy]]       ngoại lệ **lịch sử**, ghim nội dung bằng sha256:
+# [targets]        tệp đích bị quét (glob so với gốc repo). Từ KT-87, tệp đích = tệp **sẽ được
+#                  commit**: index (tracked/staged) ∪ untracked không bị ignore — xem
+#                  `v2/docs/k6-check-scope.md`. Cổng mặc định **bật** kiểm untracked; chẩn đoán
+#                  tách nhiễu: `./v2/bin/v2 check-rules --staged-only` hoặc biến
+#                  `V2_CHECK_UNTRACKED=false` (quay lại đúng tập index như trước KT-87).
+# [[legacy]]       ngoại lệ **lịch sử**, ghim nội dung bằng sha256 của bản **đã commit**:
 #                  * áp cho luật 1/3/7 (nguồn số + bộ đếm + cột tiêu chí);
 #                  * **luật 2 (thứ tự commit) luôn chạy**, kể cả tệp legacy;
 #                  * sửa nội dung tệp legacy ⇒ cổng ĐỎ (E1_LEGACY_SHA) — muốn sửa thì hoặc đưa
 #                    số vào khối `scope=`, hoặc cập nhật mục ngoại lệ (tên + lý do + ngày + sha
 #                    mới) và **lead duyệt**; không có đường "thêm số rồi miễn".
+#                  * tệp **chưa commit** không ghim sha được ⇒ `E1_LEGACY_UNTRACKED` (untracked)
+#                    / `E1_LEGACY_STAGED` (mới `git add`) — không có ngoại lệ cho tệp chưa commit.
 # [[negative_log]] tên log ca âm/mutation được phép đứng sau `scope-red=` (D2-112c) khi tên tệp
 #                  không tự chứa `mutation|break|selfbreak|neg|ca-am|red-`.
 

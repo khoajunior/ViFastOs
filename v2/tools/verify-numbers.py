@@ -30,9 +30,22 @@ KHÔNG copy-paste bốn bản. Nguồn luật:
 Ngoại lệ lịch sử: tệp có trong `[[legacy]]` của `v2/test/rules/numbers-policy.toml` được miễn
 luật 1/3/7 (`sha256` ghim nội dung — sửa tệp ⇒ ĐỎ, phải xử lý lại). Luật 2 luôn chạy.
 
+**Phạm vi quét (KT-87)** — tài liệu đích = **tệp sẽ được commit**, không chỉ tệp đã commit:
+`git ls-files` (index: tracked + staged) **hợp** `git ls-files -co --exclude-standard`
+(index + untracked **không bị ignore**). Tệp khớp glob mà chưa `git add` **vẫn bị kiểm** — nếu
+không, cổng xanh trên bản nháp rồi đỏ ngay sau commit (KT-85, KT-86/KT-77c). Mỗi lỗi in kèm
+trạng thái tệp (`tracked` / `staged` / `untracked`); tệp `untracked` mang thêm câu “tệp chưa
+commit — cổng vẫn phải xanh trước khi commit”. Chẩn đoán khi cần tách nhiễu (mặc định **bật**
+kiểm untracked): cờ `--staged-only` hoặc biến `V2_CHECK_UNTRACKED` = `false`/`off`/`no` (dạng số
+không cũng được) ⇒ quay lại đúng tập index như trước KT-87. Ngoại lệ ghim `sha256` chỉ ghim được
+bản **đã commit**: mục `[[legacy]]` trỏ tệp `untracked` ⇒ `E1_LEGACY_UNTRACKED`, `staged` ⇒
+`E1_LEGACY_STAGED` (không có đường miễn im lặng cho tệp chưa commit). Chi tiết + quy trình cho
+agent: `v2/docs/k6-check-scope.md`.
+
 Dùng:
     python3.12 v2/tools/verify-numbers.py                 # cả 5 luật (dùng trong cổng)
     python3.12 v2/tools/verify-numbers.py --law 1         # một luật
+    python3.12 v2/tools/verify-numbers.py --staged-only   # chẩn đoán: chỉ tệp đã có trong index
     python3.12 v2/tools/verify-numbers.py --self-test     # = luật 8
     python3.12 v2/tools/verify-numbers.py --root <repo>   # kiểm bản copy (không bao giờ ghi)
 Exit 0 = mọi luật được yêu cầu XANH; 1 = có luật ĐỎ; 2 = lỗi cấu hình/registry.
@@ -225,6 +238,53 @@ def tracked(ctx, rel):
     if ctx.get("tracked_set") is None:
         return True
     return rel in ctx["tracked_set"]
+
+
+def untracked_scan_enabled():
+    """Cổng **mặc định** kiểm cả tệp chưa commit (KT-87). Tắt bằng `V2_CHECK_UNTRACKED`."""
+    raw = os.environ.get("V2_CHECK_UNTRACKED", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def head_set(ctx):
+    """Tập tệp **đã commit** (HEAD). Tính lười: chỉ cần khi in trạng thái tệp có lỗi."""
+    if "head_set_cache" not in ctx:
+        if not ctx.get("is_git"):
+            ctx["head_set_cache"] = None
+        else:
+            rc, out, _err = git(ctx["root"], "ls-tree", "-r", "--name-only", "-z", "HEAD")
+            ctx["head_set_cache"] = set(x for x in out.split("\0") if x) if rc == 0 else None
+    return ctx["head_set_cache"]
+
+
+def file_status(ctx, rel):
+    """Trạng thái của tệp theo git:
+
+    * `tracked` — có trong HEAD (đã commit, đã vào lịch sử);
+    * `staged` — có trong index nhưng **chưa** commit (`git add` rồi, chưa commit);
+    * `untracked` — chưa vào index (bản nháp chỉ nằm trên đĩa);
+    * `no-git` — gốc kiểm không phải repo git (bản copy tự phá của luật 8): không bịa trạng thái.
+    """
+    if not ctx.get("is_git"):
+        return "no-git"
+    if rel not in (ctx.get("tracked_set") or set()):
+        return "untracked"
+    head = head_set(ctx)
+    if head is None:  # HEAD không đọc được (repo mới, chưa có commit) ⇒ coi như chưa commit
+        return "staged"
+    return "tracked" if rel in head else "staged"
+
+
+def status_tag(ctx, rel):
+    """Nhãn trạng thái in kèm **mỗi lỗi** (KT-87 — người đọc phải biết tệp đã vào lịch sử chưa)."""
+    st = file_status(ctx, rel)
+    if st == "untracked":
+        return "[untracked — tệp chưa commit — cổng vẫn phải xanh trước khi commit] "
+    if st == "staged":
+        return "[staged — tệp đã `git add`, chưa commit] "
+    if st == "tracked":
+        return "[tracked] "
+    return "[no-git] "
 
 
 def last_commit(ctx, rel):
@@ -420,6 +480,20 @@ def law1(root, ctx):
         if not os.path.isfile(path):
             fails.append((rel, 0, "E1_LEGACY_STALE", "ngoại lệ trỏ tệp không tồn tại"))
             continue
+        # KT-87: `sha256` chỉ ghim được bản **đã commit** (bản con người đã đọc/duyệt). Tệp chưa
+        # commit không có sha HEAD để khớp ⇒ nói thẳng, **không** im lặng miễn và cũng không báo
+        # nhầm thành "nội dung đã đổi".
+        st = file_status(ctx, rel)
+        if st == "untracked":
+            fails.append((rel, 0, "E1_LEGACY_UNTRACKED",
+                          "không ngoại lệ cho tệp chưa commit — ngoại lệ ghim sha256 của bản đã "
+                          "commit; commit tệp (hoặc bỏ mục ngoại lệ) rồi chạy lại cổng"))
+            continue
+        if st == "staged":
+            fails.append((rel, 0, "E1_LEGACY_STAGED",
+                          "mục ngoại lệ trỏ tệp mới chỉ `git add` (chưa commit) — chưa có sha HEAD "
+                          "để ghim; commit tệp rồi chạy lại cổng"))
+            continue
         want = entry.get("sha256", "")
         if not re.fullmatch(r"[0-9a-f]{64}", want or ""):
             fails.append((rel, 0, "E1_LEGACY_SHA", "ngoại lệ thiếu sha256 (64 hex)"))
@@ -454,8 +528,12 @@ def law1(root, ctx):
     ctx["law1_excluded"] = len(excluded)
     for rel in sorted(excluded):
         entry = context_excluded(ctx, rel)
+        # KT-87: `[[excluded]]` là quyết định **phạm vi** (nêu tên + chủ + lý do + ngày), không ghim
+        # sha, nên nó áp được cho cả tệp chưa commit — nhưng phải **hiện ra** để người đọc biết.
+        st = file_status(ctx, rel)
+        mark = "" if st in ("tracked", "no-git") else f" ({st})"
         print(f"# note - luat 1: loại khỏi tài liệu đích [{rel}] chủ {entry.get('owner', '?')}: "
-              f"{entry.get('reason', '')}")
+              f"{entry.get('reason', '')}{mark}")
     for rel in docs:
         if rel in legacy or rel in excluded:
             continue
@@ -1065,6 +1143,42 @@ def sabotage_bare_small_number(root):
     p = os.path.join(root, "v2", "agent", "reports", "T.md")
     open(p, "a").write("\nSố ca đỏ: 3.\n")
 
+def sabotage_untracked_doc_skipped(root):
+    """KT-87 (lỗ KT-85/KT-86): tài liệu **mới, chưa `git add`** có số ở prose từng được bỏ qua.
+
+    Trước KT-87 tài liệu đích = index, nên bản nháp untracked không bị quét: cổng xanh, commit
+    xong cổng đỏ. Cổng phải thấy tệp **sẽ được commit** ⇒ ĐỎ ngay khi còn untracked.
+    """
+    open(os.path.join(root, "v2", "docs", "k6-untracked.md"), "w").write(
+        "# Tài liệu mới (chưa commit)\n\nKiểm xong thấy 729 ca xanh.\n"
+    )
+
+def sabotage_staged_doc_skipped(root):
+    """KT-87: tài liệu mới đã `git add` (staged) phải được quét y như bản sẽ commit."""
+    p = os.path.join(root, "v2", "docs", "k6-staged.md")
+    open(p, "w").write("# Tài liệu mới (đã git add)\n\nKiểm xong thấy 731 ca xanh.\n")
+    _git(root)("add", "v2/docs/k6-staged.md")
+
+
+def sabotage_legacy_untracked(root):
+    """KT-87: mục `[[legacy]]` trỏ tệp **chưa commit** — sha chỉ ghim bản đã commit.
+
+    Trước KT-87 đường này báo nhầm thành `E1_LEGACY_SHA` ("nội dung đã đổi") vì `git show
+    HEAD:<tệp>` rỗng. Phải ĐỎ **đúng mã** `E1_LEGACY_UNTRACKED`: không có ngoại lệ cho tệp chưa
+    commit (nếu không, ai cũng thêm `[[legacy]]` + sha của bản nháp để miễn luật 1).
+    """
+    p = os.path.join(root, "v2", "docs", "k6-untracked-legacy.md")
+    open(p, "w").write("# Tài liệu chưa commit\n\nKiểm xong thấy 733 ca xanh.\n")
+    pol = os.path.join(root, "v2", "test", "rules", "numbers-policy.toml")
+    with open(pol, "a") as fh:
+        fh.write(
+            "\n[[legacy]]\n"
+            'path = "v2/docs/k6-untracked-legacy.md"\n'
+            f'sha256 = "{sha256_file(p)}"\n'
+            'reason = "ca phá luật 8: ngoại lệ trỏ tệp chưa commit"\n'
+            'date = "2026-11-17"\n'
+        )
+
 
 def sabotage_heading_not_reset(root):
     # cờ heading không reset (lỗi kt75): số **sau** tiêu đề đầu bị miễn oan.
@@ -1161,6 +1275,26 @@ def sabotage_log_after_report(root):
     g("commit", "-q", "-m", "fixture: log sau báo cáo")
 
 
+def sabotage_legacy_staged(root):
+    """KT-87 (chiều staged của cùng lỗ): `[[legacy]]` trỏ tệp mới `git add` nhưng **chưa commit**.
+
+    Khác `legacy-untracked` ở chỗ tệp **đã vào index**: cổng phải thấy nó (không bỏ sót) và phải
+    nói đúng `E1_LEGACY_STAGED` — sha256 ghim bản HEAD, mà HEAD chưa có tệp ⇒ không thể khớp.
+    """
+    p = os.path.join(root, "v2", "docs", "k6-staged-legacy.md")
+    open(p, "w").write("# Tài liệu đã git add\n\nKhông có số đo nào ở prose.\n")
+    _git(root)("add", "v2/docs/k6-staged-legacy.md")
+    pol = os.path.join(root, "v2", "test", "rules", "numbers-policy.toml")
+    with open(pol, "a") as fh:
+        fh.write(
+            "\n[[legacy]]\n"
+            'path = "v2/docs/k6-staged-legacy.md"\n'
+            f'sha256 = "{sha256_file(p)}"\n'
+            'reason = "ca phá luật 8: ngoại lệ trỏ tệp mới chỉ git add"\n'
+            'date = "2026-11-17"\n'
+        )
+
+
 def sabotage_legacy_changed(root):
     # ngoại lệ lịch sử ghim sha256 của bản ĐÃ COMMIT: sửa rồi commit ⇒ ĐỎ (ngoại lệ hết hạn).
     p = os.path.join(root, "v2", "agent", "reports", "T.md")
@@ -1186,6 +1320,10 @@ SABOTAGES = {
     "decimal-x-y": sabotage_decimal,
     "fence-text-no-scope": sabotage_fence_text_no_scope,
     "bare-small-number": sabotage_bare_small_number,
+    "untracked-doc-skipped": sabotage_untracked_doc_skipped,
+    "staged-doc-skipped": sabotage_staged_doc_skipped,
+    "legacy-untracked": sabotage_legacy_untracked,
+    "legacy-staged": sabotage_legacy_staged,
     "heading-not-reset": sabotage_heading_not_reset,
     "scope-tmp": sabotage_scope_tmp,
     "scope-negative-source": sabotage_scope_negative_source,
@@ -1271,15 +1409,29 @@ def law8(root, ctx, quiet=False):
 
 
 # ------------------------------------------------------------------ điều phối
-def load_context(root):
+def load_context(root, untracked=True):
     rules = os.path.join(root, RULES_DIR_REL)
     ctx = {"root": root}
     ctx["is_git"] = is_git(root)
+    ctx["untracked_scan"] = bool(untracked) and ctx["is_git"]
     if ctx["is_git"]:
         _rc, out, _e = git(root, "ls-files", "-z")
-        ctx["tracked_set"] = set(x for x in out.split("\0") if x)
+        index = set(x for x in out.split("\0") if x)
+        ctx["tracked_set"] = index
+        # KT-87: tệp **sẽ được commit** = index ∪ untracked không bị ignore. `-co --exclude-standard`
+        # = cached + others(untracked, trừ ignore); hợp với `git ls-files` (index) theo yêu cầu
+        # tường minh. Tập này quyết định tài liệu nào bị quét.
+        rc2, out2, err2 = git(root, "ls-files", "-co", "--exclude-standard", "-z")
+        ctx["visible_set"] = index | set(x for x in out2.split("\0") if x)
+        # Không im lặng rơi về hành vi cũ (đúng lỗ KT-87) nếu lệnh git hỏng: ghi cảnh báo.
+        ctx["scope_error"] = (
+            "" if rc2 == 0 else f"`git ls-files -co --exclude-standard` lỗi ({err2[:120]}) — "
+            "chỉ thấy tập index, tệp chưa commit có thể bị bỏ sót"
+        )
     else:
         ctx["tracked_set"] = None
+        ctx["visible_set"] = None
+        ctx["scope_error"] = ""
     try:
         ctx["policy"] = load_toml(os.path.join(rules, POLICY_NAME))
         ctx["counters"] = load_toml(os.path.join(rules, COUNTERS_NAME))
@@ -1287,14 +1439,15 @@ def load_context(root):
     except ConfigError:
         raise
     globs = ctx["policy"].get("targets", {}).get("globs", list(DEFAULT_TARGET_GLOBS))
+    # Tài liệu đích = tệp mà **lần commit tới sẽ chứa**: có trong index (tracked/staged) **và**
+    # tệp chưa `git add` nhưng không bị ignore (untracked). KT-85/KT-86/KT-77c: cổng từng xanh
+    # trên bản nháp untracked rồi đỏ ngay sau commit — đó là lỗ, không phải "bảo vệ task song song".
+    # Tắt kiểm untracked (chẩn đoán) ⇒ quay lại đúng tập index như trước KT-87.
+    allowed = ctx["visible_set"] if ctx["untracked_scan"] else ctx["tracked_set"]
     docs = []
     for path in target_docs(root, globs):
         rel = relpath(root, path)
-        # Tài liệu đích = tệp **đã có trong repo** (index). Tệp chưa `git add` là bản nháp của
-        # task khác: chưa phải báo cáo, và D2-105(a) cấm KT-80 làm đỏ cổng vì bản nháp song song.
-        # Commit xong tệp sẽ vào index/HEAD và lần cổng kế tiếp kiểm nó (không có đường lách:
-        # commit là điều kiện để thành "báo cáo").
-        if ctx["tracked_set"] is not None and rel not in ctx["tracked_set"]:
+        if allowed is not None and rel not in allowed:
             continue
         docs.append(rel)
     ctx["docs"] = docs
@@ -1330,9 +1483,13 @@ def main(argv=None):
     ap.add_argument("--law", action="append", default=[],
                     help="luật cần chạy: 1,2,3,7,8 (lặp lại hoặc '1,2')")
     ap.add_argument("--self-test", action="store_true", help="= --law 8")
+    ap.add_argument("--staged-only", action="store_true",
+                    help="chẩn đoán: chỉ quét tệp đã có trong index (bỏ untracked) — cổng mặc "
+                         "định QUÉT cả tệp chưa commit; tương đương V2_CHECK_UNTRACKED=false")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
     root = os.path.abspath(args.root)
+    scan_untracked = untracked_scan_enabled() and not args.staged_only
     laws = []
     for item in args.law:
         for part in item.split(","):
@@ -1344,12 +1501,24 @@ def main(argv=None):
     if not laws:
         laws = [1, 2, 3, 7, 8]
     try:
-        ctx = load_context(root)
+        ctx = load_context(root, untracked=scan_untracked)
     except ConfigError as exc:
         print(f"not ok - luat 0: E0_CONFIG {exc}")
         return 2
+    counts = {"tracked": 0, "staged": 0, "untracked": 0, "no-git": 0}
+    for rel in ctx["docs"]:
+        counts[file_status(ctx, rel)] += 1
+    scope = ("index+untracked" if ctx["untracked_scan"] and not ctx.get("scope_error")
+             else "index-only (chẩn đoán)")
     print(f"# verify-numbers: root={root} docs={len(ctx['docs'])} "
+          f"tracked={counts['tracked']} staged={counts['staged']} "
+          f"untracked={counts['untracked']} scan={scope} "
           f"legacy={len(ctx['policy'].get('legacy', []))} laws={','.join(map(str, laws))}")
+    if ctx.get("scope_error"):
+        print(f"# note - phạm vi quét: {ctx['scope_error']}")
+    if not ctx["untracked_scan"] and ctx["is_git"]:
+        print("# note - phạm vi quét: CHỈ index — tệp chưa `git add` KHÔNG được kiểm "
+              "(cờ --staged-only/V2_CHECK_UNTRACKED; cổng thật bật kiểm untracked)")
     ok = 0
     fail = 0
     walls = {}
@@ -1383,7 +1552,8 @@ def main(argv=None):
             fail += 1
             for rel, lineno, code, why in fails:
                 loc = f"{rel}:{lineno}" if lineno else rel
-                print(f"not ok - luat {law}: {loc}: {code} {why}")
+                tag = status_tag(ctx, rel) if rel else ""
+                print(f"not ok - luat {law}: {loc}: {code} {tag}{why}")
             print(f"not ok - luat {law}: {len(fails)} lỗi ({extra})")
         else:
             ok += 1
