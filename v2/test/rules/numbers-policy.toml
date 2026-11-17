@@ -224,12 +224,3 @@ debt = "28 số dạng key=value ở prose; chuyển vào khối scope= khi mở
 reason = "viết trước khi luật 1 siết đường key=value (phản biện KT-80); ngoài vùng ghi KT-80"
 date = "2026-11-17"
 
-[[legacy]]
-path = "v2/docs/k6-parity.md"
-sha256 = "ccfd1f40bab66f9da93494cbf3e1fae721c9c86eacfec602b74e0de18551227a"
-kind = "pre_existing"
-expires_task = "KT-82"
-owner = "KT-77a"
-debt = "4 số dạng key=value ở prose (qemu_foreign/qemu_ppid1/inject_ok); KT-77a sửa khi mở lại"
-reason = "viết trước khi luật 1 siết đường key=value (phản biện KT-80); ngoài vùng ghi KT-80"
-date = "2026-11-17"

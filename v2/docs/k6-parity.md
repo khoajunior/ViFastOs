@@ -143,9 +143,15 @@ not ok 2 - echo: timeout sau 2000 ms — expect khong xuat hien du 1 lan (^# she
 Sau khi đổi wrapper sang **bơm lặp**, lần đo cuối đạt tất cả (log `-r2b`). Đây **không** phải cổng
 chặt — chỉ là phép đo trên ảnh test; cổng phải là ảnh sản phẩm có shell (KT-77b).
 
-**Hạ tầng khi đo:** vòng `-r2b` có **QEMU của tab khác** (KT-77b) đang chạy ⇒ `qemu_foreign=1`,
-`verdict=KHONG_HOP_LE` (dòng đầu của log); vì vậy **không** dùng số **thời gian** của vòng này để kết
-luận (D2-116/OD-K6-6). Kết quả TAP là nội dung log, không phải phép đo thời gian.
+**Hạ tầng khi đo:** vòng `-r2b` có **QEMU của tab khác** (KT-77b) đang chạy nên `qg_infra` kết luận
+phép đo **không hợp lệ** (dẫn nguyên văn ở khối dưới); vì vậy **không** dùng số **thời gian** của
+vòng này để kết luận (D2-116/OD-K6-6). Kết quả TAP là nội dung log, không phải phép đo thời gian.
+
+Hạ tầng của vòng đo (trích từ `v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1-r2b-20261117T1305.log:7`):
+
+```text scope=v2/agent/JOURNAL/kt77a-transcript-ktest-proc-smp1-r2b-20261117T1305.log
+# infra before: qemu_total=1 qemu_ppid1=0 qemu_own=0 qemu_foreign=1 loadavg_1m=3.03 loadavg_5m=3.89 loadavg_15m=3.53 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=qemu_foreign=1
+```
 
 ## §4. Ca âm (D2-108B) — ba ca, ba exit code khác nhau (log `-r2b`)
 
@@ -178,9 +184,13 @@ not ok 1 - help: khong thay shell trong log (qemu_rc=0)
 
 - **Ảnh test không có shell "tự do"**: shell trong `ktest-proc` đọc **script sáu dòng do kernel bơm**
    (`v2/kernel/vifast-kbin-riscv64/src/proc_demo.rs:270-280`), rồi `exit`; byte serial ngoài **vào
-   được** shell nhưng **gộp cửa sổ RX** với dòng script kernel ⇒ `inject_ok=0`
-   (`v2/agent/JOURNAL/kt77a-serial-1-help-serial-ktest-proc-smp1-r2b-20261117T1305.log:118`) và TAP
-   nội bộ của ảnh test đỏ — runner parity chỉ chấm `expect` của kịch bản.
+   được** shell nhưng **gộp cửa sổ RX** với dòng script kernel (khối dẫn nguồn dưới) và TAP nội
+   bộ của ảnh test đỏ — runner parity chỉ chấm `expect` của kịch bản.
+
+```text scope=v2/agent/JOURNAL/kt77a-serial-1-help-serial-ktest-proc-smp1-r2b-20261117T1305.log
+# con uart: irqs=41 bytes=55 const:script_bytes=45 lines=6 inject_ok=0 drops=0 timeouts=0 head=42 tail=42 used=0 empty_polls=0 const:va=0x43000000 ring_ok=1
+```
+
 - **`ps` phụ thuộc ảnh test (OD-K6-2 tiêu chí sáu)** — cảnh báo bắt buộc: `ps` được đánh `active`
    **nhưng** bên phục vụ `PS_REQ` chỉ tồn tại trong ảnh test
    (`v2/kernel/vifast-kbin-riscv64/src/proc_demo.rs:338`); đường **sản phẩm** **không** có procsrv.
@@ -196,8 +206,8 @@ not ok 1 - help: khong thay shell trong log (qemu_rc=0)
    canonical — KHÔNG dùng làm bằng chứng v2.0** (D2-122(2)). Việc đóng băng `artifacts/<sha>.bin`
    thuộc **KT-84**. Lúc đo, tab KT-77b đã tạo một artifact có `# shell: up` — **không** phải phép đo
    của KT-77a.
-- **Đo trên máy có QEMU của tab khác** ở vòng `-r2b` ⇒ `qemu_foreign=1`, `verdict=KHONG_HOP_LE`;
-   không dùng số thời gian. `qemu_ppid1=0` (không có QEMU mồ côi).
+- **Đo trên máy có QEMU của tab khác** ở vòng `-r2b` ⇒ `qg_infra` đánh dấu phép đo **không hợp lệ**
+   (khối dẫn nguồn ở §3); không dùng số thời gian; **không** có QEMU mồ côi.
 - **Chỉ bốn lệnh chạy được**; hai mươi bốn mục `deferred-K7` (bảng §1), trong đó `cd`/`pwd` **chờ
    Agent 0** quyết vì hai dữ kiện mâu thuẫn.
 
