@@ -1,0 +1,351 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-77a — nguồn sự thật cho "tương đương v1 ở mức người dùng" (OD-K6-2, Agent 0 17/11/2026).
+#
+# LUẬT (task KT-77a): mỗi mục **bắt buộc** có `source = file:dòng` trong `docs/v1/` chứng minh
+# lệnh đó CÓ THẬT ở v1 (tag `v1-archive`). Không tìm được bằng chứng ⇒ **không** đưa vào.
+# `docs/v1/` là đọc-only; tệp này KHÔNG sửa ABI (`abi.toml`/`kernel.toml` giữ nguyên).
+#
+# Trường:
+#   name       tên lệnh v1 (đúng như bằng chứng ghi)
+#   args       cú pháp đối số
+#   send       chuỗi byte của kịch bản serial (escape `\n` = LF; runner giải mã)
+#   expect     status=active  ⇒ **regex** (grep -E) mà log shell phải khớp
+#              status=deferred-K7 ⇒ mô tả kết quả mong đợi ở v1 (tài liệu, không chạy)
+#   transcript_expect  regex riêng cho chế độ transcript (script nội bộ kernel dùng đối số khác);
+#              bỏ trống ⇒ dùng `expect`. Chế độ serial luôn dùng `expect`.
+#   serial_min_count  số lần `expect` phải xuất hiện ở chế độ serial (help/ps = 2 vì kernel cũng
+#              tự chạy một lần; echo/kill = 1 vì dùng chuỗi đặc trưng)
+#   timeout_ms thời gian chờ tối đa cho `expect` (mili giây) — mỗi kịch bản
+#   source     file:dòng trong docs/v1/ chứng minh lệnh có thật
+#   status     active (v2 đã có lệnh, chạy được) | deferred-K7 (kèm `reason`)
+#   v1_output  đầu ra đã đo/ghi ở v1 (nếu bằng chứng có nêu); rỗng = không có
+#   note       khác biệt parity đã biết (v1 vs v2)
+#
+# Đếm: 26 lệnh — khớp con số bảng lệnh shell sinh tự động của v1
+# (`docs/v1/overnight-log.md:2982` = 25 lệnh ở vòng 175; `:3397` = 26 lệnh sau khi thêm `loop`).
+
+schema = 1
+runner = 'v2/test/parity/run.sh'
+
+[meta]
+task = 'KT-77a'
+decision = 'OD-K6-2 (Agent 0, 17/11/2026) — Agent 1 thi hành theo D2-121'
+v1_tag = 'v1-archive'
+evidence_rule = 'moi muc phai co source = file:dong trong docs/v1; khong co bang chung thi khong dua vao'
+serial_newline_v1 = 'v1 nhan \r (docs/v1/agent2-report-62.md:23)'
+serial_newline_v2 = 'shell v2 nhan \n (v2/kernel/vifast-kbin-riscv64/init/shell_user.rs:299)'
+image_test = 'v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-proc'
+image_product = 'v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64'
+
+[serial]
+# Quy ước attribution của chế độ serial (đo được trên ktest-proc):
+#  - help/ps: ảnh test **cũng** tự chạy hai lệnh này (script nội bộ kernel) ⇒ expect phải xuất hiện
+#    ≥ `serial_min_count` lần thì mới chứng minh dòng của kịch bản đã chạy.
+#  - echo/kill: dùng chuỗi đặc trưng (echo K77A; kill 999 — kernel dùng pid thật khác) ⇒ 1 lần.
+#  - send_delay_ms: cửa sổ an toàn để byte vào RBR sau khi chardev stdio sẵn sàng (đo: 40..150 ms).
+send_delay_ms = 50
+attribution = 'help/ps dem >= serial_min_count; echo/kill dung chuoi dac trung'
+
+[[command]]
+name = 'help'
+args = ''
+send = 'help\nhelp\n'
+expect = '^# shell: help cmds=6$'
+timeout_ms = 2000
+serial_min_count = 2
+source = 'docs/v1/agent2-report-21.md:81'
+source_more = 'docs/v1/agent2-report-62.md:13'
+v1_output = 'help time echo ls ...'
+status = 'active'
+note = 'gui hai lan (do duoc: dong dau cua payload trung cua so RX voi dong dau script noi bo cua kernel nen hay bi gop; gui 2 lan cho count=3/3 on dinh). v1 liet ke 13+ lenh trong help; v2 in 6 lenh (help/echo/ps/wait/kill/exit) => parity mot phan, ghi trong docs/k6-parity.md'
+
+[[command]]
+name = 'echo'
+args = '<text>'
+send = 'echo K77A\n'
+expect = '^# shell: echo K77A$'
+transcript_expect = '^# shell: echo shell-that$'
+timeout_ms = 2000
+serial_min_count = 1
+source = 'docs/v1/agent2-report-21.md:81'
+source_more = 'docs/v1/agent2-report-62.md:23'
+v1_output = 'echo <text>'
+status = 'active'
+note = 'v1 in dung phan text; v2 in # shell: echo <text> (tien to nhan danh)'
+
+[[command]]
+name = 'ps'
+args = ''
+send = 'ps\n'
+expect = '^# shell: ps n=[1-9][0-9]*$'
+timeout_ms = 2000
+serial_min_count = 2
+source = 'docs/v1/overnight-log.md:2633'
+source_more = 'docs/v1/overnight-log.md:3470'
+v1_output = '0 15 4 aff=1 root'
+status = 'active'
+note = 'v1 in <slot> <prio> <state> aff=<n> <ten4>; v2 in pid=<pid> state=<ten> => parity mot phan'
+
+[[command]]
+name = 'kill'
+args = '<pid>'
+send = 'kill 999\n'
+expect = '^# shell: kill pid=999 code=0$'
+transcript_expect = '^# shell: kill pid=[0-9]+ code=0$'
+timeout_ms = 2000
+serial_min_count = 1
+source = 'docs/v1/overnight-log.md:2887'
+source_more = 'docs/v1/overnight-log.md:2894'
+v1_output = 'KILL EXEC OK / KILL EXEC SKIP'
+status = 'active'
+note = 'v1 in KILL EXEC OK|SKIP; v2 in # shell: kill pid=N code=0 => parity mot phan'
+
+[[command]]
+name = 'time'
+args = ''
+send = 'time\n'
+expect = 'so tick/thoi gian tu luc boot (v1: uptime -> <n> ticks)'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:81'
+v1_output = ''
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh time (shell_user.rs:247-269 chi co help/echo/ps/wait/kill/exit); can syscall dong ho tren shell => K7'
+
+[[command]]
+name = 'ls'
+args = '[path]'
+send = 'ls\n'
+expect = 'liet ke muc cua thu muc (v1 do duoc: ls -> 4 muc)'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:81'
+source_more = 'docs/v1/overnight-log.md:3470'
+v1_output = '4 muc'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS/VFS client (chua co ls tren shell) => can KT-77b/K7'
+
+[[command]]
+name = 'cat'
+args = '<path>'
+send = 'cat /README\n'
+expect = 'in noi dung tep'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:81'
+v1_output = ''
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh doc tep => KT-77b/K7'
+
+[[command]]
+name = 'mkdir'
+args = '<path>'
+send = 'mkdir /parity\n'
+expect = 'tao thu muc, khong in loi'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:81'
+v1_output = ''
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'rm'
+args = '<path>'
+send = 'rm /parity/x\n'
+expect = 'xoa muc, khong in loi'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:81'
+v1_output = ''
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'mv'
+args = '<src> <dst>'
+send = 'mv /a /b\n'
+expect = 'doi ten/di chuyen muc'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:81'
+v1_output = ''
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'ln'
+args = '<src> <dst>'
+send = 'ln /a /b\n'
+expect = 'tao lien ket cung (v1 self-test LINK: ca hai size 3)'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:82'
+v1_output = 'ca hai size 3'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'stat'
+args = '<path>'
+send = 'stat /\n'
+expect = '<size> bytes file|dir|link'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:82'
+source_more = 'docs/v1/overnight-log.md:2576'
+v1_output = '512 bytes dir'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'sync'
+args = ''
+send = 'sync\n'
+expect = 'day du lieu xuong thiet bi (flush)'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:82'
+v1_output = ''
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS/flush; v2 chua co fsync tu user mode => K7 (D2-117)'
+
+[[command]]
+name = 'truncate'
+args = '<path> <size>'
+send = 'truncate /a 4\n'
+expect = 'cat tep ve <size> byte'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:82'
+source_more = 'docs/v1/overnight-log.md:2255'
+v1_output = 'ghi 8 byte, truncate con 4'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'fsck'
+args = ''
+send = 'fsck\n'
+expect = 'kiem tra FS sach (v1: fsck phai sach sau chuoi thao tac)'
+timeout_ms = 2000
+source = 'docs/v1/agent2-report-21.md:82'
+source_more = 'docs/v1/overnight-log.md:2276'
+v1_output = 'fsck sach'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh FS => KT-77b/K7'
+
+[[command]]
+name = 'free'
+args = ''
+send = 'free\n'
+expect = '<trong>/<tong> KiB'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2640'
+source_more = 'docs/v1/overnight-log.md:3470'
+v1_output = '24/344 KiB free'
+status = 'deferred-K7'
+reason = 'can syscall MemInfo (v1) chua co tren v2; khong mo ABI trong KT-77a => K7'
+
+[[command]]
+name = 'df'
+args = ''
+send = 'df\n'
+expect = 'used/total block cua vung du lieu FS'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2387'
+source_more = 'docs/v1/overnight-log.md:3470'
+v1_output = '12/8162 blocks'
+status = 'deferred-K7'
+reason = 'can opcode STATFS/ABI FS tu shell chua co tren v2 => K7'
+
+[[command]]
+name = 'uptime'
+args = ''
+send = 'uptime\n'
+expect = '<n> ticks (v1 do duoc: 2s / 68 ticks)'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2576'
+source_more = 'docs/v1/overnight-log.md:3470'
+v1_output = '2s'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh uptime; can syscall Clock tren shell => K7'
+
+[[command]]
+name = 'uname'
+args = ''
+send = 'uname\n'
+expect = 'ViFastOs <arch> bootinfo-v3'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2424'
+v1_output = 'ViFastOs <arch> bootinfo-v3'
+status = 'deferred-K7'
+reason = 'shell v2 chua co lenh uname; can chuoi phien ban tu bootinfo trong shell => K7'
+
+[[command]]
+name = 'run'
+args = '<path>'
+send = 'run /prog.elf\n'
+expect = 'nap va chay chuong trinh tu FS (v1: RUN FS OK / RUN OK)'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:1582'
+v1_output = 'RUN OK'
+status = 'deferred-K7'
+reason = 'shell v2 chua co exec tu FS; ảnh sản phẩm chưa có U-mode/shell => KT-77b/K7'
+
+[[command]]
+name = 'runfs'
+args = '<path> [args...]'
+send = 'runfs /prog.elf hello\n'
+expect = 'RUN FS OK roi in tham so'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:1598'
+source_more = 'docs/v1/overnight-log.md:1805'
+v1_output = 'RUN FS OK + hello'
+status = 'deferred-K7'
+reason = 'shell v2 chua co exec tu FS => KT-77b/K7'
+
+[[command]]
+name = 'exec'
+args = '<path> [args...]'
+send = 'exec /prog.elf hello\n'
+expect = 'bi danh cua runfs (v1: hai lenh dung chung mot duong ma)'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:1843'
+v1_output = 'RUN FS OK'
+status = 'deferred-K7'
+reason = 'shell v2 chua co exec tu FS => KT-77b/K7'
+
+[[command]]
+name = 'jobs'
+args = ''
+send = 'jobs\n'
+expect = 'jobs: N runnable'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2903'
+v1_output = 'jobs: 2 runnable'
+status = 'deferred-K7'
+reason = 'can syscall TcbInfo tren shell (v2 chua co) => K7'
+
+[[command]]
+name = 'loop'
+args = '<n>'
+send = 'loop 6\n'
+expect = 'LOOP OK (root lap spawn/destroy n lan)'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:3388'
+v1_output = 'LOOP OK'
+status = 'deferred-K7'
+reason = 'giao thuc loop o root chua co tren v2 => K7'
+
+[[command]]
+name = 'history'
+args = ''
+send = 'history\n'
+expect = 'last: <lenh truoc>'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2776'
+v1_output = 'last: echo hi'
+status = 'deferred-K7'
+reason = 'shell v2 khong co lich su lenh => K7'
+
+[[command]]
+name = '!!'
+args = ''
+send = '!!\n'
+expect = 'chay lai lenh truoc (v1: !!: echo hi roi in hi)'
+timeout_ms = 2000
+source = 'docs/v1/overnight-log.md:2776'
+v1_output = '!!: echo hi -> hi'
+status = 'deferred-K7'
+reason = 'shell v2 khong co lich su lenh => K7'

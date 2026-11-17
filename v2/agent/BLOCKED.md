@@ -467,3 +467,26 @@ persist, driver không vào ảnh sản phẩm) liệt kê đủ ở `K6-DOD.md`
      không ảnh hưởng kết luận).
 - **Không** thuộc KT-78: tái lập **byte** của build (nợ `P20`, `KT-79`); KT-78 **không** sửa
   `v2/kernel/**`, `v2/lib/**`, `spec/` (ảnh sản phẩm **trùng byte** KT-76).
+
+## KT-77a — parity v1 (`OD-K6-2` phần đầu): **DONE**, không có mục nào bị chặn
+
+- **Không** mục nào của KT-77a bị chặn: `spec/v1-parity.toml` có **26/26** lệnh kèm `source`
+  (`docs/v1/`), runner chạy được cả `--mode transcript` (4/4) và `--mode serial` (4/4) trên ảnh test,
+  ba ca âm có log trong repo (exit 3/4/5). Log: `v2/agent/JOURNAL/kt77a-*`,
+  tài liệu: `v2/docs/k6-parity.md`.
+- **Chuyển tiếp (không phải chặn KT-77a):**
+  1. **KT-77b** — shell + U-mode trong **ảnh sản phẩm**, rồi chạy
+     `bash v2/test/parity/run.sh --mode serial --image product`; lúc đó mới là **cổng parity thật**
+     (OD-K6-2 tiêu chí 1–6). Ảnh sản phẩm hiện **không có** `# shell: up` (S1 **vẫn mở**).
+  2. **22 lệnh `deferred-K7`** — mỗi lệnh cần syscall/ABI mới (`MemInfo`, `TcbInfo`, `STATFS`,
+     exec-from-FS) hoặc VFS client trong shell. Danh sách + lý do nằm trong `spec/v1-parity.toml`
+     (`status = 'deferred-K7'`, `reason`), đúng OD-K6-2 ("lệnh không làm được trong ngân sách ghi
+     `deferred-K7` kèm lý do"). Mở các lệnh này = **quyết định ABI/phạm vi của Agent 0** (D2-121
+     mục (a)/(d) — Agent 1 không tự quyết).
+  3. **Đo serial "chặt" trên ảnh test** cần bỏ script nội bộ `proc_demo::build_script`
+     (`v2/kernel/vifast-kbin-riscv64/src/proc_demo.rs:270-280`) — tệp **ngoài vùng KT-77a**
+     (`v2/kernel/**/src/**`) và ngoài vùng KT-78. Đo được hiện tại: byte ngoài vào shell nhưng gộp
+     cửa sổ RX với script kernel ⇒ `inject_ok=0`, TAP nội bộ ảnh test đỏ
+     (`kt77a-serial-1-help-serial-ktest-proc-smp1.log:118`). Không tự sửa.
+- **Không** đổi ABI, không sửa `spec/abi.toml`/`spec/kernel.toml`, không sửa `v2/test/boot/**`,
+  không sửa `docs/v1/**`, không nới ngưỡng, không retry để xanh.

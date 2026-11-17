@@ -3593,3 +3593,63 @@ năm); (c) `D2-106` — dòng tổng hợp do `qg_guard_summary` (awk, công th�
 
 **Không chạm**: `spec/`, `v2/kernel/**`, `v2/lib/**`, `crates/`, `viscript/`, `review/`; `expected.txt`
 và mọi ngưỡng nguyên. **Freeze**: không job nền, `0` QEMU; lead commit theo pathspec (`D2-105a`).
+
+## KT-77a — `spec/v1-parity.toml` + runner serial (OD-K6-2 phần đầu): **DONE**, không BLOCKED
+
+**Ngày:** 2026-11-17 · **Agent 2 dòng OS** (uỷ quyền Agent 1, **D2-121**) · HEAD đầu việc
+`f7b17e51`. **Ngoại lệ `spec/` được Agent 0 cấp (D2-119)**: chỉ **tạo mới** `spec/v1-parity.toml`;
+`spec/abi.toml`, `spec/kernel.toml` **không đổi**. Không đụng `v2/kernel/**`, `v2/test/boot/**`,
+`v2/lib/**`, `crates/`, `viscript/`, `review/`, `docs/v1/**`.
+
+- **26 lệnh** v1 có `source = file:dòng` trong `docs/v1/` (khớp 25 lệnh ở `overnight-log.md:2982`,
+  26 sau `loop` ở `:3397`); **4 active** (`help`, `echo`, `ps`, `kill`), **22 `deferred-K7`** kèm lý do.
+- Runner `v2/test/parity/run.sh` (+ `stdin_wrap.sh`) dùng **nguyên** `v2/test/boot/qemu_guard.sh`
+  (KT-78, không sửa): `--mode transcript` (nguồn byte = script nội bộ kernel), `--mode serial`
+  (bơm byte qua stdin QEMU), ca âm `wrong-expect`/`no-send`, `--image product` (không shell).
+- Tài liệu: `v2/docs/k6-parity.md`. Nhật ký: `v2/agent/JOURNAL/kt77a-journal.md`.
+
+**Đo trên ảnh test `ktest-proc` (smp=1)** — log trong repo:
+
+```text scope=kt77a-transcript-ktest-proc-smp1.log
+ok 1 - help
+ok 2 - echo
+ok 3 - ps
+ok 4 - kill
+# parity: total=26 ok=4 deferred=22 active=4 (active_da_chay=4)
+# parity: qemu_con_sot_total=0 qemu_cua_script=0
+```
+
+```text scope=kt77a-serial-ktest-proc-smp1.log
+ok 1 - help (khop=3 >= 2, waited_ms=0)
+ok 2 - echo (khop=1 >= 1, waited_ms=0)
+ok 3 - ps (khop=2 >= 2, waited_ms=0)
+ok 4 - kill (khop=1 >= 1, waited_ms=0)
+# parity: total=26 ok=4 deferred=22 active=4 (active_da_chay=4)
+# parity: KET_LUAN=ok (exit 0)
+```
+
+**Ca âm (D2-108B)** — ba ca, ba exit code:
+
+```text scope=kt77a-serial-ktest-proc-smp1-neg-wrong-expect.log
+not ok 1 - help: byte da vao shell (co 2 dong 'shell: ?') nhung expect khong khop sau 2000 ms (^# shell: echo KHONG-BAO-GIO$)
+# parity: KET_LUAN=not_ok (exit 3)
+```
+
+```text scope=kt77a-serial-ktest-proc-smp1-neg-no-send.log
+not ok 1 - help: timeout sau 2000 ms — expect khong xuat hien du 2 lan (^# shell: help cmds=6$)
+# parity: KET_LUAN=timeout (exit 4)
+```
+
+```text scope=kt77a-serial-product-smp1.log
+not ok 1 - help: khong thay shell trong log (qemu_rc=0)
+# parity: KET_LUAN=khong_co_shell (exit 5)
+```
+
+**Giới hạn đã đo (ghi để không đọc quá mức):** shell trong `ktest-proc` đọc **script 6 dòng do
+kernel bơm** (`proc_demo.rs:270-280`) rồi `exit`; byte serial ngoài vào được shell nhưng gộp cửa sổ
+RX với dòng script ⇒ `inject_ok=0` (`kt77a-serial-1-help-serial-ktest-proc-smp1.log:118`) và TAP nội
+bộ của ảnh test đỏ (`not ok 3`, `not ok 4`). Vì vậy chế độ serial trên ảnh test là **đo chuyển
+động**; cổng parity thật phải là **ảnh sản phẩm có shell** (**KT-77b** — S1 vẫn mở: ảnh sản phẩm in
+`ok 1 - k3 boot` rồi `# k3 halt`, **0** dòng `# shell: up`). Ảnh test dùng có sẵn (không build lại):
+`ktest-proc` sha256 `f7c6b4a3…c281cfc1` (437.672 B); ảnh sản phẩm `fd202276…4393a6da` (188.552 B).
+QEMU: `qemu_ppid1=0 qemu_foreign=0` trước/sau mọi lần đo (`kt77a-infra.log:1-8`).
