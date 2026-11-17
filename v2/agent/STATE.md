@@ -3729,5 +3729,48 @@ feature sai, sửa thu hẹp được, ảnh test vẫn 10/10 TAP (`kt77b-regres
 ghi rõ là **một** fault `FaultKind::Exit{0}` của shell (không phải W^X); tiêu chí hai ghi **CHƯA
 ĐẠT**. Tự kiểm sau vá: `check-rules --law 1` ok, `selfbreak` **5/5**, `v2 check` PASS
 (`JOURNAL/kt77b-logs/kt77b-{law1,selfbreak,selfcheck-docs}.log`). Cây từng đỏ vì file **của KT-80b**
-(`k6-machine-rules.md:179`) đang được ghi đồng thời — bằng chứng `JOURNAL/kt77b-logs/kt77b-concurrent-red.log`. Chi tiết: `docs/k6-product-shell.md` +
+(`k6-machine-rules.md:179`) đang được ghi đồng thời — bằng chứng `JOURNAL/kt77b-logs/kt77b-concurrent-red.log`.
+
+**Vòng vá reviewer KT-77b (DRIFT sha):** ảnh bằng chứng nay build từ **commit `12fbff3e`**, cây
+`v2/kernel` sạch, hai lần độc lập ⇒ cùng `sha256=07c34fc6…`, 176.768 B, `build=6e90c73c43f9b4aa`
+(khớp sha reviewer); `39ca3cc6…` gắn nhãn **bản trước commit — KHÔNG dùng**. Đã chạy lại trên ảnh
+mới: parity 1/2/4 hart `KET_LUAN=ok` (smp4 `qemu_con_sot_total=0`), boot-tới-exit 1/2/4, ca âm
+shell tắt `exit 5` (ba lần; QEMU sót là của tab khác, `qemu_cua_script=0`), sai expect `exit 3`,
+detector 4/4 ok **có lớp `probe` bằng feature-graph** (`ktest=0 umode=1`), budget đo lại. Vá
+D2-102 (dòng evidence `const:input_mode`/`const:inject`/`const:rx_path`) **chưa commit** ⇒ ảnh
+phải build lại sau commit. Nợ mới: build ở **đường dẫn khác** cho sha khác dù cùng commit —
+`build.rs` gọi `$RUSTC` trực tiếp cho ELF U-mode nên không nhận `--remap-path-prefix` (KT-79/85).
+Tự kiểm: luật 1 ok, `selfbreak` 5/5; `v2 check` chỉ đỏ ở bước **fmt** do KT-77c đang sửa cùng
+`proc_rt.rs` (diff fmt chỉ ở import của họ, 0 dòng của bản vá). Chi tiết: `docs/k6-product-shell.md` +
 `JOURNAL/kt77b-journal.md`.
+
+## Cập nhật lead (2026-11-17 chiều) — K6 sau D2-123/D2-125
+
+**HEAD `715a297e`** · `v2 check` PASS trong worktree sạch · `git status -- v2/kernel v2/lib` **rỗng**.
+Cây `v2/kernel` **sạch** là điều kiện của KT-86: ảnh chỉ được đo khi `dirty=0` và `rev` trong ảnh khớp HEAD.
+
+### Đã đóng trong lượt này
+- **KT-77b DONE** — U-mode + shell vào ảnh sản phẩm; ảnh bằng chứng tái lập từ HEAD; `shell>` ở 1/2/4 hart;
+  parity bốn lệnh `active` cũ; ba ca âm; marker harness **0** trên sản phẩm.
+- **KT-77c DONE** — FS + virtio-blk vào ảnh sản phẩm (`proc_fs.rs`, endpoint `EP_FS`); `ls`/`cat` chuyển
+  `deferred-K7` → **`active`**; ghi tệp và **đọc lại sau reboot** đo bằng **hai boot** trên **cùng tệp đĩa**;
+  ba ca âm; ngưỡng không đổi. Bẫy `vblk = ["ktest"]` là **sai nhãn**, không phải phụ thuộc harness.
+- **KT-80 DONE** — năm luật máy trong `v2 check`/`gate --fast`; **21** ca hồi quy; luật 1 bắt cả `key=value`
+  theo **hình dạng giá trị**; `expires_task` cho ngoại lệ `pre_existing`.
+- **KT-85 + KT-85b DONE** — bốn hook git ở git-common-dir (`pre-commit`, `pre-push`, `commit-msg`,
+  `reference-transaction`); `VIFAST_ROLE` là **hàng rào chống nhầm**, không chống cố ý (D2-125.1).
+- **KT-86 DONE** — `# build: rev=<12hex> dirty=<0|1>` là **`const` trong byte ảnh**; `vbrev_gate` ở **cả bốn**
+  runner từ chối đo khi lệch; năm ca âm, trong đó `tree-dirty` bắt được "ảnh khai sạch nhưng cây bẩn".
+- **KT-87 DONE** — `v2 check` thấy cả tệp **chưa** `git add` (lỗ đã làm HEAD đỏ hai lần trong buổi);
+  nhãn `[tracked]/[staged]/[untracked]`; ca kiểm "cây thật == clone tạm".
+
+### Đang chạy
+- **KT-88** — **lần đo cuối K6** (D2-123.3): build ảnh từ HEAD sạch, ma trận 24 boot, soak 1.000, persist,
+  ba ca âm, sáu tiêu chí. Số của KT-82/KT-83 sẽ lấy từ đây.
+
+### Nợ đang mở (không chặn KT-88)
+- **A1-184**: `build.rs` gọi `$RUSTC` trực tiếp cho ELF U-mode ⇒ **không** nhận `--remap-path-prefix`;
+  cùng commit nhưng **khác đường dẫn nguồn** ⇒ khác sha. Ảnh hưởng OD-K6-3 ở mức "2 máy".
+- **A1-179**: bốn tài liệu `pre_existing` (`K6-DOD`, `k6-exec`, `k6-persist`, `k6-parity`) có `expires_task = "KT-82"`
+  ⇒ **phải** chuyển số vào khối `scope=` trước KT-82.
+- `pre-merge-commit` chưa có hook; GitHub branch protection chưa bật (hướng dẫn đã gửi người dùng).
