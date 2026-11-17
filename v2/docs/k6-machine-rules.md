@@ -99,7 +99,7 @@ và tên cột bị bỏ phải có thật trong bảng gốc (nếu không ⇒ 
 
 ## 6. Luật VIII — ca phá cũ là ca hồi quy
 
-`v2/test/rules/verify-script-regressions.txt` liệt kê **mười bảy** đường phá đã từng lọt qua các
+`v2/test/rules/verify-script-regressions.txt` liệt kê **hai mươi mốt** đường phá đã từng lọt qua các
 verifier tiền nhiệm, mỗi dòng ghi: id · luật · mã lỗi kỳ vọng · cách phá · mô tả. Tài liệu này
 **không chép tay** danh sách đó — nó trích nguyên văn từ registry:
 
