@@ -188,11 +188,11 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-77a | **K6** `spec/v1-parity.toml` + script kịch bản serial | KT-76 | 3 h | READY | lệnh shell v1 + `file:dòng`; chạy được trên ảnh test có shell |
 | KT-77b | **K6** user mode + shell vào **ảnh sản phẩm** | KT-78, KT-77a | 3 h | BLOCKED | 6 tiêu chí OD-K6-2; ngân sách 2x3h rồi rơi về (b) |
 | KT-78 | **K6** harness QEMU: process group + timeout + dọn con | KT-76 | 3 h | READY | OD-K6-6; ca âm: giết cha ⇒ 0 QEMU sau 5 s |
-| KT-79 | **K6** build tái lập byte (P20) | KT-76 | 3 h | READY | OD-K6-3; 2 máy x 2 đường dẫn = 1 sha + ca âm |
+| KT-79 | **K6** build tái lập byte (P20) | KT-76 | 3 h | READY | OD-K6-3 + D2-120/A.3: 2 đường dẫn **và** máy thứ hai `psvn`; cùng sha = đạt đủ |
 | KT-80 | **K6** 8 luật máy vào cổng (OD-K6-5) | KT-76 | 3 h | READY | mỗi luật 1 ca phá làm đỏ cổng |
 | KT-81 | **K6** thiết bị giả nghiêm ngặt + bảng tài nguyên | KT-80 | 3 h | BLOCKED | bắt lại 2 lỗi driver cũ ở mô hình |
-| KT-82 | **K6** văn bản đóng K6 (a hoặc b) + caveat P20 | KT-77b | 3 h | BLOCKED | số do script sinh; reviewer duyệt |
-| KT-83 | **K6** mở K7 "Đóng lỗi v1" + chốt bảng 7 lỗi | KT-82 | 3 h | BLOCKED | trạng thái + `file:dòng` từng lỗi |
+| KT-82 | **K6** văn bản đóng K6 (a hoặc b) + caveat P20 | KT-77b | 3 h | BLOCKED | ba trạng thái đóng/hoãn/mở; số từ bảng KT-83 (D2-120/A.2) |
+| KT-83 | **K6** mở K7 "Đóng lỗi v1" + chốt bảng 7 lỗi | KT-82 | 3 h | BLOCKED | 2 đóng / 1 hoãn K5' / 4 mở; `file:dòng` từng lỗi; K7 **không** nhận N5 |
 
 **APPROVED 2026-11-17 Agent 0** — quyết định cổng K6 `OD-K6-1..8` tại [`reports/QUYET-DINH-A0-K6-2026-11-17.md`](reports/QUYET-DINH-A0-K6-2026-11-17.md) (sha256 `0361fb7e…`), ghi thành **D2-119**. Kèm: (i) `spec/v1-parity.toml` **tạo mới** được phép ở KT-77a (không đổi ABI); (ii) đính chính của lead: số lỗi v1 đã đóng là **2/7** (N4, N6), **1/7 hoãn K5'** (N5), **4/7 mở** (N1/N2/N3/N7) — KT-83 chốt lại trước khi văn bản đóng K6 dùng con số.
 | KT-77 | ~~**K6** đưa U-mode + shell vào ảnh sản phẩm~~ → **tách thành KT-77a/77b** (D2-119) | — | — | DONE | superseded |

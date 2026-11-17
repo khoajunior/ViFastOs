@@ -119,3 +119,31 @@ Giữ trong sổ. Phân vào K7 **chỉ** những nợ nằm trong đường c�
 3. Kích thước ảnh sản phẩm mới so với 262.144.
 4. Danh sách `deferred-K7` trong v1-parity.toml (nếu có).
 5. Văn bản đóng K6 ghi đúng số lỗi v1 đã đóng.
+
+---
+
+## §5. PHỤ LỤC A — ĐÍNH CHÍNH VÀ SỬA ĐỔI (Agent 0, 17/11/2026)
+
+Phần §0–§4 ở trên giữ nguyên làm bản gốc. Phụ lục này **thay thế** ba điểm; khi hai chỗ khác nhau thì **phụ lục thắng**.
+
+### A.0 Đính chính số lỗi v1 (Agent 0 tự nhận lỗi)
+Agent 0 xác nhận: **2 đóng (N4, N6) · 1 hoãn K5' (N5) · 4 mở (N1/N2/N3/N7)**. Lỗi của Agent 0 ở §1: suy "đã đóng" **bằng phép trừ** (7 − 4 mở = 3), bỏ qua trạng thái **hoãn**. Ghi nhận đúng tinh thần §4 của briefing: con số truyền miệng vẫn phải đo lại.
+
+### A.1 Sửa OD-K6-7 (định nghĩa v2.0 hoàn thiện)
+Bỏ cụm "**7/7 lỗi v1** có ca đỏ-trước/xanh-sau"; thay bằng:
+
+> **"6/7 lỗi v1 (N1, N2, N3, N4, N6, N7) có ca đỏ-trước/xanh-sau; N5 thuộc K5' x86_64, ngoài phạm vi v2.0."**
+
+Lý do: v2.0 chỉ riscv64; giữ "7/7" thì định nghĩa **không thể đạt**.
+
+### A.2 Sửa OD-K6-4 (K7)
+**K7 không nhận N5.** Văn bản đóng K6 (**KT-82**) phải ghi **đúng ba trạng thái**: đóng / hoãn / mở, với số lấy từ **bảng của KT-83** (không lấy từ phụ lục này).
+
+### A.3 Sửa KT-79 (build tái lập) — chưa chấp nhận "1 máy"
+- Máy thứ hai: thử dùng **ps** (Agent 2 đã SSH được từ `mps`), build ở **đường dẫn khác** với máy hiện tại; toolchain ghim bằng `rust-toolchain.toml` cho **cả hai** máy.
+- **Ra cùng sha** ⇒ **đạt đủ** OD-K6-3.
+- **Không ra cùng sha** ⇒ báo **nguyên nhân bằng diff byte**; **không** được gộp vào kết luận "do khác máy".
+- **Không build được** trên ps (thiếu target hoặc mạng) ⇒ **khi đó mới** ghi "đạt một phần: 2 đường dẫn, 1 máy", kèm **lý do cụ thể**.
+
+### A.4 Thứ tự task (giữ nguyên)
+**KT-78, KT-79 → KT-77a → KT-77b → KT-82**; các task khác không đổi.
