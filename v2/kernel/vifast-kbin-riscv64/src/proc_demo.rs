@@ -40,45 +40,20 @@ use vifast_plat_riscv64::obj as aobj;
 use vifast_plat_riscv64::user::{self, LoadedInit, Stop};
 use vifast_plat_riscv64::{core_bridge, uart_console, Riscv64Virt};
 
+// KT-77b: bố cục cspace/nhãn message **một nguồn** cho cả ảnh test và ảnh sản phẩm.
+use crate::proc_abi::*;
+
 /// ELF U-mode do `build.rs` sinh (KT-65).
 static PROCSRV_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/procsrv.elf"));
 static SHELL_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shell.elf"));
 static CHILD_ELF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/child.elf"));
 
-/// Ô bảng dải/console capture: procsrv, shell, con.
-const SLOT_PROCSRV: usize = 0;
-const SLOT_SHELL: usize = 1;
-const SLOT_CHILD: usize = 2;
-
-/// Slot cspace dùng chung của ảnh demo (chương trình U-mode cũng dùng hằng này).
-const EP_FAULT: usize = 1;
-const EP_PROC: usize = 2;
-const EP_UART: usize = 3;
-const EP_REPLY: usize = 4;
-const EP_PS: usize = 5;
-const EP_CTL: usize = 6;
-const EP_EVENTS: usize = 8;
-const SLOT_CSPACE: usize = 20;
-const TCB_SLOTS: [usize; 5] = [10, 11, 12, 13, 14];
-const SC_SLOTS: [usize; 5] = [30, 31, 32, 33, 34];
+/// Chỉ số tác vụ trong mảng `tasks` của ảnh test (ánh xạ `proc_abi::SLOT_*`).
 const T_PROCSRV: usize = 0;
 const T_SHELL: usize = 1;
 const T_CHILD: usize = 2;
 const T_VICTIM: usize = 3;
 const T_KERN: usize = 4;
-
-/// Label message (trùng hằng trong 3 chương trình user; `LINE` của KT-65 đã bỏ — KT-73 đọc byte
-/// từ ring thay vì message dòng do kernel cắm sẵn).
-const PS_REQ: u64 = 0x602;
-const PS_REPLY: u64 = 0x603;
-const EV_FAULT: u64 = 0x502;
-const EV_WAIT: u64 = 0x503;
-const EV_KILL: u64 = 0x504;
-const EV_UP: u64 = 0x501;
-const EV_PS: u64 = 0x505;
-const EV_ECHO: u64 = 0x506;
-const EV_HELP: u64 = 0x507;
-const FAULT_EXIT: u64 = 0x608;
 
 /// Vùng RAM cho Untyped **U2** của riêng pha demo (nạp 3 VSpace + Frame). Nằm trên RAM 128 MiB,
 /// ngoài mọi vùng kernel/object layer đã dùng; không đụng ngưỡng `.data+.bss` (đây là PA thật,

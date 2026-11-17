@@ -1,0 +1,5 @@
+# repro-build: máy Darwin arm64, gốc=/Users/mps/dvchd/ViFastOs
+# repro-build: rustc 1.99.1 (58cf8f9c3 2026-10-13) | cargo 1.99.1 (5f94df478 2026-08-27) | toolchain=1.99.1-aarch64-apple-darwin (overridden by environment variable RUSTUP_TOOLCHAIN) 
+# repro-build: RUSTFLAGS=[--remap-path-prefix=/Users/mps/dvchd/ViFastOs=/vifast -C strip=symbols ] (remap /Users/mps/dvchd/ViFastOs -> /vifast)
+# repro-build: CARGO_TARGET_DIR=/private/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/vifast-repro-target.2P3GZI
+REPRO machine=Darwin-arm64 root=/Users/mps/dvchd/ViFastOs sha256=39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57 size=176768 wall_s=13 build=6e90c73c43f9b4aa text=106764 image=/private/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/vifast-repro-target.2P3GZI/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64

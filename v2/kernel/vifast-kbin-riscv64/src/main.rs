@@ -32,6 +32,13 @@ use vifast_plat_riscv64::smp;
 use vifast_plat_riscv64::timer;
 use vifast_plat_riscv64::{read_trap_vector, Riscv64Virt, UART0_IRQ};
 
+// **KT-77b** (OD-K6-2): đường U-mode + shell của **ảnh sản phẩm**. Bật bằng feature
+// `product-shell` (không `ktest`) nên ảnh không link module harness nào (D2-08).
+#[cfg(feature = "product-shell")]
+mod proc_abi;
+#[cfg(feature = "product-shell")]
+mod proc_rt;
+
 /// Nền tảng QEMU `virt` — zero-sized, dựng được trong `static`.
 static PLATFORM: Riscv64Virt = Riscv64Virt;
 /// Một handler panic dùng chung cho cả ảnh sản phẩm và ảnh test (`vifast-plat-common`).
@@ -358,8 +365,19 @@ pub extern "C" fn rust_main() -> ! {
         }
     }
     PLATFORM.put_str("ok 1 - k3 boot\n");
-    PLATFORM.put_str("# k3 halt\n");
-    PLATFORM.halt(0)
+    // **KT-77b**: ảnh `product-shell` giao máy cho runtime U-mode (procsrv + shell) và
+    // **không** halt sau boot — shell sống để nhận kịch bản từ serial. Ca âm của tiêu chí 3
+    // là build **không** feature này: đường dưới giữ **nguyên** byte (`# k3 halt` + halt(0)).
+    #[cfg(feature = "product-shell")]
+    {
+        PLATFORM.put_str("# k3 shell: handoff product-shell=1\n");
+        proc_rt::run(&PLATFORM, obj.untyped0, core.untyped);
+    }
+    #[cfg(not(feature = "product-shell"))]
+    {
+        PLATFORM.put_str("# k3 halt\n");
+        PLATFORM.halt(0)
+    }
 }
 
 /// Entry hart **thứ cấp** của ảnh sản phẩm (KT-49): adopt `satp`/`stvec` của BSP, báo online, rồi

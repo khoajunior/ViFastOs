@@ -44,6 +44,8 @@ use vifast_plat_riscv64::mmu;
 use vifast_plat_riscv64::user::{self, LoadedInit, USER_BASE, USER_STACK_GUARD_BOTTOM};
 use vifast_plat_riscv64::{read_trap_vector, trap_vector, Riscv64Virt};
 
+// KT-77b: bố cục cspace/nhãn message dùng chung với ảnh sản phẩm.
+mod proc_abi;
 mod proc_demo;
 
 static PLATFORM: Riscv64Virt = Riscv64Virt;

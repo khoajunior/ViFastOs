@@ -1,0 +1,12 @@
+# infra before: qemu_total=1 qemu_ppid1=0 qemu_own=0 qemu_foreign=1 loadavg_1m=3.84 loadavg_5m=4.14 loadavg_15m=3.59 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=qemu_foreign=1
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=2.38 loadavg_5m=3.37 loadavg_15m=3.37 ncpu=12 boot_done=4 verdict=OK
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=5.70 loadavg_5m=4.87 loadavg_15m=4.25 ncpu=12 boot_done=0 verdict=OK
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=5.01 loadavg_5m=4.68 loadavg_15m=4.27 ncpu=12 boot_done=4 verdict=OK
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=5.01 loadavg_5m=4.68 loadavg_15m=4.27 ncpu=12 boot_done=0 verdict=OK
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=9.06 loadavg_5m=6.81 loadavg_15m=5.23 ncpu=12 boot_done=4 verdict=OK
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=9.06 loadavg_5m=6.81 loadavg_15m=5.23 ncpu=12 boot_done=0 verdict=OK
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=11.74 loadavg_5m=8.38 loadavg_15m=6.14 ncpu=12 boot_done=4 verdict=OK
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=13.67 loadavg_5m=9.04 loadavg_15m=6.42 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=loadavg_1m=13.67>ncpu=12
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=13.67 loadavg_5m=9.04 loadavg_15m=6.42 ncpu=12 boot_done=4 verdict=KHONG_HOP_LE ly_do=loadavg_1m=13.67>ncpu=12
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=13.95 loadavg_5m=9.26 loadavg_15m=6.54 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=loadavg_1m=13.95>ncpu=12
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=4.43 loadavg_5m=6.83 loadavg_15m=6.09 ncpu=12 boot_done=4 verdict=OK

@@ -275,6 +275,10 @@ pub extern "C" fn _start() -> ! {
     put(b"# shell: input=ring va=0x");
     put_hex(VA_CON_RING as u64);
     put(b"\n");
+    // KT-77b: prompt của shell. In **một dòng riêng** (`shell>\n`, không phải tiền tố `shell> `
+    // cùng dòng) để mọi dòng kết quả `# shell: …` vẫn bắt đầu ở cột 0 — kịch bản parity
+    // (`spec/v1-parity.toml`, `expect` dạng `^# shell: …$`) so khớp theo dòng.
+    put(b"shell>\n");
     let ring = Ring::new(Shm {
         base: VA_CON_RING,
     });
@@ -299,6 +303,9 @@ pub extern "C" fn _start() -> ! {
                     if *byte == b'\n' {
                         run_line(&line[..len]);
                         len = 0;
+                        // Prompt sau **mỗi** dòng lệnh (kể cả dòng sai) — trừ khi `run_line`
+                        // đã `exit` (không trả về).
+                        put(b"shell>\n");
                     } else if len < MAX_LINE {
                         line[len] = *byte;
                         len += 1;

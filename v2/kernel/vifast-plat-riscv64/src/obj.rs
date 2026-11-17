@@ -8,7 +8,7 @@
 //!   section ELF nên không vào trần `.data+.bss`, D2-72 Q5) và dựng **2 Untyped boot**:
 //!   `U0` = 64 KiB arena + cửa sổ PA 1 GiB căn 2 MiB, `U1` = 4 KiB arena + cửa sổ PA 1 GiB căn
 //!   1 GiB (cho Frame 1 GiB — D2-66);
-//! - `#[cfg(feature = "ktest")]`: [`copy_kernel_root`] chép root kernel vào root VSpace (giữ
+//! - `#[cfg(any(feature = "ktest", feature = "umode"))]`: [`copy_kernel_root`] chép root kernel vào root VSpace (giữ
 //!   kernel sống khi đổi `satp`), [`switch_root`]/[`restore_kernel_root`] ghi `satp` + `sfence`,
 //!   và [`va_read_u64_sum`]/[`va_write_u64_sum`] đọc/ghi VA **user** từ S-mode qua `sstatus.SUM`
 //!   để TAP chứng minh chuyển dịch phần cứng thật (không chỉ walk phần mềm).
@@ -16,10 +16,10 @@
 //! `unsafe` ở đây thuộc danh sách đóng `kernel/vifast-plat-*` của D2-17: asm `satp`/`sfence`/
 //! `sstatus` và truy cập bộ nhớ vật lý. **Không** có logic object ở tệp này.
 
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 use core::arch::asm;
 
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 use vifast_plat_common::mmu::satp_sv39_asid;
 use vifast_plat_common::mmu::{align_up, satp_root};
 use vifast_plat_common::obj::{CapId, FlushRequest, Machine, ObjError, ObjKind, PhysMem};
@@ -160,7 +160,7 @@ pub fn kernel_root_active() -> bool {
 /// (dùng **chung** bảng cấp dưới) nên kernel tiếp tục chạy; chỉ nhánh root mà VSpace tự dùng
 /// (vd. VA `0x4000_0000`, root index 1) là của object layer. Trả `false` nếu PA đích không
 /// thuộc RAM/không căn 4 KiB.
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn copy_kernel_root(dst_pa: u64) -> bool {
     if dst_pa & 0xfff != 0 {
         return false;
@@ -198,7 +198,7 @@ pub fn copy_kernel_root(dst_pa: u64) -> bool {
 /// Hệ quả: sau khi đổi `satp` sang root user, kernel **không** được chạm physmap/high alias;
 /// `user::UserMemAccess` vì vậy kiểm con trỏ bằng **bảng dải user ghi lúc nạp** thay vì `walk`
 /// (walk đọc PTE qua physmap). Trả `false` nếu PA đích không thuộc RAM/không căn 4 KiB.
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn copy_kernel_low_root(dst_pa: u64, skip_index: usize) -> bool {
     if dst_pa & 0xfff != 0 || skip_index >= 256 {
         return false;
@@ -228,7 +228,7 @@ pub fn copy_kernel_low_root(dst_pa: u64, skip_index: usize) -> bool {
 ///
 /// Chỉ dùng khi root đích đã có đủ mapping kernel ([`copy_kernel_root`]) — nếu không, lệnh kế
 /// tiếp có thể page-fault. Trả `true` ⇔ `satp` đọc lại đúng.
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn switch_root(root_pa: u64, asid: u16) -> bool {
     if root_pa & 0xfff != 0 {
         return false;
@@ -248,7 +248,7 @@ pub fn switch_root(root_pa: u64, asid: u16) -> bool {
 }
 
 /// Khôi phục `satp` kernel (root + ASID lease của KT-51) rồi `sfence.vma` toàn bộ.
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn restore_kernel_root() -> bool {
     let ok = mmu::set_satp_asid(tlb::asid());
     tlb::sfence_all();
@@ -259,7 +259,7 @@ pub fn restore_kernel_root() -> bool {
 ///
 /// `pub(crate)` từ KT-53 để `user::UserMemAccess` đọc byte user của syscall `DebugPutStr` bằng
 /// cùng cơ chế đã kiểm ở TAP 35 (không mở `unsafe` ra ngoài crate arch, D2-17).
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub(crate) fn set_sum(on: bool) {
     const SUM: u64 = 1 << 18;
     // SAFETY: chỉ đổi bit SUM của CSR `sstatus` của hart hiện tại, không đụng bộ nhớ.
@@ -277,7 +277,7 @@ pub(crate) fn set_sum(on: bool) {
 /// # Safety (logic)
 /// Caller phải bảo đảm `va` vừa map leaf `U|R` (TAP làm vậy trước khi gọi; sai ⇒ page fault
 /// thật, đúng chính sách fatal của KT-45).
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn va_read_u64_sum(va: u64) -> Option<u64> {
     if va & 7 != 0 {
         return None;
@@ -290,7 +290,7 @@ pub fn va_read_u64_sum(va: u64) -> Option<u64> {
 }
 
 /// Ghi 8 B tại VA **user** từ S-mode với `SUM=1`, rồi tắt SUM.
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn va_write_u64_sum(va: u64, value: u64) -> bool {
     if va & 7 != 0 {
         return false;
@@ -303,7 +303,7 @@ pub fn va_write_u64_sum(va: u64, value: u64) -> bool {
 }
 
 /// `true` ⇔ `sstatus.SUM` đang tắt (không rò bit SUM sang phần còn lại của boot).
-#[cfg(feature = "ktest")]
+#[cfg(any(feature = "ktest", feature = "umode"))]
 pub fn sum_off() -> bool {
     let bits: u64;
     // SAFETY: `csrr sstatus` chỉ đọc CSR.

@@ -17,6 +17,11 @@ ktest = ["vifast-plat-riscv64/ktest"]
 vblk = ["vifast-plat-riscv64/vblk"]
 # KT-53: ảnh test U-mode (kèm ktest) — tách để ảnh chính/guard không link module U-mode.
 user = ["vifast-plat-riscv64/user"]
+# **KT-77b** (OD-K6-2): ảnh **sản phẩm** có U-mode + procsrv + shell. Bật `user` (không `ktest`)
+# nên ảnh **không** link module harness nào (D2-08) — kiểm bằng máy ở
+# `v2/agent/JOURNAL/kt77b-harness-scan.sh`. Ca âm của tiêu chí 3 = build **không** feature này
+# (`bash v2/tools/repro-build.sh` mặc định) ⇒ runner parity phải đỏ `exit 5`.
+product-shell = ["user"]
 # KT-73: ảnh `ktest-con` — UART RX IRQ → ring → U-mode + virtio-console hai queue. Ảnh sản phẩm
 # và các ảnh cũ **không** bật (giữ nguyên `.text`/mapping; xem `docs/k6-console.md` §6).
 con = ["ktest", "user", "vifast-plat-riscv64/vcon"]
