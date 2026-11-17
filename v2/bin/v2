@@ -83,6 +83,11 @@ v2 — cổng dòng OS ViFastOs v2 (vòng 1)
                                Miri qua `cargo +nightly miri` trên v2/Cargo.toml; mặc định `test`
                                (D2-47: lệnh rời, KHÔNG nằm trong gate --fast)
   ./v2/bin/v2 rules [--root D] chỉ chạy 5 luật cấu trúc trên D (mặc định v2/)
+  ./v2/bin/v2 check-repro [--negative]
+                               KT-79 / OD-K6-3: build ảnh sản phẩm ở **2 đường dẫn tuyệt đối
+                               khác nhau** ⇒ phải CÙNG sha256. `--negative` = ca âm (tắt
+                               --remap-path-prefix) ⇒ phải ĐỎ. KHÔNG nằm trong gate --fast
+                               (2 build lạnh ~2 phút); xem v2/docs/k6-repro.md
 
 Luật: R1 tệp kernel/lib ≤1.500 dòng; R2 cấm cfg(target_arch) trong kernel/vifast-core + lib;
       R3 SPDX theo loại tệp; R4 cấm path-dependency sang crates/ (D2-26);
@@ -565,6 +570,7 @@ case "$cmd" in
         fi
         ;;
     miri) do_miri "$@" ;;
+    check-repro) exec bash "$V2_ROOT/tools/repro-check.sh" "$@" ;;
     rules)
         root="$V2_ROOT"
         if [ "${1:-}" = "--root" ] && [ -n "${2:-}" ]; then
