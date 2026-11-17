@@ -98,3 +98,59 @@ fn khong_xuong_dong_cuoi_tep() {
 fn giu_dung_khi_bieu_thuc_xa_dau_tep() {
     kiem("xa", "(               [1, \"a\"] )\n", "1:21");
 }
+
+// ---- Sửa vòng 1 (sau DRIFT): lambda `fn` ở đầu tệp phải vẫn là **biểu thức** ----
+// Ở đầu câu lệnh parser hiểu `fn` là khai báo; nhóm ở đầu tệp vẫn phải hạ như `let __vach = fn…`.
+
+/// Mã thoát của `vis <args…> <p>`.
+fn ma_thoat(p: &Path, args: &[&str]) -> i32 {
+    Command::new(env!("CARGO_BIN_EXE_vis"))
+        .args(args)
+        .arg(p)
+        .output()
+        .expect("chạy vis")
+        .status
+        .code()
+        .unwrap_or(-1)
+}
+
+#[test]
+fn lambda_dau_tep_van_la_bieu_thuc() {
+    let d = tam("lam");
+    let p = d.join("lam.vish");
+    std::fs::write(&p, "(fn(x: int) -> int: x)\n").expect("ghi");
+    let thuc = (
+        ma_thoat(&p, &["check"]),
+        ma_thoat(&p, &["run"]),
+        ma_thoat(&p, &["run", "--vm"]),
+    );
+    let _ = std::fs::remove_dir_all(&d);
+    assert_eq!(
+        thuc,
+        (0, 0, 0),
+        "(check, run, run --vm) cho lambda ở đầu tệp"
+    );
+}
+
+#[test]
+fn lambda_dau_tep_tro_toan_hang_trai() {
+    kiem("lamcong", "(fn(x: int) -> int: x + \"a\")\n", "1:21");
+}
+
+#[test]
+fn lambda_dong_hai_tro_toan_hang_trai() {
+    kiem(
+        "lamdong2",
+        "echo 1\n( fn(x: int) -> int: x + \"a\" )\n",
+        "2:22",
+    );
+}
+
+#[test]
+fn lambda_roi_take_tro_toan_hang_trai() {
+    kiem(
+        "lamtake",
+        "( fn(x: int) -> int: x + \"a\" ) | take 1\n",
+        "1:22",
+    );
+}
