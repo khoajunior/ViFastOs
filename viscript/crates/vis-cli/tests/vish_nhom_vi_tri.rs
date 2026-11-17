@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+//! **T-01** — lỗi kiểu **trong** nhóm `( … )` của `.vish` phải trỏ đúng biểu thức con (`dòng:cột`)
+//! như `.vis` (VD-80 / ST-46: chẩn đoán tuyệt đối trong ngoặc).
+//!
+//! Gốc lỗi: `lower_bieu_thuc_tai` đệm `bat_dau - len("let __vach = ")` dấu cách; khi biểu thức bắt
+//! đầu trước byte 13 (nhóm ở **đầu tệp**) phép trừ bão hoà về 0 ⇒ span lệch sang phải (về cuối
+//! dòng / dòng sau). Mỗi ca so `dòng:cột` của `VS0412` ở `vis check`, `vis run` và `vis run --vm`.
+//!
+//! Tệp `.vish` tạm **không** có dòng SPDX: lỗi chỉ xuất hiện khi nhóm nằm trong 13 byte đầu tệp.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn tam(tag: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("vis-nvt-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).expect("thư mục tạm");
+    d
+}
+
+/// `dòng:cột` của `VS0412` trong `vis check` (dòng TAP `# VS0412 <dòng:cột> …`).
+fn vi_tri_check(p: &Path) -> String {
+    let o = Command::new(env!("CARGO_BIN_EXE_vis"))
+        .arg("check")
+        .arg(p)
+        .output()
+        .expect("chạy vis check");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    out.lines()
+        .find_map(|l| l.strip_prefix("# VS0412 "))
+        .and_then(|r| r.split_whitespace().next())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("<không có VS0412 trong stdout: {out}>"))
+}
+
+/// `dòng:cột` của `VS0412` trong `vis run` (`<tệp>.vish:<dòng>:<cột>: error VS0412: …`).
+fn vi_tri_run(p: &Path, vm: bool) -> String {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_vis"));
+    c.arg("run");
+    if vm {
+        c.arg("--vm");
+    }
+    let o = c.arg(p).output().expect("chạy vis run");
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    err.lines()
+        .find(|l| l.contains(": error VS0412:"))
+        .and_then(|l| l.split(".vish:").nth(1))
+        .and_then(|r| r.split(": error").next())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("<không có VS0412 trong stderr: {err}>"))
+}
+
+/// Ghi `src` (nguyên văn, không thêm gì) vào tệp tạm rồi so `(check, run, run --vm)` với `mong`.
+fn kiem(tag: &str, src: &str, mong: &str) {
+    let d = tam(tag);
+    let p = d.join(format!("{tag}.vish"));
+    std::fs::write(&p, src).expect("ghi");
+    let thuc = (
+        vi_tri_check(&p),
+        vi_tri_run(&p, false),
+        vi_tri_run(&p, true),
+    );
+    let _ = std::fs::remove_dir_all(&d);
+    assert_eq!(
+        thuc,
+        (mong.to_string(), mong.to_string(), mong.to_string()),
+        "(check, run, run --vm) cho {src:?}"
+    );
+}
+
+#[test]
+fn list_dau_tep_tro_phan_tu_sai() {
+    kiem("list", "( [1, \"a\"] )\n", "1:7");
+}
+
+#[test]
+fn cong_dau_tep_tro_toan_hang_trai() {
+    kiem("cong", "( 1 + \"a\" )\n", "1:3");
+}
+
+#[test]
+fn nhom_roi_take_tro_phan_tu_sai() {
+    kiem("take", "( [1, \"a\"] ) | take 1\n", "1:7");
+}
+
+#[test]
+fn nhom_dong_hai_tro_phan_tu_sai() {
+    kiem("dong2", "echo 1\n( [1, \"a\"] )\n", "2:7");
+}
+
+#[test]
+fn khong_xuong_dong_cuoi_tep() {
+    kiem("khongnl", "( [1, \"a\"] )", "1:7");
+}
+
+/// Đối chứng: biểu thức bắt đầu từ byte 13 trở đi đã đúng trên `origin/main`; phải **giữ** đúng.
+#[test]
+fn giu_dung_khi_bieu_thuc_xa_dau_tep() {
+    kiem("xa", "(               [1, \"a\"] )\n", "1:21");
+}

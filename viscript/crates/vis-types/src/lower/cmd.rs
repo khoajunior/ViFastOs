@@ -95,7 +95,16 @@ impl<'a> Lowerer<'a> {
         let dau = "let __vach = ";
         let pad = bat_dau.saturating_sub(dau.len());
         // Bọc `let` để **giữ** biểu thức (câu lệnh trần bị bỏ ở cấp tệp) — không chạy tyck ở đây.
-        let src = format!("{dau}{}{}", " ".repeat(pad), txt.trim());
+        // **T-01**: biểu thức bắt đầu **trước** byte `dau.len()` (nhóm ở đầu tệp: `( [1, "a"] )`)
+        // ⇒ không đủ chỗ cho `let __vach = `, `pad` bão hoà về 0 và mọi span lệch phải
+        // `dau.len() - bat_dau` byte (chẩn đoán rơi về cuối dòng / dòng sau). Khi đó đệm bằng
+        // `bat_dau` **dấu xuống dòng** (1 byte mỗi dấu; biểu thức ở đầu dòng ⇒ không sinh `Indent`)
+        // và hạ **biểu thức trần**: span vẫn tuyệt đối, nhánh `HStmt::Expr` bên dưới nhận kết quả.
+        let src = if bat_dau < dau.len() {
+            format!("{}{}", "\n".repeat(bat_dau), txt.trim())
+        } else {
+            format!("{dau}{}{}", " ".repeat(pad), txt.trim())
+        };
         // **ST-122 (VD-127)**: `src` chỉ **đệm** cho span tuyệt đối; token phải mang `file` của tệp
         // đang hạ (`lex`/`parse` cũ cho `file = 0` ⇒ mọi node của `( biểu thức )` ở **module** bị quy
         // sang tệp chính).
