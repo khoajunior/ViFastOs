@@ -69,8 +69,8 @@ cụ, không copy-paste bốn bản) + ba registry; (3) cài luật 1/2/3/7/8 + 
 
 ## 4. Ngoại lệ (có tên + lý do + ngày, ghim sha256)
 
-Hai mươi tệp **lịch sử** (viết trước OD-K6-5 và **ngoài vùng ghi** của KT-80) nằm trong
-`[[legacy]]`: mười một báo cáo (`A1-decision-log`, `BRIEFING-Agent0-K6`, `K1C/K2/K3/K35/K3B-DOD`,
+Mười chín tệp **lịch sử** (viết trước OD-K6-5 và **ngoài vùng ghi** của KT-80) nằm trong
+`[[legacy]]`: mười báo cáo (`A1-decision-log`, `BRIEFING-Agent0-K6`, `K1C/K2/K3/K35/K3B-DOD`,
 `KT-04d-goi-duyet`, `KT32-L1-MIXED`, `QUYET-DINH-A0-K6-2026-11-17`, `R1-v2`) và chín tài liệu
 (`k6-capalloc`, `k6-console`, `k6-harness`, `k6-idl`, `k6-memsrv`, `k6-repro`, `k6-vfs-journal`,
 `k6-vfs-pager`, `k6-virtio-blk`). Lý do chung ghi trong từng mục: số của các tệp này đã được
@@ -85,7 +85,7 @@ Kiểm bằng log (không viết tay số):
 
 ```text scope=kt80-check-rules.log
 # verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
-# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
+# verify-numbers: ok=5 fail=0 wall_ms=10348 law_wall_ms={1:826,2:1454,3:93,7:56,8:7731}
 ```
 
 ## 5. Ca phá (ĐỎ thật) và self-test

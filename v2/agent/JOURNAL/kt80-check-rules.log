@@ -134,3 +134,69 @@ ok - luat 3: counters=2 used=2 (69 ms)
 ok - luat 7: extractions=3 (19 ms)
 ok - luat 8: cases=13 (6223 ms)
 # verify-numbers: ok=5 fail=0 wall_ms=7208 law_wall_ms={1:33,2:758,3:69,7:19,8:6223}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 100 lỗi E1_* khi chạy `v2 check-rules --law 1` (số đo trong prose + khối scope= chép kèm tiền tố `số-dòng:`); chuyển số vào khối scope= rồi xoá ngoại lệ
+# note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
+ok - luat 1: docs_checked=4 pre_existing=1 excluded=1 (799 ms)
+ok - luat 2: pairs=78 pending=0 (1365 ms)
+ok - luat 3: counters=2 used=2 (70 ms)
+ok - luat 7: extractions=3 (24 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+not ok - self-test legacy-changed: KHÔNG ĐỎ đúng mã E1_LEGACY_SHA
+not ok - luat 8: verify-script-regressions.txt:37: E8_CASE_GREEN ca [legacy-changed] XANH: cần ĐỎ [E1_LEGACY_SHA] — ngoại lệ lịch sử bị sửa nội dung
+not ok - luat 8: 1 lỗi (cases=13)
+# verify-numbers: ok=4 fail=1 wall_ms=9239 law_wall_ms={1:799,2:1365,3:70,7:24,8:6876}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 100 lỗi E1_* khi chạy `v2 check-rules --law 1` (số đo trong prose + khối scope= chép kèm tiền tố `số-dòng:`); chuyển số vào khối scope= rồi xoá ngoại lệ
+# note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
+ok - luat 1: docs_checked=4 pre_existing=1 excluded=1 (1322 ms)
+ok - luat 2: pairs=78 pending=0 (1512 ms)
+ok - luat 3: counters=2 used=2 (69 ms)
+ok - luat 7: extractions=3 (24 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6489 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=9526 law_wall_ms={1:1322,2:1512,3:69,7:24,8:6489}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=19 laws=1,2,3,7,8
+# note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
+ok - luat 1: docs_checked=5 pre_existing=0 excluded=1 (826 ms)
+ok - luat 2: pairs=78 pending=0 (1454 ms)
+ok - luat 3: counters=2 used=2 (93 ms)
+ok - luat 7: extractions=3 (56 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (7731 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=10348 law_wall_ms={1:826,2:1454,3:93,7:56,8:7731}

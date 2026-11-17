@@ -3666,10 +3666,12 @@ QEMU: `qemu_ppid1=0 qemu_foreign=0` trước/sau mọi lần đo (`kt77a-infra.l
   có ca âm khác không; bản trích tiêu chí đủ **cột**; ca phá cũ là **ca hồi quy** (`--self-test`).
 - **Registry:** `v2/test/rules/{numbers-policy,counters,criteria}.toml`,
   `v2/test/rules/verify-script-regressions.txt`. **Ca phá:** `v2/test/rules/selfbreak.sh`.
-- **Ngoại lệ (báo lead):** **hai mươi** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80) +
-  **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, commit `6f8f63a5` của KT-77a, có chủ + nợ
-  `kind="pre_existing"`), tất cả ghim `sha256` trong `[[legacy]]`; **không** có ngoại lệ cho tài
-  liệu mới sau khi luật vào cổng.
+- **Ngoại lệ (báo lead):** **mười chín** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80),
+  ghim `sha256` **của bản HEAD** trong `[[legacy]]`; **một** tệp **loại khỏi tài liệu đích**
+  (`[[excluded]]`: `A1-decision-log.md` — sổ quyết định sống của Agent 1, có chủ + ngày + điều kiện
+  quay lại). Ngoại lệ `v2/docs/k6-parity.md` (có trước luật, KT-77a) đã được **xoá** sau khi KT-77a
+  sửa tài liệu cho đúng luật ở `de55b786`; tài liệu đó nay **được kiểm**. **Không** còn ngoại lệ cho
+  tài liệu mới.
 - **Tài liệu:** [`docs/k6-machine-rules.md`](../docs/k6-machine-rules.md) + `docs/k3b-core.md` §27;
   nhật ký `JOURNAL/kt80-journal.md`.
 - **Phối hợp (D2-105a):** `STATE.md`/`BLOCKED.md` ghi **append** (mục KT-77a ở trên do task song
@@ -3688,3 +3690,20 @@ Số đo (nguyên văn trong khối `scope=`, không viết tay):
 ```text scope=kt80-selfbreak.log
 # selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi
 ```
+
+**Vá sau review KT-77a (2026-11-17, `reviewer-kt77a`, cùng ngày):** reviewer chấm **DRIFT** nhưng xác
+nhận 26/26 `source` đúng lệnh/0 bịa và 5 cảnh khớp số. Đã vá: (1) `reason` của `time`/`uptime`/`jobs`
+— **không** phải ABI thiếu (`ClockRead` 11 đã có `spec/abi.toml:117`/`user.rs:1229`;
+`shell_user.rs:189-218` đã nhận state TCB) ⇒ chỉ thiếu **builtin**; (2) thêm **`cd`/`pwd`** với hai
+chiều bằng chứng (tag `v1-archive` có; `overnight-log.md:3664-3669` ghi đã revert) +
+`decision = 'cho Agent 0'` ⇒ **BLOCKED-CHO-A0**; (3) bỏ `TcbInfo` khỏi danh sách ABI thiếu; (4)
+`help` không khoá regex vào `cmds=6` (việc in nhãn `const:` thuộc KT-77b); (5) runner ghi
+`image_sha256`/`image_bytes`/`artifacts_bin` vào **log runner**; `fd202276…` gắn nhãn **trước
+canonical — KHÔNG dùng làm bằng chứng v2.0** (D2-122(2)); đóng băng `artifacts/<sha>.bin` = **KT-84**;
+(6) sửa lệch dòng (`free` 2641, `free`/`df` `source_more` 3469, `\r` `agent2-report-62.md:24`).
+**Cảnh báo mới (OD-K6-2 tiêu chí 6):** `ps` là `active` nhưng bên phục vụ `PS_REQ` **chỉ có trong ảnh
+test** (`proc_demo.rs:338`) — ảnh sản phẩm muốn `ps` chạy được phải có **procsrv ở đường sản phẩm**
+(KT-77b). **Log mới (không ghi đè log cũ):** `*-r2b-20261117T1305.log` — transcript 4/4, serial 4/4,
+ca âm exit 3/4/5; vòng `-r2` trước đó có 1 lần serial 3/4 (`echo` timeout) giữ nguyên làm bằng chứng.
+Vòng `-r2b` có **QEMU của tab KT-77b** ⇒ `qemu_foreign=1`, `verdict=KHONG_HOP_LE` (không dùng số thời
+gian). `spec/v1-parity.toml` nay **28 mục** (22 builtin + 6 applet; `args` là applet debug, không đưa vào).

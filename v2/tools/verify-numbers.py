@@ -166,6 +166,37 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+def read_committed_or_worktree(ctx, rel):
+    """Bản **đã commit** (HEAD) nếu tệp có commit; ngược lại đọc working tree.
+
+    Luật 2 là thuộc tính của **artifact đã commit**; bản nháp đang sửa trong working tree (của
+    task song song) không được làm đỏ cổng của task này. Khi bản nháp được commit, nó thành HEAD
+    và lần cổng kế tiếp kiểm nó. Cùng triết lý D2-105(b): xác minh bằng HEAD.
+    """
+    if ctx.get("is_git"):
+        proc = subprocess.run(["git", "-C", ctx["root"], "show", f"HEAD:{rel}"],
+                              capture_output=True, check=False)
+        if proc.returncode == 0:
+            return proc.stdout.decode("utf-8", errors="replace")
+    return open(os.path.join(ctx["root"], rel), encoding="utf-8").read()
+
+
+def sha256_committed(ctx, rel):
+    """sha256 của bản **đã commit** (HEAD) — ngoại lệ ghim nội dung đã được duyệt.
+
+    Sửa tệp trong working tree (bản nháp của task khác) **không** làm đỏ oan; nhưng khi bản sửa
+    được **commit** thì sha HEAD đổi ⇒ ĐỎ cho tới khi ngoại lệ được xử lý lại. Bản copy không có
+    git (tự phá) dùng nội dung working tree.
+    """
+    if not ctx.get("is_git"):
+        return sha256_file(os.path.join(ctx["root"], rel))
+    proc = subprocess.run(["git", "-C", ctx["root"], "show", f"HEAD:{rel}"],
+                          capture_output=True, check=False)
+    if proc.returncode != 0:
+        return ""
+    return hashlib.sha256(proc.stdout).hexdigest()
+
+
 def git(root, *args):
     proc = subprocess.run(
         ["git", "-C", root, *args], capture_output=True, text=True, check=False
@@ -316,6 +347,13 @@ def log_lines(ctx, path):
 
 
 # ------------------------------------------------------------------ luật 1
+def context_excluded(ctx, rel):
+    for e in ctx["policy"].get("excluded", []):
+        if e.get("path") == rel:
+            return e
+    return {}
+
+
 def law1(root, ctx):
     """Số do script sinh từ log đã commit + trích nguyên văn. Trả list lỗi."""
     fails = []
@@ -334,7 +372,7 @@ def law1(root, ctx):
         if not re.fullmatch(r"[0-9a-f]{64}", want or ""):
             fails.append((rel, 0, "E1_LEGACY_SHA", "ngoại lệ thiếu sha256 (64 hex)"))
             continue
-        got = sha256_file(path)
+        got = sha256_committed(ctx, rel)
         if got != want:
             fails.append(
                 (rel, 0, "E1_LEGACY_SHA",
@@ -342,6 +380,12 @@ def law1(root, ctx):
                  "cập nhật ngoại lệ có tên+lý do+ngày")
             )
 
+    excluded = ctx["excluded"]
+    if ctx.get("is_git"):
+        # chỉ kiểm "mục mồ côi" trên repo thật; bản copy tự phá không chép tệp excluded
+        for rel in sorted(excluded):
+            if not os.path.isfile(os.path.join(root, rel)):
+                fails.append((rel, 0, "E1_EXCLUDED_STALE", "mục [[excluded]] trỏ tệp không tồn tại"))
     pre = [rel for rel, e in legacy.items() if e.get("kind") == "pre_existing"]
     if pre:
         for rel in pre:
@@ -351,8 +395,13 @@ def law1(root, ctx):
     ctx["law1_pre_existing"] = len(pre)
     docs = ctx["docs"]
     checked = 0
+    ctx["law1_excluded"] = len(excluded)
+    for rel in sorted(excluded):
+        entry = context_excluded(ctx, rel)
+        print(f"# note - luat 1: loại khỏi tài liệu đích [{rel}] chủ {entry.get('owner', '?')}: "
+              f"{entry.get('reason', '')}")
     for rel in docs:
-        if rel in legacy:
+        if rel in legacy or rel in excluded:
             continue
         checked += 1
         path = os.path.join(root, rel)
@@ -469,7 +518,8 @@ def law2(root, ctx):
     for rel in ctx["docs"]:
         path = os.path.join(root, rel)
         try:
-            _prose, blocks = parse_doc(open(path, encoding="utf-8").read())
+            text = read_committed_or_worktree(ctx, rel)
+            _prose, blocks = parse_doc(text)
         except ConfigError as exc:
             fails.append((rel, 0, "E2_BLOCK_UNCLOSED", str(exc)))
             continue
@@ -1004,20 +1054,22 @@ def sabotage_log_after_report(root):
 
 
 def sabotage_legacy_changed(root):
-    # ngoại lệ lịch sử ghim sha256: sửa tệp ⇒ ĐỎ
+    # ngoại lệ lịch sử ghim sha256 của bản ĐÃ COMMIT: sửa rồi commit ⇒ ĐỎ (ngoại lệ hết hạn).
     p = os.path.join(root, "v2", "agent", "reports", "T.md")
-    text = open(p, encoding="utf-8").read()
-    open(p, "w").write(text)
+    pinned = sha256_file(p)  # nội dung đang là HEAD (fixture commit đầu)
     pol = os.path.join(root, "v2", "test", "rules", "numbers-policy.toml")
     with open(pol, "a") as fh:
         fh.write(
             "\n[[legacy]]\n"
             'path = "v2/agent/reports/T.md"\n'
-            f'sha256 = "{sha256_file(p)}"\n'
+            f'sha256 = "{pinned}"\n'
             'reason = "ca phá luật 8: ngoại lệ rồi sửa"\n'
             'date = "2026-11-17"\n'
         )
     open(p, "a").write("\nSố đo thêm 424242.\n")
+    g = _git(root)
+    g("add", "-A")
+    g("commit", "-q", "-m", "fixture: sửa tệp đang có ngoại lệ")
 
 
 SABOTAGES = {
@@ -1146,6 +1198,8 @@ def load_context(root):
             path = os.path.join(root, f)
             generated[f] = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
     ctx["generated_criteria"] = generated
+    ctx["excluded"] = {e["path"] for e in ctx["policy"].get("excluded", [])}
+    ctx["docs"] = [d for d in ctx["docs"] if d not in ctx["excluded"]]
     return ctx
 
 
@@ -1192,7 +1246,8 @@ def main(argv=None):
         if law == 1:
             fails = law1(root, ctx)
             extra = (f"docs_checked={ctx.get('law1_checked', 0)} "
-                     f"pre_existing={ctx.get('law1_pre_existing', 0)}")
+                     f"pre_existing={ctx.get('law1_pre_existing', 0)} "
+                     f"excluded={ctx.get('law1_excluded', 0)}")
         elif law == 2:
             fails = law2(root, ctx)
             extra = (f"pairs={ctx.get('law2_pairs', 0)} pending={ctx.get('law2_pending', 0)}")

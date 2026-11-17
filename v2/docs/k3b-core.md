@@ -2087,7 +2087,7 @@ registry: `v2/test/rules/{numbers-policy,counters,criteria}.toml` +
 Bằng chứng (chạy lại được; log trong repo):
 
 ```text scope=kt80-check-rules.log
-# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
+# verify-numbers: ok=5 fail=0 wall_ms=10348 law_wall_ms={1:826,2:1454,3:93,7:56,8:7731}
 ```
 
 ```text scope=kt80-selfbreak.log

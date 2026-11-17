@@ -31,13 +31,18 @@ done
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/kt80-selfbreak.XXXXXX")" || exit 2
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# md5/shasum **cây thật** — chỉ các thư mục KT-80 có thể chạm; không gồm JOURNAL (task khác
-# đang ghi log song song — D2-105) để phép so không báo động giả.
+# shasum **các tệp thuộc KT-80** (bộ kiểm + registry + tài liệu luật): đây là "cây thật" mà
+# self-break có thể làm hỏng. KHÔNG băm cả `v2/docs`/`v2/agent/reports`: các task song song đang
+# sửa tệp của họ (D2-105) ⇒ băm toàn thư mục sẽ báo động giả giữa lúc chạy. KHÔNG băm
+# `JOURNAL/kt80-*`: đó là **đầu ra** của chính lần chạy (log do `tee` ghi). Tệp của task khác là
+# **đầu vào** (copy từ HEAD cho tệp ghim sha), không phải đầu ra của script này.
 hash_real_tree() {
     (
         cd "$ROOT" || exit 1
-        find v2/docs v2/agent/reports v2/test/rules v2/tools v2/bin -type f -print0 |
-            sort -z | xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}'
+        {
+            printf '%s\0' v2/bin/v2 v2/tools/verify-numbers.py v2/docs/k6-machine-rules.md
+            find v2/test/rules -type f -print0
+        } | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}'
     )
 }
 
@@ -66,11 +71,26 @@ paths = subprocess.run(
     capture_output=True, check=True,
 ).stdout.split(b"\0")
 paths += [b"docs/v1/KNOWN-ISSUES.md", b"docs/v2/ViFastOs-v2-thiet-ke.md"]
+# Tệp ghim sha trong [[legacy]] lấy **bản HEAD** (đã duyệt). Tệp đang được task khác sửa trong
+# working tree là bản nháp — không chép, để phép thử không phụ thuộc bản nháp của task khác
+# (D2-105b: xác minh bằng HEAD). Mục [[excluded]] không phải tài liệu đích: bỏ.
+import tomllib
+policy = tomllib.load(open(os.path.join(root, "v2/test/rules/numbers-policy.toml"), "rb"))
+pinned = {e["path"] for e in policy.get("legacy", [])}
+excluded = {e["path"] for e in policy.get("excluded", [])}
 for raw in paths:
     rel = raw.decode()
-    if not rel or not os.path.isfile(os.path.join(root, rel)):
+    if not rel or rel in excluded:
         continue
     target = os.path.join(dst, rel)
+    if rel in pinned:
+        blob = subprocess.run(["git", "-C", root, "show", f"HEAD:{rel}"],
+                              capture_output=True, check=True).stdout
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        open(target, "wb").write(blob)
+        continue
+    if not os.path.isfile(os.path.join(root, rel)):
+        continue
     os.makedirs(os.path.dirname(target), exist_ok=True)
     shutil.copy2(os.path.join(root, rel), target)
 PYEOF

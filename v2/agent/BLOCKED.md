@@ -505,3 +505,28 @@ persist, driver không vào ảnh sản phẩm) liệt kê đủ ở `K6-DOD.md`
   log (`k6-parity.md:85-89`, `:96-99`; log `kt77a-transcript-ktest-proc-smp1.log`). KT-80 **không**
   sửa tệp của task khác và **không** thêm ngoại lệ cho tài liệu mới; đề nghị KT-77a chép đúng dòng
   log (hoặc thêm khối riêng) trước khi `git add`.
+
+### KT-77a — vá sau review (2026-11-17, reviewer-kt77a)
+
+- **Đã sửa trong vùng được phép** (`spec/v1-parity.toml`, `v2/docs/k6-parity.md`,
+  `v2/test/parity/**`, `v2/agent/**`): (1) `reason` của `time`/`uptime`/`jobs` — **không** phải ABI
+  thiếu: `ClockRead` (syscall 11) đã có (`spec/abi.toml:117`, `user.rs:1229`, TAP `ktest_user.rs:1105`);
+  `ps` đã nhận state từng TCB từ reply `PS_REQ` (`shell_user.rs:189-218`) ⇒ chỉ thiếu **builtin**;
+  (2) thêm `cd`, `pwd` với **cả hai chiều** bằng chứng (tag `v1-archive` có; `overnight-log.md:3664-3669`
+  ghi đã revert) + `decision = 'cho Agent 0'`; (3) sửa `TcbInfo` khỏi danh sách "ABI thiếu" trong doc;
+  (4) `help` không khoá regex vào `cmds=6`; (5) runner ghi `image_sha256`/`image_bytes`/`artifacts_bin`
+  vào log; (6) sửa 3 lệch dòng (`free` 2641, `free`/`df` `source_more` 3469, `\r` ở `agent2-report-62.md:24`).
+- **BLOCKED-CHO-A0 (một mục, không tự quyết):** `cd`/`pwd` — dữ kiện mâu thuẫn: mã/tài liệu ở tag
+  `v1-archive` **có** (`crates/vifast-client/src/main.rs:878,883`; `docs/11-hien-tai/16-van-hanh.md:109,121`)
+  nhưng `docs/v1/overnight-log.md:3664-3669` (vòng 222) ghi **đã revert**. Đề nghị Agent 0 chọn:
+  (a) coi là lệnh v1 (đưa vào parity, `deferred-K7` vì shell v2 chưa có), hoặc (b) coi là đã bỏ (ghi
+  `not-in-v1` + lý do). KT-77a giữ `deferred-K7` + `decision = 'cho Agent 0'`.
+- **Cảnh báo bắt buộc (OD-K6-2 tiêu chí 6):** `ps` được đánh `active` nhưng bên phục vụ `PS_REQ`
+  **chỉ có trong ảnh test** (`proc_demo.rs:338`), **không** có ở đường sản phẩm ⇒ ảnh sản phẩm muốn
+  `ps` chạy được phải có **procsrv ở đường sản phẩm** (KT-77b). Ghi ở `v2/docs/k6-parity.md` §5.2.
+- **D2-102a (kernel-side, không sửa được ở KT-77a):** `# shell: help cmds=6` in hằng `CMDS` không
+  nhãn `const:` (`shell_user.rs:45,248-249`). Runner đã bỏ khoá regex vào số; thêm nhãn thuộc KT-77b.
+- **Ảnh đo:** runner ghi sha+size vào log; `artifacts/<sha>.bin` cho ảnh test **chưa có** (`co=0`).
+  Ảnh sản phẩm `fd202276…` = **trước canonical, KHÔNG dùng làm bằng chứng v2.0** (D2-122(2)); đóng băng
+  `artifacts/<sha>.bin` thuộc **KT-84**. Vòng đo `-r2b` có **QEMU của tab KT-77b** ⇒ `qemu_foreign=1`,
+  `verdict=KHONG_HOP_LE`; không dùng số thời gian của vòng đó.

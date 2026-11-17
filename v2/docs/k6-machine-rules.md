@@ -137,7 +137,7 @@ Bước cổng gọi `check-rules` (nhãn bước trong log cổng là `luật m
 (đã có trong danh sách đích), luật I kiểm luôn tài liệu này:
 
 ```text scope=kt80-check-rules.log
-# verify-numbers: ok=5 fail=0 wall_ms=6623 law_wall_ms={1:16,2:253,3:46,7:16,8:6231}
+# verify-numbers: ok=5 fail=0 wall_ms=10348 law_wall_ms={1:826,2:1454,3:93,7:56,8:7731}
 ```
 
 Ngân sách OD-K6-5 cho cả năm luật là **sáu mươi giây**; số đo thực tế nằm trong khối trên. Luật
@@ -166,11 +166,19 @@ không dùng để kết luận hiệu năng**; năm luật thì đo riêng ở 
 
 ## 8. Ngoại lệ và giới hạn đã biết
 
-- **Số ngoại lệ**: `legacy=` trong khối `scope=` của mục §7. Hai mươi tệp **lịch sử** (viết trước
-  OD-K6-5, ngoài vùng ghi KT-80) và **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, commit
-  `6f8f63a5` của KT-77a, chạy song song KT-80). Mục thứ hai in `# note` mỗi lần chạy, có chủ + nợ
-  ghi trong registry (`kind = "pre_existing"`, `owner`, `debt`) — trả nợ bằng cách đưa số vào khối
-  `scope=` rồi xoá mục. Không có ngoại lệ nào cho tài liệu **mới** sau khi luật đã vào cổng.
+- **Số ngoại lệ**: `legacy=` trong khối `scope=` của mục §7 = **mười chín** tệp **lịch sử** (viết
+  trước OD-K6-5, ngoài vùng ghi KT-80), ghim `sha256` của bản **đã commit** (HEAD) nên bản nháp
+  đang sửa của task khác không làm đỏ oan; commit bản sửa là ĐỎ cho tới khi xử lý lại.
+  Ban đầu có thêm **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, viết song song) với đúng
+  cơ chế `kind="pre_existing"` + chủ + nợ; KT-77a đã **sửa tài liệu cho đúng luật** ở commit
+  `de55b786` (số vào khối `scope=`, không ngoại lệ) nên mục đó đã được **xoá** — hiện `k6-parity.md`
+  nằm trong danh sách **được kiểm** (`docs_checked` tăng lên), không còn ngoại lệ nào cho tài liệu
+  mới.
+- **Một tệp loại khỏi tài liệu đích** (`[[excluded]]`, `excluded=` trong khối §7):
+  `v2/agent/reports/A1-decision-log.md` — **sổ quyết định sống** của Agent 1, ghi thêm sau mỗi quyết
+  định (ví dụ A1-177); ghim sha sẽ đỏ oan mỗi lần ghi, mà KT-80 không được sửa tệp của vai khác.
+  Quyết định phạm vi có tên + ngày + chủ + điều kiện quay lại; tệp mất ⇒ `E1_EXCLUDED_STALE`.
+  Không có ngoại lệ/loại trừ nào cho tài liệu **mới** sau khi luật đã vào cổng.
 - **Giới hạn kế thừa của bộ tách số** (giữ tương thích kt76, đã ghi ở `numeric_tokens`): token số
   **đứng riêng** mới bị bắt; giá trị dính sau `key=` (ví dụ `writes=0`) được coi là định danh
   trường evidence. Các ca phá đã đăng ký ở luật VIII không dựa vào giới hạn này; muốn siết tiếp
