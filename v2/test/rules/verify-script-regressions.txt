@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-80 / OD-K6-5 luật 8 — registry các **đường phá đã từng lọt** của script kiểm số.
+#
+# Mỗi dòng: id | luật | mã lỗi kỳ vọng | cách phá (id dựng sẵn trong verify-numbers.py) | mô tả
+#
+# `verify-numbers.py --self-test` dựng một repo mini XANH trong thư mục tạm, rồi với **mỗi** dòng
+# dưới đây: copy repo mini ⇒ áp "cách phá" ⇒ chạy đúng luật ⇒ **bắt buộc ĐỎ đúng mã lỗi**.
+# Ca nào XANH (hoặc đỏ sai mã) ⇒ self-test ĐỎ. Nhờ vậy: ai sửa verifier làm một đường phá cũ lọt
+# lại thì cổng đỏ ngay, không cần reviewer nhớ.
+#
+# Nguồn từng đường (D2-117/D2-118 + phản biện KT-73/74/75/76):
+#   union-haystack        : D2-112(a) — nối log thành haystack chung ⇒ hoán số giữa hai ảnh vẫn xanh
+#   heading-number        : D2-118(D) — `## 98765` từng được miễn vì "số trong heading"
+#   heading-not-reset     : KT-75 — cờ `heading` không reset ⇒ mọi số SAU tiêu đề đầu được miễn
+#   decimal-x-y           : D2-117 — miễn `^\d+\.\d+$` ⇒ `262.144` chèn vào prose vẫn lọt
+#   fence-text-no-scope   : D2-112 — fence ```text KHÔNG có `scope=` vẫn được coi là khối hợp lệ
+#   bare-small-number     : D2-112(b) — "số một chữ số được miễn" ⇒ mọi số đo một chữ số đổi được
+#   scope-tmp             : D2-109C — log ngoài repo/`/tmp` từng được trích làm nguồn
+#   scope-negative-source : D2-112(c) — log mutation/ca âm từng được dùng làm nguồn số đo
+#   counter-unproven      : D2-108B — bộ đếm "0" chưa có ca âm vẫn được tính là ok
+#   counter-undeclared    : luật 3 — dòng `counter=<tên>` không khai registry
+#   criteria-drop-column  : D2-118(B) — bản trích cắt một cột vẫn được coi là "đủ"
+#   log-after-report      : OD-K6-5 #2 — báo cáo commit trước log vẫn xanh
+#   legacy-changed        : ngoại lệ theo tên nhưng nội dung đổi (thêm số) vẫn được miễn
+union-haystack | 1 | E1_NOT_VERBATIM | union-haystack | số của log khác được trích dưới scope= sai
+heading-number | 1 | E1_NUMBER_OUTSIDE | heading-number | tiêu đề "## 98765" (số năm chữ số)
+heading-not-reset | 1 | E1_NUMBER_OUTSIDE | heading-not-reset | cờ heading không reset (lỗi KT-75)
+decimal-x-y | 1 | E1_NUMBER_OUTSIDE | decimal-x-y | số thập phân "262.144" trong prose (D2-117)
+fence-text-no-scope | 1 | E1_NUMBER_OUTSIDE | fence-text-no-scope | fence ```text thiếu `scope=`
+bare-small-number | 1 | E1_NUMBER_OUTSIDE | bare-small-number | số đo một chữ số trong prose
+scope-tmp | 1 | E1_SCOPE_OUTSIDE_REPO | scope-tmp | `scope=/tmp/...` (log ngoài repo)
+scope-negative-source | 1 | E1_SCOPE_FORBIDDEN | scope-negative-source | `scope=` trỏ log ca âm
+counter-unproven | 3 | E3_UNPROVEN_IN_OK | counter-unproven | `proven=false` nhưng nằm trong khối ok
+counter-undeclared | 3 | E3_COUNTER_UNDECLARED | counter-undeclared | `counter=` không khai registry
+criteria-drop-column | 7 | E7_COLUMN_MISMATCH | criteria-drop-column | bản trích bỏ một cột
+log-after-report | 2 | E2_ORDER | log-after-report | commit báo cáo TRƯỚC commit log
+legacy-changed | 1 | E1_LEGACY_SHA | legacy-changed | ngoại lệ lịch sử bị sửa nội dung

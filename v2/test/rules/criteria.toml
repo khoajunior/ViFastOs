@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-80 / OD-K6-5 luật 7 (D2-118B) — registry bản trích tiêu chí.
+#
+# Luật: bản trích tiêu chí (`criteria.txt`, `K*-DOD.md`) phải khai nguồn gốc ở đây; **số cột
+# trích = số cột gốc** trừ cột bị bỏ có ghi **tên + lý do** ngay trong tệp trích:
+#     <!-- cot-bo: Tên cột — ly-do: … -->
+# Tệp `criteria.txt` hoặc `*-DOD.md` không khai báo trong tệp này ⇒ luật 7 ĐỎ (E7_NOT_REGISTERED),
+# trừ ngoại lệ lịch sử ở `numbers-policy.toml`.
+#
+# kind = design-row   : một dòng bảng của thiết kế (đọc-only) được trích nguyên văn.
+# kind = table-rows   : các dòng bảng được trích từ một bảng (header ở `header`).
+# kind = dod-block    : khối `scope=<tệp trích>` trong DOD phải đủ cột (K6 = `columns` cột,
+#                       dòng `| K6 |` = 3 cột) — không được cắt cột khi chép lại.
+
+[[extraction]]
+id = "kt76-design-k6-row"
+file = "v2/agent/JOURNAL/kt76-criteria.txt"
+source = "docs/v2/ViFastOs-v2-thiet-ke.md"
+kind = "design-row"
+heading = "### 10.1"
+row_prefix = "| K6 |"
+columns = 3
+reason = "dòng K6 của bảng DÒNG LÕI §10.1 — tiêu chí K6 gốc (đọc-only)"
+
+[[extraction]]
+id = "kt76-known-issues"
+file = "v2/agent/JOURNAL/kt76-criteria.txt"
+source = "docs/v1/KNOWN-ISSUES.md"
+kind = "table-rows"
+header = "| # |"
+rows = 7
+columns = 6
+reason = "bảy lỗi v1 — trích ĐỦ SÁU CỘT (D2-118B: bản đầu cắt cột 'Ca kiểm tương ứng trong v2' ⇒ N1/N7 bị ghi N/A sai)"
+
+[[extraction]]
+id = "k6-dod-criteria-block"
+file = "v2/agent/reports/K6-DOD.md"
+source = "v2/agent/JOURNAL/kt76-criteria.txt"
+kind = "dod-block"
+columns = 6
+reason = "K6-DOD §1 chép nguyên văn tệp trích; mọi dòng N1..N7 phải đủ sáu cột"

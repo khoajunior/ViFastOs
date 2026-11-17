@@ -1,0 +1,107 @@
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+not ok - luat 1: v2/docs/k6-machine-rules.md:81: E1_SCOPE_UNTRACKED log `v2/agent/JOURNAL/kt80-law3-counter-evidence.log` chưa có trong git (index) — phải commit log trước
+not ok - luat 1: v2/docs/k6-machine-rules.md:106: E1_SCOPE_UNTRACKED log `v2/test/rules/verify-script-regressions.txt` chưa có trong git (index) — phải commit log trước
+not ok - luat 1: v2/docs/k6-machine-rules.md:135: E1_SCOPE_UNTRACKED log `v2/agent/JOURNAL/kt80-check-rules.log` chưa có trong git (index) — phải commit log trước
+not ok - luat 1: v2/docs/k6-machine-rules.md:136: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt80-check-rules.log`: PLACEHOLDER_CHECK_RULES_LINE
+not ok - luat 1: 4 lỗi (docs_checked=4)
+ok - luat 2: pairs=66 pending=3 (381 ms)
+ok - luat 3: counters=2 used=2 (68 ms)
+ok - luat 7: extractions=3 (23 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6056 ms)
+# verify-numbers: ok=4 fail=1 wall_ms=6665 law_wall_ms={1:38,2:381,3:68,7:23,8:6056}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+ok - luat 1: docs_checked=4 (37 ms)
+ok - luat 2: pairs=66 pending=3 (381 ms)
+ok - luat 3: counters=2 used=2 (67 ms)
+ok - luat 7: extractions=3 (23 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6763 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=7371 law_wall_ms={1:37,2:381,3:67,7:23,8:6763}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+not ok - luat 1: v2/docs/k6-machine-rules.md:130: E1_SCOPE_UNTRACKED log `v2/agent/JOURNAL/kt80-selfbreak.log` chưa có trong git (index) — phải commit log trước
+not ok - luat 1: v2/docs/k6-machine-rules.md:140: E1_NOT_VERBATIM dòng không có nguyên văn trong `v2/agent/JOURNAL/kt80-check-rules.log`: # verify-numbers: ok=5 fail=0 wall_ms=6805 law_wall_ms={1:37,2:373,3:67,7:23,8:6137}
+not ok - luat 1: 2 lỗi (docs_checked=4)
+ok - luat 2: pairs=66 pending=4 (385 ms)
+ok - luat 3: counters=2 used=2 (66 ms)
+ok - luat 7: extractions=3 (24 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6119 ms)
+# verify-numbers: ok=4 fail=1 wall_ms=6739 law_wall_ms={1:38,2:385,3:66,7:24,8:6119}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+not ok - luat 1: v2/docs/k6-machine-rules.md:130: E1_SCOPE_UNTRACKED log `v2/agent/JOURNAL/kt80-selfbreak.log` chưa có trong git (index) — phải commit log trước
+not ok - luat 1: 1 lỗi (docs_checked=4)
+ok - luat 2: pairs=66 pending=4 (393 ms)
+ok - luat 3: counters=2 used=2 (51 ms)
+ok - luat 7: extractions=3 (12 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6614 ms)
+# verify-numbers: ok=4 fail=1 wall_ms=7220 law_wall_ms={1:38,2:393,3:51,7:12,8:6614}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
+ok - luat 1: docs_checked=4 (67 ms)
+ok - luat 2: pairs=66 pending=4 (480 ms)
+ok - luat 3: counters=2 used=2 (197 ms)
+ok - luat 7: extractions=3 (67 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=13 (6233 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}

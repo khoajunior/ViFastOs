@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-80 / OD-K6-5 luật 1, 2, 3 — chính sách "số phải có nguồn" cho dòng OS v2.
+#
+# [targets]        tệp đích bị quét (glob so với gốc repo).
+# [[legacy]]       ngoại lệ **lịch sử**, ghim nội dung bằng sha256:
+#                  * áp cho luật 1/3/7 (nguồn số + bộ đếm + cột tiêu chí);
+#                  * **luật 2 (thứ tự commit) luôn chạy**, kể cả tệp legacy;
+#                  * sửa nội dung tệp legacy ⇒ cổng ĐỎ (E1_LEGACY_SHA) — muốn sửa thì hoặc đưa
+#                    số vào khối `scope=`, hoặc cập nhật mục ngoại lệ (tên + lý do + ngày + sha
+#                    mới) và **lead duyệt**; không có đường "thêm số rồi miễn".
+# [[negative_log]] tên log ca âm/mutation được phép đứng sau `scope-red=` (D2-112c) khi tên tệp
+#                  không tự chứa `mutation|break|selfbreak|neg|ca-am|red-`.
+
+[targets]
+globs = ["v2/agent/reports/*.md", "v2/docs/k6-*.md"]
+
+# ---------------------------------------------------------------- log ca âm (luật 1)
+# Lý do: KT-75 đặt tên log ca âm là `qemu-b09/b10`/`persist-run` (không có chữ `red`); khai
+# tường minh ở đây để `scope-red=` vẫn kiểm được **và** `scope=` không được dùng chúng làm nguồn.
+[[negative_log]]
+name = "kt75-qemu-b09.log"
+reason = "boot ca âm 'noflush_write' của test-persist (k6-persist.md §6.2)"
+date = "2026-11-17"
+
+[[negative_log]]
+name = "kt75-qemu-b10.log"
+reason = "boot ca âm 'verify_absent' của test-persist (k6-persist.md §6.2)"
+date = "2026-11-17"
+
+[[negative_log]]
+name = "kt75-persist-run.log"
+mixed = true
+reason = "log runner test-persist: chứa cả tổng kết đường xanh (k6-persist.md §8) và dòng sha của hai boot ca âm (cùng tệp, §6.2) — vì vậy được phép ở cả `scope=` lẫn `scope-red=`"
+date = "2026-11-17"
+
+# ---------------------------------------------------------------- ngoại lệ lịch sử (luật 1/3/7)
+# Mọi mục dưới đây có **cùng một lý do gốc**: báo cáo/tài liệu được viết **trước** khi OD-K6-5
+# (2026-11-17) biến D2-102/106/108/109/110/112 thành luật cổng, và **ngoài vùng ghi của KT-80**
+# (D2-105(a): KT-80 chỉ được ghi `v2/tools/**`, `v2/bin/v2`, `v2/test/rules/**`,
+# `v2/docs/k6-machine-rules.md`, `v2/docs/k3b-core.md` §27, `v2/agent/{STATE,BLOCKED}.md`,
+# `v2/agent/JOURNAL/kt80-*`). Số trong các tệp này đã được verifier **riêng của từng task**
+# (kt71..kt79) kiểm tại thời điểm viết; ghim sha256 để không ai thêm số vào mà không bị thấy.
+# Ngày ghi ngoại lệ: 2026-11-17. Người ghi: Agent 2 dòng OS (KT-80).
+
+[[legacy]]
+path = "v2/agent/reports/A1-decision-log.md"
+sha256 = "28208db4a29acc459da1ca3788df89e264201b3199833a760a5879b1908a45c8"
+reason = "sổ quyết định Agent 1, viết trước OD-K6-5, ngoài vùng ghi KT-80"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/BRIEFING-Agent0-K6.md"
+sha256 = "dc54ec26f2b9be7a4e1a1fd57ef4cc8421cd632456f30fb0cb30e2e661ecb2d4"
+reason = "briefing cho Agent 0, viết trước OD-K6-5, ngoài vùng ghi KT-80"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/K1C-DOD.md"
+sha256 = "7b8eb85269bf7fea448cd01b5659553aaac96bc8423fc06e6c2a6c33867be97e"
+reason = "DOD lịch sử K1c (đã đóng), số do verifier KT-23..KT-32 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/K2-DOD.md"
+sha256 = "79245d4db9224527c8c19ebf85d94d4c561958fda7cc1d8ad9a35965440ee3da"
+reason = "DOD lịch sử K2 (đã đóng), số do verifier KT-35..KT-43 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/K3-DOD.md"
+sha256 = "ab9c8773573bc11b28230123cf054393568ed027e87cc023e021de8d2e148e85"
+reason = "DOD lịch sử K3 (đã đóng), số do verifier KT-44..KT-57 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/K35-DOD.md"
+sha256 = "a84e3eed85f09f1e54651c40c309a8526521055b6567ab6913ac3af7b396017e"
+reason = "DOD lịch sử K3.5 (đã đóng), số do verifier KT-62..KT-66 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/K3B-DOD.md"
+sha256 = "fe60c5edfc896c9df2c5328db0f9e23703526b7020dea1f75bf91466eab9f887"
+reason = "DOD lịch sử K3b (đã đóng), số do verifier KT-58..KT-61 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/KT-04d-goi-duyet.md"
+sha256 = "ff40c23c1aaba5ed76c4c48a2b98a96b046d52369f542854f2beed938e0533f1"
+reason = "gói duyệt KT-04d (đã APPROVED), viết trước OD-K6-5"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/KT32-L1-MIXED.md"
+sha256 = "5906e6cf0a66993e2768e51171caa00c31e2018babf6d5bf293ffc425e8075e8"
+reason = "báo cáo L1 trộn KT-32 (đã đóng), số do verifier KT-32 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/QUYET-DINH-A0-K6-2026-11-17.md"
+sha256 = "9112d86af9de3b168a13ee480f2dcb989adff7366fbc0aa3803851a46bef2c90"
+reason = "quyết định Agent 0 chép nguyên văn (đọc-only với Agent 2), viết trước OD-K6-5"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/agent/reports/R1-v2.md"
+sha256 = "29fb7100c8bbe5cd3626632dcf0ddd9bace8798084d4fd93e2404019a03fa920"
+reason = "báo cáo vòng 1 (đã đóng), số do check_report.py + verifier R1 kiểm"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-capalloc.md"
+sha256 = "346035d625a6cddd5b6f18431481321d4830761cb65c41c41990eddf9b92f7f6"
+reason = "tài liệu KT-68 viết trước OD-K6-5 (ngoài vùng ghi KT-80); số có log riêng của KT-68"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-console.md"
+sha256 = "a854dc39e6c1833319ff38459ca0759dfdaf71611c0baadd95114e873b974ee9"
+reason = "tài liệu KT-73 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt73 kiểm số"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-harness.md"
+sha256 = "c87860cbbf800de586b7622a1584cdeef4d13d5045ad36032792a7ec6d7067a7"
+reason = "tài liệu KT-78 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt78 kiểm số"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-idl.md"
+sha256 = "a0396c1e0cce043c0e96952b12141209628d73f424c64925976eddb9c33613e0"
+reason = "tài liệu KT-69 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt69 kiểm số"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-memsrv.md"
+sha256 = "599f57ba6cb7753afb03446dc4c4f67e7758722eb774608cbce58b3b60c14c05"
+reason = "tài liệu KT-67/67a/67b viết trước OD-K6-5 (ngoài vùng ghi KT-80)"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-repro.md"
+sha256 = "916f6118d183ef41b03a1670a8c168178f7db1da41731062ed282903d18d8f98"
+reason = "tài liệu KT-79 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt79 kiểm số"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-vfs-journal.md"
+sha256 = "8713d6b33e102c3e7fc09c0c9f73a594fa3923d03bc6ccfa753ec954c0fd1e82"
+reason = "tài liệu KT-71 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt71 kiểm số"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-vfs-pager.md"
+sha256 = "fd56dff363b75b73659f8f92d01ad63f8e842f47e5b196d1ad7f1b76907e4290"
+reason = "tài liệu KT-70 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt70 kiểm số"
+date = "2026-11-17"
+
+[[legacy]]
+path = "v2/docs/k6-virtio-blk.md"
+sha256 = "72f51e636880b0dd6d7f9c92d01f66d3cd7f9dc8b761b70237874b99b958ca27"
+reason = "tài liệu KT-72 viết trước OD-K6-5 (ngoài vùng ghi KT-80); verifier kt72 kiểm số"
+date = "2026-11-17"
+
+# ------------------------------------------------- ngoại lệ "có trước luật" (KHÔNG phải lịch sử)
+# Tệp **mới** nhưng đã được commit **trước** commit đưa luật vào cổng (lead commit `6f8f63a5`
+# cho KT-77a, chạy song song KT-80). Đây là loại ngoại lệ mà OD-K6-5 cho phép với tệp "hiện có
+# vi phạm luật mới" — nhưng phải **có tên + lý do + ngày + sha**, và phải **trả nợ**: khi KT-77a
+# (hoặc K7) đưa số vào khối `scope=` thì xoá mục này. Sửa nội dung tệp ⇒ ĐỎ (phải xử lý lại),
+# nên nó không thể âm thầm thành "miễn trừ vĩnh viễn".
+[[legacy]]
+path = "v2/docs/k6-parity.md"
+sha256 = "31ce3441f7ee37fcc1de2d0802283a7be558972e002deba4ac2275938c4d2820"
+kind = "pre_existing"
+owner = "KT-77a"
+debt = "100 lỗi E1_* khi chạy `v2 check-rules --law 1` (số đo trong prose + khối scope= chép kèm tiền tố `số-dòng:`); chuyển số vào khối scope= rồi xoá ngoại lệ"
+reason = "viết song song KT-80, commit 6f8f63a5 TRƯỚC khi luật 1 vào cổng; ngoài vùng ghi của KT-80"
+date = "2026-11-17"

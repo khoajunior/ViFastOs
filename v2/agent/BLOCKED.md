@@ -490,3 +490,18 @@ persist, driver không vào ảnh sản phẩm) liệt kê đủ ở `K6-DOD.md`
      (`kt77a-serial-1-help-serial-ktest-proc-smp1.log:118`). Không tự sửa.
 - **Không** đổi ABI, không sửa `spec/abi.toml`/`spec/kernel.toml`, không sửa `v2/test/boot/**`,
   không sửa `docs/v1/**`, không nới ngưỡng, không retry để xanh.
+
+## 9. Ghi chú phối hợp từ KT-80 (không phải task bị chặn)
+
+- **Không có task nào bị chặn kỹ thuật** bởi KT-80: năm luật đã cài, `v2 check-rules` xanh, ca phá
+  5/5 đỏ đúng mã. Mục này chỉ ghi hai việc phối hợp:
+- **Luật 1 áp cho tài liệu mới** (`v2/agent/reports/*.md`, `v2/docs/k6-*.md` **đã có trong git
+  index**): tài liệu mới phải đặt số trong khối `scope=<log trong repo>` và trích **nguyên văn cả
+  dòng**; tài liệu chưa `git add` là bản nháp nên chưa bị kiểm, **commit xong là bị kiểm**. Tài liệu
+  viết trước OD-K6-5 có tên trong `[[legacy]]` (ghim sha256); sửa nội dung tệp legacy ⇒ cổng đỏ cho
+  tới khi hoặc đưa số vào khối `scope=`, hoặc cập nhật ngoại lệ có lý do + ngày và lead duyệt.
+- **Cần KT-77a xử lý trước khi commit**: `v2/docs/k6-parity.md` (task song song, chưa `git add`)
+  hiện chưa đạt luật 1 — khối `scope=` chép kèm tiền tố `số-dòng:` nên dòng không nguyên văn trong
+  log (`k6-parity.md:85-89`, `:96-99`; log `kt77a-transcript-ktest-proc-smp1.log`). KT-80 **không**
+  sửa tệp của task khác và **không** thêm ngoại lệ cho tài liệu mới; đề nghị KT-77a chép đúng dòng
+  log (hoặc thêm khối riêng) trước khi `git add`.

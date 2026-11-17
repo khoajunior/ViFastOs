@@ -2056,3 +2056,45 @@ trỏ vào cây nguồn ⇒ fail-closed; `repro-build`/`repro-check` kiểm sha 
 **Nợ:** host Windows (psvn) cho thứ tự monomorphization khác ⇒ sha khác (dữ kiện phụ, A1-173);
 harness `v2/test/boot/**` chạy `cargo` trần từ gốc repo nên không còn được ghim — muốn ghim thì
 gọi `repro-build.sh` hoặc đặt `RUSTUP_TOOLCHAIN=1.99.1` (đề xuất cho KT-78/A0).
+
+## 27. KT-80 — năm luật máy của OD-K6-5 vào cổng (luật 1, 2, 3, 7, 8)
+
+Tài liệu đầy đủ: [`k6-machine-rules.md`](k6-machine-rules.md). Công cụ: `v2/tools/verify-numbers.py`
+(một công cụ dùng chung, **không** copy-paste bốn verifier cũ `kt73/74/75/76/78-verify-numbers`);
+registry: `v2/test/rules/{numbers-policy,counters,criteria}.toml` +
+`v2/test/rules/verify-script-regressions.txt`; ca phá: `v2/test/rules/selfbreak.sh` +
+`v2/test/rules/counter-evidence.sh`.
+
+**Cài trong cổng**: `./v2/bin/v2 check-rules` (luật `--law N`, hồi quy `--self-test`), được
+`v2 check` và `v2 gate --fast` gọi ở bước `luật máy K6 (KT-80)`. Mỗi luật in
+`ok - luat N: …` hoặc `not ok - luat N: file:dòng: MÃ_LỖI lý-do`; exit khác 0 nếu bất kỳ luật đỏ.
+
+- **Luật 1** (`E1_*`): số trong `v2/agent/reports/*.md` + `v2/docs/k6-*.md` phải nằm trong khối
+  `scope=<log>` và trích **nguyên văn cả dòng**; log phải ở trong repo + đã có trong git;
+  `scope=` không được trỏ log ca âm (`scope-red=` mới được, tên phải khai); tệp tiêu chí sinh
+  từ máy phải chép **toàn bộ**. Ngoại lệ lịch sử ghim `sha256`.
+- **Luật 2** (`E2_*`): commit chứa log phải là **tổ tiên** của commit chứa báo cáo (hoặc cùng
+  commit) — `git log --format=%H -- <path>` (gom một lệnh) + `git merge-base --is-ancestor`;
+  chỉ đọc HEAD nên cây bẩn không ảnh hưởng; báo cáo chưa commit ⇒ cặp `pending`.
+- **Luật 3** (`E3_*`): dòng `counter=<tên>` phải khai trong `counters.toml`; `proven=true` phải
+  có log ca âm **khác không** trong repo; `proven=false` chỉ được nằm trong `scope-pending=`.
+  Bộ đếm mẫu: `qemu_ppid1`, `isolation_bad` (ca âm thật của KT-78).
+- **Luật 7** (`E7_*`): bản trích tiêu chí khai nguồn trong `criteria.toml`; số cột trích = số cột
+  gốc trừ cột bỏ có ghi tên + lý do trong tệp; tệp `criteria.txt`/`*-DOD.md` không khai ⇒ đỏ.
+- **Luật 8** (`E8_*`): `--self-test` chạy **mười ba** đường phá đã từng lọt trên repo mini trong
+  thư mục tạm, đòi **đỏ đúng mã** từng ca; verifier bị làm yếu ⇒ ca cũ xanh ⇒ self-test đỏ.
+
+Bằng chứng (chạy lại được; log trong repo):
+
+```text scope=kt80-check-rules.log
+# verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}
+```
+
+```text scope=kt80-selfbreak.log
+# selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi
+```
+
+**Ngoại lệ**: chỉ tài liệu **lịch sử** (viết trước OD-K6-5, ngoài vùng ghi KT-80) — danh sách có
+tên + lý do + ngày + `sha256` trong `numbers-policy.toml` (`legacy=` trong dòng log trên); không
+có ngoại lệ cho tài liệu mới. **Không** chạm `spec/`, ABI, ngưỡng, `v2/kernel/**`, `v2/lib/**`,
+`v2/test/parity/**`, `spec/v1-parity.toml` (KT-77a song song).

@@ -3653,3 +3653,35 @@ bộ của ảnh test đỏ (`not ok 3`, `not ok 4`). Vì vậy chế độ seri
 `ok 1 - k3 boot` rồi `# k3 halt`, **0** dòng `# shell: up`). Ảnh test dùng có sẵn (không build lại):
 `ktest-proc` sha256 `f7c6b4a3…c281cfc1` (437.672 B); ảnh sản phẩm `fd202276…4393a6da` (188.552 B).
 QEMU: `qemu_ppid1=0 qemu_foreign=0` trước/sau mọi lần đo (`kt77a-infra.log:1-8`).
+
+## KT-80 — năm luật máy OD-K6-5 vào cổng (luật 1, 2, 3, 7, 8) — 2026-11-17, Agent 2
+
+**Ngày:** 2026-11-17 · **Task:** KT-80 (OD-K6-5, D2-119 + D2-120) · HEAD đầu việc `046cc7d3` ·
+**DONE phần cài + đo**, chờ reviewer. Luật 5, 6 thuộc **KT-81** (chưa mở) — KT-80 **không** làm.
+
+- **Cài trong cổng:** `./v2/bin/v2 check-rules` (một công cụ `v2/tools/verify-numbers.py`, không
+  copy-paste bốn verifier cũ); `v2 check` và `gate --fast` gọi bước `luật máy K6 (KT-80)`.
+  Năm luật: số trong báo cáo phải nằm trong khối `scope=` + trích **nguyên văn** từ log **trong
+  repo/git**; log commit **trước** báo cáo (thứ tự commit); bộ đếm `counter=` phải khai registry +
+  có ca âm khác không; bản trích tiêu chí đủ **cột**; ca phá cũ là **ca hồi quy** (`--self-test`).
+- **Registry:** `v2/test/rules/{numbers-policy,counters,criteria}.toml`,
+  `v2/test/rules/verify-script-regressions.txt`. **Ca phá:** `v2/test/rules/selfbreak.sh`.
+- **Ngoại lệ (báo lead):** **hai mươi** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80) ghim
+  `sha256` trong `[[legacy]]`; **không** có ngoại lệ cho tài liệu mới.
+- **Tài liệu:** [`docs/k6-machine-rules.md`](../docs/k6-machine-rules.md) + `docs/k3b-core.md` §27;
+  nhật ký `JOURNAL/kt80-journal.md`.
+- **Phối hợp (D2-105a):** `STATE.md`/`BLOCKED.md` ghi **append** (mục KT-77a ở trên do task song
+  song thêm); **không** chạm `v2/test/parity/**`, `spec/v1-parity.toml`.
+- **Ghi nhận cho lead:** `v2/docs/k6-parity.md` (KT-77a, chưa `git add`) **chưa đạt** luật 1 — khối
+  `scope=` chép kèm tiền tố `số-dòng:` nên không nguyên văn (`k6-parity.md:85-89`, `:96-99`);
+  KT-80 không sửa tệp của task khác.
+
+Số đo (nguyên văn trong khối `scope=`, không viết tay):
+
+```text scope=kt80-check-rules.log
+# verify-numbers: ok=5 fail=0 wall_ms=7143 law_wall_ms={1:67,2:480,3:197,7:67,8:6233}
+```
+
+```text scope=kt80-selfbreak.log
+# selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi
+```

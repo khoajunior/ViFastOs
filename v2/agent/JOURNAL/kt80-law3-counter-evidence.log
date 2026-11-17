@@ -1,0 +1,4 @@
+# kt80 counter-evidence (chạy lại: bash v2/test/rules/counter-evidence.sh)
+counter=qemu_ppid1 positive=0 negative=1 positive_log=kt78-ktest-matrix.log negative_log=kt78-guard/selftest-20261117T015708Z.log
+counter=isolation_bad positive=0 negative=1 positive_log=kt78-ktest-matrix.log negative_log=kt78-guard/selftest-20261117T015708Z.log
+# counter-evidence: PASS (giá trị đọc từ log KT-78; registry v2/test/rules/counters.toml)

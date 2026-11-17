@@ -83,6 +83,11 @@ v2 — cổng dòng OS ViFastOs v2 (vòng 1)
                                Miri qua `cargo +nightly miri` trên v2/Cargo.toml; mặc định `test`
                                (D2-47: lệnh rời, KHÔNG nằm trong gate --fast)
   ./v2/bin/v2 rules [--root D] chỉ chạy 5 luật cấu trúc trên D (mặc định v2/)
+  ./v2/bin/v2 check-rules [--law N] [--self-test] [--root R]
+                               KT-80 / OD-K6-5: 5 luật máy (1, 2, 3, 7, 8) — số do script sinh từ
+                               log đã commit; log commit trước báo cáo; bộ đếm "0" phải có ca âm;
+                               bản trích tiêu chí đủ cột; ca phá cũ là ca hồi quy. Được
+                               `v2 check` / `gate --fast` gọi tự động.
   ./v2/bin/v2 check-repro [--negative]
                                KT-79 / OD-K6-3: build ảnh sản phẩm ở **2 đường dẫn tuyệt đối
                                khác nhau** ⇒ phải CÙNG sha256. `--negative` = ca âm (tắt
@@ -221,6 +226,17 @@ run_step() { # <tên> <lệnh...>
     return 1
 }
 
+# KT-80 / OD-K6-5 — 5 luật máy; logic nằm ở `v2/tools/verify-numbers.py` (một công cụ dùng
+# chung, không copy-paste 4 verifier cũ). `--law`/`--self-test`/`--root` chuyển tiếp nguyên văn.
+check_k6_rules() {
+    local py
+    if ! py="$(find_python)"; then
+        echo "check-rules: cần python ≥ 3.11 có tomllib (đã thử python3.12/3.11/3)" >&2
+        return 1
+    fi
+    "$py" "$V2_ROOT/tools/verify-numbers.py" --root "$REPO_ROOT" "$@"
+}
+
 do_check() {
     local fails=0
     echo "== v2 check (HEAD $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')) =="
@@ -229,6 +245,7 @@ do_check() {
     echo "--- luật cấu trúc R1..R5"
     if rules "$V2_ROOT"; then echo "--- luật cấu trúc: OK"; else echo "--- luật cấu trúc: FAIL" >&2; fails=$((fails + 1)); fi
     run_step "self-test luật" bash "$V2_ROOT/test/rules/run.sh" || fails=$((fails + 1))
+    run_step "luật máy K6 (KT-80: 1,2,3,7,8)" check_k6_rules || fails=$((fails + 1))
     echo "--- spec/abi.toml"
     if PY="$(find_python)"; then
         if "$PY" "$V2_ROOT/test/abi/check_abi.py" --file "$REPO_ROOT/spec/abi.toml"; then
@@ -571,6 +588,7 @@ case "$cmd" in
         ;;
     miri) do_miri "$@" ;;
     check-repro) exec bash "$V2_ROOT/tools/repro-check.sh" "$@" ;;
+    check-rules) check_k6_rules "$@" ;;
     rules)
         root="$V2_ROOT"
         if [ "${1:-}" = "--root" ] && [ -n "${2:-}" ]; then

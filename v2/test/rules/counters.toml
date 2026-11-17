@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-80 / OD-K6-5 luật 3 (D2-108B) — registry bộ đếm.
+#
+# Quy ước:
+#   * Mọi dòng evidence trong tài liệu đích khai `counter=<tên>` phải có mục ở đây.
+#   * `proven = true`  ⇒ bắt buộc có **log ca âm trong repo** khớp `negative_pattern`
+#                        (bộ đếm **khác 0**); thiếu/không khớp ⇒ luật 3 ĐỎ (E3_NEGATIVE_ZERO /
+#                        E3_NO_NEGATIVE_LOG). Có thể khai thêm `positive_log` (đường xanh).
+#   * `proven = false` ⇒ dòng `counter=<tên>` **không** được nằm trong khối `scope=` (khối được
+#                        coi là ok): chỉ được nằm trong `scope-pending=`. Bắt buộc có `reason`.
+#   * Mục khai mà không tài liệu nào dùng: chỉ cảnh báo (`# note`), không làm đỏ — để registry
+#     giữ được bộ đếm của chiến dịch đo đang mở.
+#
+# Ngày ghi: 2026-11-17 (KT-80).
+
+[[counter]]
+name = "qemu_ppid1"
+proven = true
+positive_log = "v2/agent/JOURNAL/kt78-ktest-matrix.log"
+negative_log = "v2/agent/JOURNAL/kt78-guard/selftest-20261117T015708Z.log"
+negative_pattern = "# infra-orphan: .*qemu_ppid1=1"
+reason = "QEMU mồ côi (D2-116): ca 'infra-orphan' của guard_selftest tạo QEMU ppid=1 có kiểm soát ⇒ bộ đếm khác 0; đường xanh là matrix KT-78 (0)"
+date = "2026-11-17"
+
+[[counter]]
+name = "isolation_bad"
+proven = true
+positive_log = "v2/agent/JOURNAL/kt78-ktest-matrix.log"
+negative_log = "v2/agent/JOURNAL/kt78-guard/selftest-20261117T015708Z.log"
+negative_pattern = "isolation_bad=1"
+reason = "process group (OD-K6-6): ca 'iso-bad' chạy QEMU KHÔNG qua setpgrp ⇒ isolation_bad=1; đường xanh là matrix KT-78 (0)"
+date = "2026-11-17"
