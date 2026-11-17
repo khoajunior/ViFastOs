@@ -70,3 +70,38 @@ pub const EV_ECHO: u64 = 0x506;
 pub const EV_HELP: u64 = 0x507;
 /// Label message kernel chuyển tiếp `FaultKind::Exit{code}` sang procsrv (cầu nối arch, nợ ABI).
 pub const FAULT_EXIT: u64 = 0x608;
+
+// ---------------------------------------------------------------------------------------------
+// **KT-77c** — dịch vụ **FS của ảnh sản phẩm** (`proc_fs.rs`). Không mở ABI mới: request/reply đi
+// trên `NB_SEND`/`NB_RECV` đã có, thêm **một** endpoint và **một** label. Bố cục MR ở
+// `proc_fs.rs` (mỗi request = một reply 4 word).
+// ---------------------------------------------------------------------------------------------
+
+/// Slot endpoint `FS_REQ` → kernel (slot 7 trống từ KT-65; `EP_CTL` = 6 là cap, không phải ep).
+pub const EP_FS: usize = 7;
+/// Label request FS từ shell U-mode → kernel (shell gửi trên [`EP_FS`]).
+pub const FS_REQ: u64 = 0x612;
+/// Label reply FS từ kernel → shell (kernel gửi trên [`EP_REPLY`]).
+pub const FS_REPLY: u64 = 0x613;
+
+/// `OP_PATH` — nạp đường dẫn (byte trong 3 MR word tiếp theo) vào kernel trước thao tác.
+pub const OP_PATH: u64 = 0x10;
+/// `OP_LS` — liệt kê entry thứ `index` của thư mục đang nạp.
+pub const OP_LS: u64 = 0x11;
+/// `OP_CAT` — đọc 24 B tệp tại `offset`.
+pub const OP_CAT: u64 = 0x12;
+/// `OP_WRITE` — ghi `len` B (tạo tệp nếu chưa có).
+pub const OP_WRITE: u64 = 0x13;
+/// `OP_TRUNC` — cắt tệp về `size` (giữ `write` idempotent).
+pub const OP_TRUNC: u64 = 0x14;
+/// `OP_STAT` — kích thước/kiểu của đường dẫn đang nạp.
+pub const OP_STAT: u64 = 0x15;
+/// `OP_SYNC` — `Fs::fsync` + `flush` xuống phương tiện.
+pub const OP_SYNC: u64 = 0x16;
+
+/// Reply: thành công (`len`/`kind`/`ino` nằm ở byte cao của word 0).
+pub const ST_OK: u64 = 0;
+/// Reply: hết dữ liệu (hết entry của thư mục / hết tệp).
+pub const ST_END: u64 = 1;
+/// Reply: lỗi — mã lỗi ở byte 1 của word 0 ([`crate::proc_fs`] `err_code`).
+pub const ST_ERR: u64 = 2;

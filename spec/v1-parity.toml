@@ -160,24 +160,24 @@ reason = 'thieu BUILTIN time trong shell v2 (shell_user.rs:247-269 chi co help/e
 name = 'ls'
 args = '[path]'
 send = 'ls\n'
-expect = 'liet ke muc cua thu muc (v1 do duoc: ls -> 4 muc)'
-timeout_ms = 2000
+expect = '^# shell: ls n=[0-9]+ path=/'
+timeout_ms = 4000
 source = 'docs/v1/agent2-report-21.md:81'
 source_more = 'docs/v1/overnight-log.md:3470'
 v1_output = '4 muc'
-status = 'deferred-K7'
-reason = 'shell v2 chua co lenh FS/VFS client (chua co ls tren shell) => can KT-77b/K7'
+status = 'active'
+note = 'KT-77c: `ls` la builtin cua shell san pham, di qua dich vu FS trong kernel (proc_fs.rs, endpoint EP_FS) tren volume virtio-blk (co `-drive`) hoac volume RAM (khong dia). So muc khac v1 vi day la volume cua anh v2: `/README` (seed khi format) + tep nguoi dung tao, khong phai image v1 4 muc.'
 
 [[command]]
 name = 'cat'
 args = '<path>'
-send = 'cat /README\n'
-expect = 'in noi dung tep'
-timeout_ms = 2000
+send = 'write /p.txt hello77\ncat /p.txt\n'
+expect = '^# shell: cat ok bytes=7 first=hello77$'
+timeout_ms = 4000
 source = 'docs/v1/agent2-report-21.md:81'
 v1_output = ''
-status = 'deferred-K7'
-reason = 'shell v2 chua co lenh doc tep => KT-77b/K7'
+status = 'active'
+note = 'KT-77c: `cat` doc tep that qua dich vu FS cua kernel. `send` gom `write` + `cat` de do ca duong GHI roi DOC LAI trong cung mot boot; `first=` la 8 byte dau doc duoc nen expect khong the khop neu ghi/doc sai. Doc lai SAU REBOOT (cung anh dia qua `-drive`) la bang chung rieng: `v2/agent/JOURNAL/kt77c-logs/kt77c-boot-reboot-read-smp1.log` (spec mot boot moi muc nen khong do duoc o day).'
 
 [[command]]
 name = 'mkdir'

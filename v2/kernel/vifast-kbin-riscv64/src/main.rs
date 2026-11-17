@@ -44,11 +44,33 @@ static PLATFORM: Riscv64Virt = Riscv64Virt;
 /// Một handler panic dùng chung cho cả ảnh sản phẩm và ảnh test (`vifast-plat-common`).
 static PANIC: PanicHandler<Riscv64Virt> = PanicHandler::new(Riscv64Virt);
 
+/// **KT-86** (D2-125.3) — dòng **danh tính bản dựng**, sinh **lúc build** bởi `build.rs`
+/// (`cargo:rustc-env`, không viết tay trong mã — D2-102: in từ `const`, không literal):
+///
+/// ```text
+/// # build: rev=<12 hex của git rev-parse HEAD> dirty=<0|1>
+/// ```
+///
+/// `dirty=1` ⇔ có thay đổi chưa commit trong `v2/kernel`/`v2/lib` **tại thời điểm build**
+/// (định nghĩa đầy đủ: `v2/test/boot/build-rev.sh` + `v2/docs/k6-build-rev.md` §2). Harness
+/// `v2/test/boot/build-rev.sh` đọc dòng này từ log boot và **TỪ CHỐI ĐO** khi `rev` lệch
+/// `git rev-parse HEAD`, khi `dirty=1`, hoặc khi log **không có** dòng này (fail-closed).
+const BUILD_LINE: &str = concat!(
+    "# build: rev=",
+    env!("VIFAST_BUILD_REV"),
+    " dirty=",
+    env!("VIFAST_BUILD_DIRTY"),
+    "\n"
+);
+
 /// Được `_start` (trong `vifast-plat-riscv64`) gọi sau khi đặt `sp`/`tp`/`sscratch`.
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
     PLATFORM.put_str("TAP version 13\n1..1\n");
     PLATFORM.put_str("# k3 image=product (kernel thật trên QEMU virt, không phải model)\n");
+    // **KT-86** (D2-125.3): in danh tính bản dựng **ngay đầu boot** (trước mọi PANIC có thể có) để
+    // log nào cũng trả lời được "ảnh này build từ mã nào" — harness từ chối đo nếu lệch.
+    PLATFORM.put_str(BUILD_LINE);
     // KT-57 / D2-80 — bằng chứng neo **ảnh**: in `# conf image: build=<16 hex> text=<len>`
     // (FNV-1a 64 trên `.text` đã nạp, hàm tái dùng của KT-55) để `soak.sh` băm lại từ ELF và từ
     // chối log không có/lệch hash. Đây là **dòng bằng chứng**, không đổi ngữ nghĩa/threshold.
@@ -392,3 +414,13 @@ pub extern "C" fn rust_secondary_main(_hart: usize, opaque: usize) -> ! {
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
     PANIC.handle(info)
 }
+// **KT-77c** (D2-123.2): dịch vụ FS + virtio-blk của ảnh sản phẩm — chỉ biên dịch khi bật
+// `product-fs` (kéo theo `product-shell` + nhãn `block` của crate arch, **không** `ktest`).
+//
+// Vì sao khai báo `mod` ở **cuối tệp** (không phải cạnh `mod proc_rt` ở đầu): ảnh **không**
+// feature phải **giữ nguyên từng byte** — baseline `c1072d72` (KT-79, D2-122). Chèn ba dòng ở
+// giữa tệp làm **số dòng** của mọi panic location phía sau lệch +3, và `.rodata` đổi 5 byte (đo
+// được: `JOURNAL/kt77c-logs/kt77c-baseline-lineshift.log`). Khai báo ở cuối ⇒ không dòng nào
+// của mã cũ bị dịch ⇒ baseline giữ đúng sha.
+#[cfg(feature = "product-fs")]
+mod proc_fs;

@@ -13,6 +13,12 @@
 //! - `ps`    — gửi `PS_REQ`, nhận bảng TCB **do kernel đọc từ `Machine`** rồi tự định dạng/in.
 //! - `wait <pid>` / `kill <pid>` — gọi **giao thức procsrv** (`NBSend(proc_ep)` + `NBRecv(reply_ep)`),
 //!   in mã trả về. Không phải syscall mới.
+//! - **KT-77c** (chỉ khi build ELF này với `--cfg shell_fs`, tức ảnh `product-fs`):
+//!   `ls`, `cat <path>`, `write <path> <text>` — **dịch vụ FS của kernel**
+//!   (`EP_FS`, `FS_REQ`/`FS_REPLY`, bố cục MR ở `src/proc_fs.rs`). Cùng hai syscall đã có
+//!   (`NBSend`/`NBRecv`), **không** mở ABI. `write` tự `fsync` (journal + `flush` thiết bị) nên
+//!   dữ liệu qua reboot; chờ reply có **hạn** (`FS_REPLY_BUDGET` lượt) để ảnh **không** FS/không
+//!   đĩa **không treo** — in `fs khong san sang` rồi trả prompt.
 //! - `exit`  — `Exit(0)`.
 //!
 //! Vòng lặp polling + `Yield`: kernel là scheduler tuần tự của pha demo (không có scheduler
@@ -36,12 +42,52 @@ const EP_PROC: u64 = 2;
 const EP_REPLY: u64 = 4;
 const EP_PS: u64 = 5;
 const EP_EVENTS: u64 = 8;
+/// **KT-77c**: endpoint dịch vụ FS phía kernel (slot 7 — khớp `proc_abi::EP_FS`).
+#[cfg(shell_fs)]
+const EP_FS: u64 = 7;
+/// Label/giao thức FS — khớp `proc_abi::FS_REQ`/`FS_REPLY` và `OP_*`/`ST_*`.
+#[cfg(shell_fs)]
+const FS_REQ: u64 = 0x612;
+#[cfg(shell_fs)]
+const FS_REPLY: u64 = 0x613;
+#[cfg(shell_fs)]
+const OP_PATH: u64 = 0x10;
+#[cfg(shell_fs)]
+const OP_LS: u64 = 0x11;
+#[cfg(shell_fs)]
+const OP_CAT: u64 = 0x12;
+#[cfg(shell_fs)]
+const OP_WRITE: u64 = 0x13;
+#[cfg(shell_fs)]
+const OP_TRUNC: u64 = 0x14;
+#[cfg(shell_fs)]
+const OP_SYNC: u64 = 0x16;
+#[cfg(shell_fs)]
+const ST_OK: u64 = 0;
+#[cfg(shell_fs)]
+const ST_END: u64 = 1;
+/// Số byte tên/dữ liệu mỗi request/reply (3 MR word).
+#[cfg(shell_fs)]
+const FS_BYTES: usize = 24;
+/// Hạn chờ một reply FS (số lượt `Yield`) — ảnh **không** FS/không đĩa ⇒ trả prompt, không treo.
+#[cfg(shell_fs)]
+const FS_REPLY_BUDGET: u32 = 20_000;
 
 /// VA ring UART → shell (kernel map; khớp `vifast_plat_riscv64::uart_console::VA_CON_RING`).
 const VA_CON_RING: u64 = 0x4300_0000;
-/// Cỡ dòng tối đa shell nhận (script demo ≤ 24 B + `\n`).
+/// Cỡ dòng tối đa shell nhận — **KT-77c** nâng 32 → 64 để `write <path> <text>` của FS vừa một
+/// dòng (đường dẫn ≤ 24 B + payload; `MAX_PATH` của kernel là 48 B, shell gửi từng khối 24 B).
+#[cfg(shell_fs)]
+const MAX_LINE: usize = 64;
+#[cfg(not(shell_fs))]
 const MAX_LINE: usize = 32;
 /// Số lệnh shell biết (in trong `help`) — **một** chỗ để `cmds=` không lệch với danh sách.
+/// **KT-77c** chỉ thêm ba lệnh FS vào ELF build với `--cfg shell_fs` (ảnh `product-fs`); ảnh test
+/// và ảnh ca âm "shell nhưng không FS" giữ **6** ⇒ kỳ vọng `# shell: help cmds=6` của harness
+/// (`proc_demo.rs`, `v2/test/boot/ktest.sh`) **không** phải sửa.
+#[cfg(shell_fs)]
+const CMDS: u64 = 9;
+#[cfg(not(shell_fs))]
 const CMDS: u64 = 6;
 
 /// Adapter [`Mem`] trên VA user (cùng shim `ring_common` của KT-69).
@@ -238,7 +284,292 @@ fn cmd_kill(pid: u64) {
     put(b"\n");
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// **KT-77c** — lệnh FS (`ls`/`cat`/`write`) qua dịch vụ FS **của kernel** (`EP_FS`).
+//
+// Mỗi request là **một** reply 4 MR word (bố cục ở `src/proc_fs.rs`): tên/dữ liệu đi trong MR
+// (24 B/lần) chứ không phải Frame chia sẻ. Mọi lời gọi đều có **hạn** (`FS_REPLY_BUDGET` lượt
+// `Yield`): ảnh build **không** `product-fs` (ca âm tiêu chí 5c) hoặc QEMU không có đĩa và không
+// dựng được volume RAM ⇒ in `fs khong san sang` rồi **trả prompt**, không treo.
+// ---------------------------------------------------------------------------------------------
+
+/// `true` ⇔ `line` là lệnh FS (`ls`/`cat`/`write`) và đã được thi hành.
+#[cfg(shell_fs)]
+fn fs_dispatch(line: &[u8]) -> bool {
+    if line == b"ls" {
+        cmd_ls(b"/");
+        true
+    } else if starts_with(line, b"ls ") {
+        cmd_ls(&line[3..]);
+        true
+    } else if starts_with(line, b"cat ") {
+        cmd_cat(&line[4..]);
+        true
+    } else if starts_with(line, b"write ") {
+        let (path, text) = split_space(&line[6..]);
+        if path.is_empty() {
+            put(b"# shell: thieu duong dan\n");
+        } else {
+            cmd_write(path, text);
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// Đóng gói tối đa [`FS_BYTES`] byte vào 3 MR word (little-endian từng byte).
+#[cfg(shell_fs)]
+fn pack_bytes(bytes: &[u8]) -> [u64; 3] {
+    let mut words = [0u64; 3];
+    let mut index = 0usize;
+    while index < bytes.len() && index < FS_BYTES {
+        words[index / 8] |= u64::from(bytes[index]) << ((index % 8) * 8);
+        index += 1;
+    }
+    words
+}
+
+/// Giải nén `len` byte từ 3 MR word.
+#[cfg(shell_fs)]
+fn unpack_bytes(words: [u64; 3], out: &mut [u8; FS_BYTES], len: usize) {
+    let len = if len > FS_BYTES { FS_BYTES } else { len };
+    let mut index = 0usize;
+    while index < len {
+        out[index] = (words[index / 8] >> ((index % 8) * 8)) as u8;
+        index += 1;
+    }
+}
+
+/// Gửi **một** request FS và chờ reply có hạn. `None` = không có dịch vụ FS trong ảnh này.
+#[cfg(shell_fs)]
+fn fs_call(words: [u64; 4]) -> Option<[u64; 4]> {
+    send(EP_FS, FS_REQ, words);
+    let mut budget = FS_REPLY_BUDGET;
+    while budget > 0 {
+        let (err, info, mr) = recv(EP_REPLY);
+        if err == 0 && info & 0xFFFFF == FS_REPLY {
+            return Some([mr[0], mr[1], mr[2], mr[3]]);
+        }
+        budget -= 1;
+        yield_cpu();
+    }
+    None
+}
+
+#[cfg(shell_fs)]
+fn put_err(code: u64) {
+    put(b"# shell: fs loi code=");
+    put_u64(code);
+    put(b"\n");
+}
+
+/// Status của reply: `ST_OK`/`ST_END`/`ST_ERR`; in lỗi (kèm mã) khi `ST_ERR`.
+#[cfg(shell_fs)]
+fn fs_status(reply: [u64; 4]) -> Option<u64> {
+    let status = reply[0] & 0xff;
+    if status == ST_OK || status == ST_END {
+        return Some(status);
+    }
+    put_err((reply[0] >> 8) & 0xff);
+    None
+}
+
+/// Nạp đường dẫn vào kernel (reset rồi từng khối 24 B). `false` = không có dịch vụ FS.
+#[cfg(shell_fs)]
+fn fs_set_path(path: &[u8]) -> Result<(), ()> {
+    match fs_call([OP_PATH, 0, 0, 0]) {
+        Some(reply) if fs_status(reply) == Some(ST_OK) => {}
+        _ => return Err(()),
+    }
+    let mut offset = 0usize;
+    while offset < path.len() {
+        let count = core::cmp::min(FS_BYTES, path.len() - offset);
+        let words = pack_bytes(&path[offset..offset + count]);
+        let head = OP_PATH | ((count as u64) << 40);
+        match fs_call([head, words[0], words[1], words[2]]) {
+            Some(reply) if fs_status(reply) == Some(ST_OK) => {}
+            Some(_) => return Err(()),
+            None => return Err(()),
+        }
+        offset += count;
+    }
+    Ok(())
+}
+
+#[cfg(shell_fs)]
+fn no_fs() {
+    put(b"# shell: fs khong san sang (image khong co product-fs hoac khong co phuong tien)\n");
+}
+
+/// `ls [path]` — in từng entry rồi dòng tổng kết `# shell: ls n=<n> path=<path>` (dòng neo của
+/// `spec/v1-parity.toml`).
+#[cfg(shell_fs)]
+fn cmd_ls(path: &[u8]) {
+    if fs_set_path(path).is_err() {
+        no_fs();
+        return;
+    }
+    let mut index = 0usize;
+    let mut count = 0u64;
+    loop {
+        let head = OP_LS | ((index as u64) << 8);
+        let Some(reply) = fs_call([head, 0, 0, 0]) else {
+            no_fs();
+            return;
+        };
+        match fs_status(reply) {
+            Some(ST_END) => break,
+            Some(_) => {}
+            None => return,
+        }
+        let ino = reply[0] >> 24;
+        if ino != 0 {
+            let len = ((reply[0] >> 8) & 0xff) as usize;
+            let kind = (reply[0] >> 16) & 0xff;
+            let mut name = [0u8; FS_BYTES];
+            unpack_bytes([reply[1], reply[2], reply[3]], &mut name, len);
+            put(b"  ");
+            put(match kind {
+                2 => b"d ",
+                3 => b"l ",
+                _ => b"f ",
+            });
+            put(&name[..len]);
+            put(b"\n");
+            count += 1;
+        }
+        index += 1;
+    }
+    put(b"# shell: ls n=");
+    put_u64(count);
+    put(b" path=");
+    put(path);
+    put(b"\n");
+    send(EP_EVENTS, EV_PS, [count, 0, 0, 0]);
+}
+
+/// `cat <path>` — in **nội dung thật** rồi `# shell: cat ok bytes=<n> first=<8 byte đầu>`.
+#[cfg(shell_fs)]
+fn cmd_cat(path: &[u8]) {
+    if fs_set_path(path).is_err() {
+        no_fs();
+        return;
+    }
+    let mut offset = 0usize;
+    let mut total = 0usize;
+    let mut first = [0u8; 8];
+    let mut first_len = 0usize;
+    loop {
+        let head = OP_CAT | ((offset as u64) << 8);
+        let Some(reply) = fs_call([head, 0, 0, 0]) else {
+            no_fs();
+            return;
+        };
+        match fs_status(reply) {
+            Some(ST_END) => break,
+            Some(_) => {}
+            None => return,
+        }
+        let count = ((reply[0] >> 8) & 0xff) as usize;
+        let mut buf = [0u8; FS_BYTES];
+        unpack_bytes([reply[1], reply[2], reply[3]], &mut buf, count);
+        put(&buf[..count]);
+        let mut index = 0usize;
+        while index < count && first_len < first.len() {
+            first[first_len] = buf[index];
+            first_len += 1;
+            index += 1;
+        }
+        total += count;
+        offset += count;
+        if count == 0 {
+            break;
+        }
+    }
+    put(b"\n# shell: cat ok bytes=");
+    put_u64(total as u64);
+    put(b" first=");
+    put(&first[..first_len]);
+    put(b"\n");
+}
+
+/// `write <path> <text>` — ghi theo khối 24 B, `TRUNC` về đúng cỡ rồi `SYNC` (fsync + flush) để
+/// dữ liệu **bền qua reboot** trên cùng ảnh đĩa (ranh giới bền của KT-75, dùng lại nguyên).
+#[cfg(shell_fs)]
+fn cmd_write(path: &[u8], text: &[u8]) {
+    if fs_set_path(path).is_err() {
+        no_fs();
+        return;
+    }
+    let mut offset = 0usize;
+    while offset < text.len() {
+        let count = core::cmp::min(FS_BYTES, text.len() - offset);
+        let words = pack_bytes(&text[offset..offset + count]);
+        let head = OP_WRITE | ((offset as u64) << 8) | ((count as u64) << 40);
+        match fs_call([head, words[0], words[1], words[2]]) {
+            Some(reply) => {
+                if fs_status(reply).is_none() {
+                    return;
+                }
+            }
+            None => {
+                no_fs();
+                return;
+            }
+        }
+        offset += count;
+    }
+    let trunc = OP_TRUNC | ((text.len() as u64) << 8);
+    match fs_call([trunc, 0, 0, 0]) {
+        Some(reply) => {
+            if fs_status(reply).is_none() {
+                return;
+            }
+        }
+        None => {
+            no_fs();
+            return;
+        }
+    }
+    let sync_ok = match fs_call([OP_SYNC, 0, 0, 0]) {
+        Some(reply) => fs_status(reply) == Some(ST_OK),
+        None => {
+            no_fs();
+            return;
+        }
+    };
+    put(b"# shell: write ");
+    put(path);
+    put(b" bytes=");
+    put_u64(text.len() as u64);
+    put(b" sync=");
+    put(if sync_ok { b"ok" } else { b"loi" });
+    put(b"\n");
+    send(EP_EVENTS, EV_ECHO, [text.len() as u64, 0, 0, 0]);
+}
+
+/// Tách `line` theo dấu cách đầu tiên: `(đầu, phần còn lại sau dấu cách)`.
+#[cfg(shell_fs)]
+fn split_space(line: &[u8]) -> (&[u8], &[u8]) {
+    let mut index = 0usize;
+    while index < line.len() {
+        if line[index] == b' ' {
+            return (&line[..index], &line[index + 1..]);
+        }
+        index += 1;
+    }
+    (line, &[])
+}
+
 fn run_line(line: &[u8]) {
+    // **KT-77c**: lệnh FS của shell sản phẩm đi qua `fs_dispatch` — tách khỏi chuỗi `if/else` để
+    // ảnh **không** `shell_fs` giữ nguyên chuỗi lệnh cũ (kỳ vọng harness không đổi).
+    #[cfg(shell_fs)]
+    if fs_dispatch(line) {
+        return;
+    }
     if starts_with(line, b"echo ") {
         put(b"# shell: echo ");
         put(&line[5..]);
@@ -248,6 +579,9 @@ fn run_line(line: &[u8]) {
         put(b"# shell: help cmds=");
         put_u64(CMDS);
         put(b"\n");
+        #[cfg(shell_fs)]
+        put(b"  help | echo <text> | ps | wait <pid> | kill <pid> | ls [path] | cat <path> | write <path> <text> | exit\n");
+        #[cfg(not(shell_fs))]
         put(b"  help | echo <text> | ps | wait <pid> | kill <pid> | exit\n");
         send(EP_EVENTS, EV_HELP, [CMDS, 0, 0, 0]);
     } else if line == b"ps" {
@@ -271,6 +605,9 @@ fn run_line(line: &[u8]) {
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
+    #[cfg(shell_fs)]
+    put(b"# shell: up cmds=help/echo/ps/wait/kill/ls/cat/write/exit\n");
+    #[cfg(not(shell_fs))]
     put(b"# shell: up cmds=help/echo/ps/wait/kill/exit\n");
     put(b"# shell: input=ring va=0x");
     put_hex(VA_CON_RING as u64);

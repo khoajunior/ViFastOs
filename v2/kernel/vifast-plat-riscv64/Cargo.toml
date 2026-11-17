@@ -21,11 +21,17 @@ umode = []
 # KT-53: ảnh có U-mode (nạp `init` ELF + sret): `ktest-user`/`ktest-proc`/`ktest-con`/`ktest-exec`
 # (bật thêm `ktest`) và **KT-77b** ảnh sản phẩm `--features product-shell` (không `ktest`).
 user = ["umode"]
+# **KT-77c** — phần **kernel** của virtio-blk (PCI ECAM + driver + cửa sổ MMIO PCIe), tách khỏi
+# harness: trước KT-77c `vblk` khai `ktest` nên ảnh **sản phẩm** bật virtio-blk là kéo cả `probe`/
+# TAP vào — **cùng lỗi** "user mode phụ thuộc test harness" mà KT-77b đã sửa cho U-mode (OD-K6-1).
+# Driver không gọi hàm test nào; `ktest` chỉ cần cho các ảnh test vì chúng dùng chung feature.
+# Không đổi một dòng mã driver nào (chỉ nhãn feature) — kiểm bằng `kt77c-harness-scan.sh`.
+block = []
 # KT-72: PCI ECAM + virtio-blk — **chỉ ảnh `ktest-vblk`** (bật cùng `ktest`). Ảnh `ktest` chính
 # giữ nguyên `.text`/mapping: TAP 35 map thử **cùng VA `0x4000_0000`** mà driver vblk map cửa sổ
 # PCIe (2 MiB) — nếu map trong ảnh `ktest` thì TAP 35 đỏ (`AlreadyMapped`). Vì vậy driver nằm ở
 # ảnh riêng; ảnh sản phẩm **không** có driver (KT-73 sẽ mở).
-vblk = ["ktest"]
+vblk = ["block", "ktest"]
 # KT-73: PCI (dùng lại của KT-72) + virtio-console 2 queue — chỉ ảnh `ktest-con`. Ảnh sản phẩm
 # **không** bật (chưa có người nhận U-mode — xem `docs/k6-console.md` §6, `BLOCKED` có `file:line`).
 vcon = ["ktest"]

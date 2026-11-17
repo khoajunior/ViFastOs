@@ -22,6 +22,11 @@ user = ["vifast-plat-riscv64/user"]
 # `v2/agent/JOURNAL/kt77b-harness-scan.sh`. Ca âm của tiêu chí 3 = build **không** feature này
 # (`bash v2/tools/repro-build.sh` mặc định) ⇒ runner parity phải đỏ `exit 5`.
 product-shell = ["user"]
+# **KT-77c** (D2-123.2): ảnh **sản phẩm** có **FS + virtio-blk** — `ls`/`cat`/ghi tệp/đọc lại sau
+# reboot. Tách `product-fs` khỏi `product-shell` để **ca âm tiêu chí 5(c)** build được ảnh có shell
+# **không** FS (parity FS phải đỏ). Nhãn `block` (crate arch) **không** kéo `ktest` — bài học
+# KT-77b cho virtio-blk (`vblk = ["ktest"]` trước KT-77c).
+product-fs = ["product-shell", "vifast-plat-riscv64/block"]
 # KT-73: ảnh `ktest-con` — UART RX IRQ → ring → U-mode + virtio-console hai queue. Ảnh sản phẩm
 # và các ảnh cũ **không** bật (giữ nguyên `.text`/mapping; xem `docs/k6-console.md` §6).
 con = ["ktest", "user", "vifast-plat-riscv64/vcon"]

@@ -84,7 +84,7 @@ pub mod pager_fault;
 /// sản phẩm chưa mở K6-driver nên giữ nguyên `.text` (KT-73 mở cho sản phẩm).
 /// KT-73: console **dùng lại** module này (`init_for(VirtioKind::Console)`) — một đường quét
 /// ECAM/BAR/cap cho mọi thiết bị virtio.
-#[cfg(any(feature = "vblk", feature = "vcon"))]
+#[cfg(any(feature = "vblk", feature = "vcon", feature = "block"))]
 pub mod pci;
 pub mod plic;
 /// KT-56: probe trap **thật** cho `FaultKind` (chỉ ảnh test — `#[cfg(feature = "ktest")]`).
@@ -116,7 +116,7 @@ pub mod user_stack;
 #[cfg(feature = "user")]
 pub mod user_tls;
 /// **KT-72** driver virtio-blk thật (virtqueue + read/write/flush) — chỉ ảnh test.
-#[cfg(feature = "vblk")]
+#[cfg(any(feature = "vblk", feature = "block"))]
 pub mod virtio_blk;
 /// **KT-73** driver virtio-console (`0x1003`) — hai virtqueue rx/tx, dùng lại `pci.rs` của KT-72
 /// (không nhân đôi đường ECAM/BAR). Chỉ ảnh test `ktest-con` (`feature = "vcon"`).
@@ -877,3 +877,21 @@ pub fn probe_nested_trap() -> ! {
         core::hint::spin_loop();
     }
 }
+// ---------------------------------------------------------------------------------------------
+// **KT-77c** — vì sao có feature `block` (crate này, `Cargo.toml`) và vì sao hai `#[cfg]` ở trên
+// (dòng `pci` + dòng `virtio_blk`) chỉ được **sửa tại chỗ**, không thêm/bớt dòng:
+//
+// * `ktest` là nhãn **harness** (probe/TAP). Trước KT-77c `vblk = ["ktest"]` nên ảnh **sản phẩm**
+//   bật virtio-blk sẽ kéo `probe` vào ảnh — **cùng bẫy** `user = ["ktest"]` mà KT-77b đã sửa cho
+//   U-mode (OD-K6-1, D2-08). Không tệp nào của driver (`virtio_blk.rs`, `pci.rs`,
+//   `lib/vifast-virtio`) có `cfg(feature = "ktest")` ⇒ phụ thuộc **chỉ là nhãn**, không phải mã.
+// * `block = []` = phần kernel của virtio-blk; `vblk = ["block", "ktest"]` giữ nguyên hành vi ảnh
+//   test (một dòng mã driver không đổi).
+// * **Byte-repro**: ảnh **không** feature phải giữ đúng baseline `c1072d72` (KT-79, D2-122). Một
+//   dòng `//` thêm vào giữa tệp làm lệch **số dòng** của mọi panic location phía sau ⇒ `.rodata`
+//   đổi (đo được: `JOURNAL/kt77c-logs/kt77c-baseline-lineshift.log`). Vì vậy giải thích nằm ở
+//   **cuối tệp** và hai `#[cfg]` được sửa **tại chỗ**.
+/// **KT-77c** — ô `static` một lần ghi cho object lớn (`Fs` ≈ 13 KiB) sống trong `.bss` thay vì
+/// trên stack 64 KiB. API **an toàn**; `unsafe` nằm trong tệp này (crate thuộc danh sách đóng
+/// D2-17) để `vifast-kbin-riscv64` không cần `unsafe` (luật R5).
+pub mod static_slot;

@@ -24,105 +24,25 @@ Mọi số đo dưới đây nằm trong khối ```` ```text scope=… ```` trí
 - **Ca âm thứ ba**: gửi byte nhưng `expect` sai ⇒ byte **đã vào shell** (`# shell: ?`) và kịch bản
   đỏ (`exit` ba) — chứng minh kịch bản không phải "xanh sẵn".
 - Ngân sách: ảnh canonical **dưới trần**; `size_of::<Machine>()` **không đổi**.
+- **Sha phải sinh từ cây đã commit** (D2-108A lần thứ tư): ảnh bằng chứng dưới đây build từ
+  commit `12fbff3e` khi `v2/kernel` sạch; bản `39ca3cc6…` là **bản trước commit — KHÔNG dùng**
+  (không bằng chứng, không matrix/soak).
+- **Detector có lớp `probe`** (D2-123(1)): ảnh sản phẩm không bật feature `ktest` ⇒ không biên
+  dịch `probe`; ca âm dùng **feature-graph** vì ảnh canonical đã strip hết symtab.
 - **Đường U-mode trước KT-77b phụ thuộc feature `ktest`** của crate arch (xem §9): đã tách bằng
   feature `umode` (kernel) + `product-shell` (ảnh sản phẩm); ảnh sản phẩm **không** link module
   harness nào. Đây **không** phải "nhét harness vào ảnh sản phẩm" — hướng ngược lại.
 
-## 2. Ảnh canonical và artifact đo
+## 2. Ảnh đo: sinh từ **cây đã commit** (D2-108A)
 
-Ảnh đo được **copy vào `v2/artifacts/<sha256>.bin`** (quyền chỉ đọc, không ghi) rồi boot **từ tệp
-đó**; mọi dòng log parity đều in `image_sha256` của tệp đang boot (đón trước D2-122.6b; việc đóng
-băng artifact thuộc KT-84).
+**Luật build (lần thứ tư của D2-108A):** sha trong tài liệu **phải** sinh từ **cây đã commit**;
+quy trình: `build → commit → build lại xác nhận cùng sha`. Bản `39ca3cc6…` được build khi
+`proc_rt.rs` còn khác bản đã commit ⇒ **gắn nhãn "bản trước commit"**: KHÔNG dùng làm bằng chứng,
+KHÔNG dùng cho matrix/soak.
 
-Hai lần build **độc lập** (hai `CARGO_TARGET_DIR` tạm khác nhau) cho **cùng sha** — đây là bằng
-chứng tái lập của lần build này, không thay cho KT-79 (KT-79 mới là task chứng minh **hai** máy):
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-build-shell-canonical.log
-REPRO machine=Darwin-arm64 root=/Users/mps/dvchd/ViFastOs sha256=39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57 size=176768 wall_s=13 build=6e90c73c43f9b4aa text=106764 image=/private/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/vifast-repro-target.2P3GZI/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
-```
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-build-canonical.log
-REPRO machine=Darwin-arm64 root=/Users/mps/dvchd/ViFastOs sha256=39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57 size=176768 wall_s=13 build=6e90c73c43f9b4aa text=106764 image=/private/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/vifast-repro-target.cwNsB3/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
-```
-
-Ảnh **không shell** của cùng lần build (ca âm tiêu chí ba) vẫn **đúng byte** như baseline KT-79
-(`A1-175`: ảnh phát hành trong repo không đổi):
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-build-canonical.log
-REPRO machine=Darwin-arm64 root=/Users/mps/dvchd/ViFastOs sha256=c1072d72d9a50809a2d5f236088b12569b09dc03b0a87d13c113040e9dc4b998 size=82552 wall_s=7 build=2cbe9bbe339d7c02 text=49874 image=/private/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/vifast-repro-target.POEdTa/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
-```
-
-**Chưa có** ELF đủ symbol cho ảnh có shell: `repro-build.sh` hiện chỉ xuất ảnh đã strip (D2-122
-yêu cầu hai tệp cùng lần build) — phần đó thuộc **KT-84**, ghi ở đây để không ai đọc nhầm.
-
-## 3. Đường boot: kernel giao máy cho runtime U-mode
-
-`src/main.rs` giữ **nguyên** các pha K3 (MMU, object layer, core, PLIC/UART IRQ, timer, SMP) rồi:
-
-- in dòng TAP `ok … k3 boot` (dòng bằng chứng cũ, không đổi);
-- nếu feature `product-shell` **bật**: in dòng `# k3 shell: handoff …` rồi gọi
-  `proc_rt::run(...)` — **không** in `# k3 halt`, vì shell phải sống để nhận kịch bản serial;
-- nếu feature **tắt**: giữ **nguyên** `# k3 halt` + `halt(0)` (ca âm; ảnh đúng sha baseline).
-
-`src/proc_rt.rs` (ảnh sản phẩm) dựng **cùng bố cục cspace** với ảnh test nhờ module hằng dùng
-chung `src/proc_abi.rs`; ba chương trình U-mode hardcode số endpoint trong ELF của chính chúng
-(`init/procsrv_user.rs:29`, `init/shell_user.rs:45`) nên bố cục kernel phải khớp từng slot:
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77a-serial-1-help-serial-custom-smp4.log
-# product shell: harts=4 procsrv=0xc shell=0xe victim=0x10 kern=0x12 const:ep_proc=2 const:ep_ps=5 const:ep_events=8 const:slot_cspace=20 input=serial no-inject=1
-```
-
-Runtime **không** có script nội bộ, **không** TAP, **không** `captured_*`. Nó **có** phần policy
-mà `ps`/`kill` cần (`PS_REQ` → đọc `Machine` → `PS_REPLY`; `EV_KILL` → `Tcb.Suspend(Abort)`;
-fault `Exit` → chuyển tiếp sang procsrv) — trước KT-77b phần này **chỉ** nằm trong
-`proc_demo.rs` (ảnh test), đúng dạng "user mode phụ thuộc harness" mà OD-K6-1 cảnh báo. Cách xử
-lý: tách **policy** sang module **không** phụ thuộc test (ba tệp `proc_abi.rs`, `proc_rt.rs` và
-phần service dùng chung) — **không** `#[cfg(feature = "ktest")]` cho phần sản phẩm.
-
-## 4. Byte của người dùng: serial → ngắt RX → ring → shell U-mode
-
-Byte đi **từ ngoài** (stdin QEMU) → PLIC ngắt RX của UART → handler → ring KT-69 → shell U-mode.
-Runtime mở **cửa sổ RX ngắn khi đang ở S-mode** rồi đóng trước khi hạ U-mode. Lý do đo được:
-trap từ U-mode **không** đổi `satp` về root kernel, mà handler đọc ring qua **physmap** — physmap
-(root index trên hai trăm) **không** map trong VSpace user (`copy_kernel_low_root` chỉ chép nửa
-thấp), nên ngắt đến đúng lúc đang chạy U-mode sẽ page-fault fatal. Đây là **nợ K7** (§10), không
-phải phụ thuộc harness; byte đến khi cửa sổ đóng nằm ở FIFO của UART rồi được vét cạn.
-
-Bằng chứng một boot sạch có `exit` (halt hẳn, không bị timeout): shell exit, procsrv nhận
-`Exit`, ring rỗng và hợp lệ:
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-run-exit-smp1.log
-# u-mode exit: code=0 faultkind=Exit{0} tcb=14 state=BlockedOnSend
-# proc: recv exit pid=14 code=0
-# product halt: shell_exit=0 fault_seen=1 events=6 ps_replies=1 ps_n=3 kill_suspend=1 proc_up=1 rx_windows=296 rx_irqs=0 rx_bytes=32 rx_late=32 ring_used=0 ring_head=2 ring_tail=2 ring_ok=1
-```
-
-**Đọc đúng `fault_seen`**: đây là **một** fault `FaultKind::Exit{0}` của shell — **không** phải page
-fault, không phải W^X. Shell gọi `Exit(0)` (`init/shell_user.rs`, nhánh `exit`), core ghi
-`Tcb.last_fault` khi procsrv `NBRecv` fault đã xếp hàng (`v2/kernel/vifast-core/src/core_ipc.rs:319`;
-nhánh procsrv đang chờ là `v2/kernel/vifast-core/src/core_ipc.rs:802`), procsrv báo `EV_FAULT` và runtime đếm ở
-`v2/kernel/vifast-kbin-riscv64/src/proc_rt.rs:185`. Ca W^X chủ đích **không** có trên ảnh sản
-phẩm: nó chỉ nằm trong ảnh test (`v2/kernel/vifast-kbin-riscv64/src/ktest_proc.rs`, TAP cuối) và
-kết thúc bằng `PANIC: u-mode fault …` — log ảnh test ở §10.
-
-## 5. Prompt `shell>`
-
-Shell U-mode in `shell>` **thành dòng riêng** sau `# shell: up` và sau mỗi dòng lệnh. Vì sao
-không in tiền tố cùng dòng như v1: `expect` của `spec/v1-parity.toml` neo theo dòng
-(dạng `^# shell: …$`), nên nếu prompt dính cùng dòng thì kịch bản sẽ trượt oan.
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77a-serial-1-help-serial-custom-smp4.log
-# shell: up cmds=help/echo/ps/wait/kill/exit
-shell>
-# shell: help cmds=6
-```
-
-## 6. Kịch bản parity trên ảnh sản phẩm (một/hai/bốn hart)
-
-Runner `v2/test/parity/run.sh --mode serial --image v2/artifacts/<sha>.bin --smp N` (dùng
-**nguyên** guard KT-78). Mỗi cấu hình hart: **bốn trên bốn** mục `active`, không còn QEMU sót sau khi script dọn.
-Số `khop` lớn hơn `min_count` vì `v2/test/parity/stdin_wrap.sh:32-43` **cố ý** bơm payload lặp
-trong cửa sổ ngắn (thiết kế của KT-77a, không phải lỗi của runtime).
+Ảnh bằng chứng build từ commit `12fbff3e` (cây `v2/kernel` sạch — đã đối chiếu `git status`
+trống trước khi build). Sha + số byte do **runner đọc lại từ chính tệp đang boot**, không phải số
+chép tay:
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-parity-smp124.log
 ===== SMP=1 =====
@@ -142,6 +62,7 @@ ok 1 - help (khop=16 >= 2, waited_ms=0)
 ok 2 - echo (khop=8 >= 1, waited_ms=0)
 ok 3 - ps (khop=8 >= 2, waited_ms=0)
 ok 4 - kill (khop=8 >= 1, waited_ms=0)
+# parity: qemu_con_sot_total=0 qemu_cua_script=0
 # parity: KET_LUAN=ok (exit 0)
 ```
 
@@ -149,7 +70,7 @@ Số hart **thật** trong log boot (không phải hằng trong tài liệu) —
 bốn hart; ba hart thứ cấp được `hart_start`:
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-run-exit-smp4.log
-# smp: boot=1 harts=4 present=0xf online=0xf started=0xd absent=0xf0 timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
+# smp: boot=0 harts=4 present=0xf online=0xf started=0xe absent=0xf0 timeout=0 dtb=0x87e00000 dtb_magic=1 base=0x80400000 stride=0x1d000
 ```
 
 ## 7. Ba ca âm
@@ -163,6 +84,10 @@ not ok 1 - help: khong thay shell trong log (qemu_rc=0)
 # parity: KET_LUAN=khong_co_shell (exit 5)
 ```
 
+Log ca âm có dòng đếm QEMU toàn máy khác không ở vài lần chạy **không** phải QEMU của script
+này: `qemu_cua_script` bằng không và `verdict` là `OK` ở cả `before` lẫn `after`; QEMU sót thuộc
+**tab khác** đang đo song song (các lần chạy ghi ở journal).
+
 **(b) Detector harness** — ảnh sản phẩm **không** có marker harness; ca âm dùng ảnh `ktest-proc`
 **canonical, đã strip** (cùng đường remap/strip với ảnh sản phẩm, không phải "bắt nhờ symtab"):
 
@@ -171,7 +96,18 @@ not ok 1 - help: khong thay shell trong log (qemu_rc=0)
 ok 1 - anh san pham khong chua ma harness (hits=0)
 # scan negative: hits=22
 ok 2 - ca am: anh co harness bi bat (hits=22 > 0)
+# feat product: ktest=0 umode=1
+# feat harness: ktest=1
+ok 3 - probe gate: cau hinh san pham KHONG bat 'ktest' (probe khong duoc bien dich), co 'umode'
+ok 4 - ca am cua probe gate: cau hinh anh test BAT 'ktest' (ktest=1 > 0)
 ```
+
+**Phạm vi ca âm:** ảnh test `ktest-proc` build **cùng pipeline canonical** (cùng remap + strip) nên
+ca âm không "bắt nhờ symtab". Với `probe` (D2-123(1)), literal trần **bị loại** vì PLIC in sẵn
+`plic: probe khong khoi phuc priority irq` (dương tính giả); lớp chuỗi dùng symbol **đủ điều kiện**
+(`vifast_plat_riscv64::probe`, `probe::on_trap`, `probe_fault_entry`, `src/probe.rs` — chỉ hiện khi
+còn symtab), và lớp **feature-graph** (hai dòng `ok` về probe gate) mới là lớp kiểm luôn chạy được trên ảnh
+stripped: thiếu `ktest` ⇒ `probe` không được biên dịch.
 
 **(c) Byte vào shell nhưng `expect` sai** — chứng minh kịch bản **không** xanh sẵn: shell in
 `# shell: ?` cho dòng sai, runner phân loại "byte đã vào shell" và đỏ (`exit` ba):
@@ -183,16 +119,16 @@ not ok 1 - help: byte da vao shell (co 9 dong 'shell: ?') nhung expect khong kho
 
 ## 8. Ngân sách (giữ nguyên ngưỡng)
 
-Ảnh sản phẩm có shell **dưới trần ảnh**; `.data+.bss` dưới trần QD §3.5; `size_of::<Machine>()`
-**không đổi** vì KT-77b không thêm trường vào core (chỉ dùng lại API sẵn có):
-
-```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-budget.log
-# image=product-shell path=artifacts/39ca3cc62fcbb7527130592d8001c8b699412f0afd916d2baa30798a3adf4f57.bin file=176768 data+bss=203232 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
-```
+Ảnh sản phẩm có shell **dưới trần ảnh**; `.data+.bss` dưới trần QD §3.5 (xem khối §2);
+`size_of::<Machine>()` **không đổi** vì KT-77b không thêm trường vào core (chỉ dùng lại API sẵn có):
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-run-exit-smp1.log
 # core: product addr=0x8022a080 bytes=189384 pin=196608 image_cap=262144 untyped=65536 retype=1 configure=1 suspend=1 resume=1 state_ready=1 objects=3 caps=1 used=0 check_caps=1 check_bytes=1 check_all_bytes=1 check_sched=1 footprint_ok=1
 ```
+
+**Hai chỉ số khác nhau, đừng lẫn:** `.data+.bss` là chỉ số của **cổng ảnh** (QD §3.5, trần ghi ở
+khối §2); còn "bộ nhớ tĩnh" của OD-K6-2 là `size_of::<Machine>()` — chỉ số của **core** (`core_bridge`,
+không đổi bởi KT-77b), đọc ở khối trên. Hai ngưỡng độc lập; Agent 0 chốt metric.
 
 ## 9. Tách phụ thuộc harness (`ktest` → `umode` + `product-shell`)
 
@@ -241,6 +177,11 @@ PANIC: u-mode fault scause=0xc stval=0x40002000 sepc=0x40002000 sstatus=0x800000
 - **Ảnh test đổi `.text`** vì `shell.elf` thêm prompt và `proc_demo` đổi nguồn hằng số; ma trận
    và các log `ktest-*` cũ phải chạy lại (TAP kỳ vọng **không** đổi — §10), việc đó thuộc bước đo
    của lead (vùng `v2/test/boot/**` là của KT-78, task này **không** chạm).
+- **Repro build & ELF U-mode**: build ở **đường dẫn khác** (git worktree) cho sha khác dù cùng
+  commit và cùng `.text` digest — `build.rs` gọi `$RUSTC` trực tiếp cho `init/*_user.rs` nên
+  **không** nhận `--remap-path-prefix`; đường dẫn tuyệt đối lọt vào `.rodata`. Nợ cho KT-79/KT-85.
+- **Ảnh trên là bằng chứng tại commit `12fbff3e`**: KT-77c đang đổi ảnh (FS/vblk) ⇒ không tuyên
+  bố là ảnh phát hành; sau khi commit vá D2-102 phải build lại (sha đổi).
 - **`user` không còn kéo `ktest`**: một số mục `pub(crate)` của crate arch (ví dụ
    `user::ranges_save`) chỉ được `exec` dùng, nên khi build `product-shell` trình biên dịch cảnh
    báo "never used". Không phải lỗi; dọn bằng `#[cfg(feature = "exec")]` ở lần chạm tệp sau.

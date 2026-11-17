@@ -18,6 +18,9 @@ use std::process::Command;
 
 fn main() {
     let dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    // **KT-86** (D2-125.3): danh tính bản dựng (`git rev` 12 hex + cờ dirty) — khối **phụ thêm**,
+    // không sửa gì bên dưới; xem `build_identity` ở cuối tệp.
+    build_identity(&dir);
     println!("cargo:rustc-link-arg=-T{dir}/linker.ld");
     println!("cargo:rustc-link-arg=--gc-sections");
     println!("cargo:rerun-if-changed=linker.ld");
@@ -114,7 +117,22 @@ fn main() {
         ("vifast_ring", ring_lib.as_path()),
         ("vifast_virtio", virtio_lib.as_path()),
     ];
-    build_user_elf(dir, "shell_user.rs", "shell.elf", &shim_shell);
+    // **KT-77c**: shell của ảnh **sản phẩm** có thêm `ls`/`cat`/`write` (dịch vụ FS của kernel);
+    // shell của ảnh **test** (và của ảnh ca âm "shell nhưng không FS") **không** có ba lệnh đó ⇒
+    // `help cmds=` giữ nguyên `6` và kỳ vọng của harness (`proc_demo.rs`, `v2/test/boot/ktest.sh`)
+    // **không** phải sửa. Cấu hình đi bằng `--cfg shell_fs` cho **đúng một** ELF này.
+    let shell_fs = std::env::var_os("CARGO_FEATURE_PRODUCT_FS").is_some();
+    let mut shell_args: [&str; 3] = ["--check-cfg=cfg(shell_fs)", "", ""];
+    if shell_fs {
+        shell_args[1] = "--cfg";
+        shell_args[2] = "shell_fs";
+    }
+    let shell_args = if shell_fs {
+        &shell_args[..]
+    } else {
+        &shell_args[..1]
+    };
+    build_user_elf_with(dir, "shell_user.rs", "shell.elf", &shim_shell, shell_args);
     build_user_elf(dir, "child_user.rs", "child.elf", &shim);
     // KT-67a: chương trình U-mode invocation/memsrv (D2-97).
     build_user_elf(dir, "inv_user.rs", "inv.elf", &shim);
@@ -261,6 +279,17 @@ fn build_rlib(dir: &Path, crate_name: &str, source: &str, externs: &[(&str, &Pat
 }
 
 fn build_user_elf(dir: &Path, source_name: &str, out_name: &str, externs: &[(&str, &Path)]) {
+    build_user_elf_with(dir, source_name, out_name, externs, &[]);
+}
+
+/// Như [`build_user_elf`] nhưng thêm cờ rustc (`extra`) — KT-77c dùng cho `--cfg shell_fs`.
+fn build_user_elf_with(
+    dir: &Path,
+    source_name: &str,
+    out_name: &str,
+    externs: &[(&str, &Path)],
+    extra: &[&str],
+) {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let out = out_dir.join(out_name);
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
@@ -277,8 +306,11 @@ fn build_user_elf(dir: &Path, source_name: &str, out_name: &str, externs: &[(&st
         .arg("-C")
         .arg("opt-level=1")
         .arg("-C")
-        .arg("debuginfo=0")
-        .arg("-C")
+        .arg("debuginfo=0");
+    for arg in extra {
+        cmd.arg(arg);
+    }
+    cmd.arg("-C")
         .arg("strip=symbols")
         .arg("-C")
         .arg("relocation-model=static")
@@ -309,4 +341,152 @@ fn build_user_elf(dir: &Path, source_name: &str, out_name: &str, externs: &[(&st
     }
     let len = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
     println!("cargo:warning=KT-65 {out_name} {len} B");
+}
+
+// =============================================================================================
+// **KT-86** (D2-125.3) — danh tính bản dựng nhúng vào ảnh.
+//
+// Vì sao: bốn lần artifact lệch mã nguồn (D2-108A/KT-71/76/79/77b) đều được phát hiện **sau**
+// khi đo. Từ đây ảnh tự mang `git rev` + cờ dirty của **lúc build**, kernel in một dòng
+// `# build: rev=<12 hex> dirty=<0|1>` (từ `const`, D2-102 — không literal), và harness
+// `v2/test/boot/build-rev.sh` **từ chối đo** khi ảnh lệch `HEAD` hoặc dirty=1.
+//
+// Định nghĩa `dirty` (nguồn sự thật duy nhất: `v2/test/boot/build-rev.sh`, cùng phạm vi):
+// chỉ tính `v2/kernel` + `v2/lib`, **có** tính tệp chưa track, **không** tính `v2/docs` /
+// `v2/agent/JOURNAL` (nếu tính, mỗi lần ghi log sẽ làm mọi phép đo bị từ chối).
+//
+// Fail-closed: không đọc được rev ⇒ `unknown`; không chứng minh được là sạch ⇒ `1`. Cả hai đều
+// làm cổng **từ chối**, không bao giờ dẫn tới "nhận nhầm là sạch".
+// =============================================================================================
+
+/// `rev` khi không đọc được `git` (không phải repo, không có git): harness thấy giá trị này là
+/// **từ chối đo** — cố ý, không có nhánh "đo được dù không biết nguồn".
+const UNKNOWN_REV: &str = "unknown";
+
+/// Số ký tự hex của `rev` trong dòng bằng chứng (khớp `VBREV_REV_LEN` của harness).
+const REV_LEN: usize = 12;
+
+/// Đặt `VIFAST_BUILD_REV`/`VIFAST_BUILD_DIRTY` cho crate (⇒ `env!` trong `src/main.rs`) và khai
+/// báo mọi thứ phải làm build script **chạy lại** để giá trị không bị cũ.
+fn build_identity(manifest_dir: &str) {
+    // Gốc cây nguồn = `<manifest>/../../..` (v2/kernel/vifast-kbin-riscv64 → gốc repo).
+    let root = std::fs::canonicalize(Path::new(manifest_dir).join("../../.."))
+        .unwrap_or_else(|_| PathBuf::from(manifest_dir).join("../../.."));
+    // Env do `v2/tools/repro-build.sh` đặt được **ưu tiên**: giá trị của nó do
+    // `v2/test/boot/build-rev.sh` tính (nguồn sự thật duy nhất của định nghĩa dirty) ⇒ dòng
+    // `REPRO` của script và dòng `# build:` của ảnh **không thể** lệch định nghĩa.
+    let rev = std::env::var("VIFAST_BUILD_REV")
+        .ok()
+        .map(|v| normalize_rev(&v))
+        .filter(|v| is_rev12(v))
+        .unwrap_or_else(|| git_head12(&root).unwrap_or_else(|| UNKNOWN_REV.to_string()));
+    let dirty = std::env::var("VIFAST_BUILD_DIRTY")
+        .ok()
+        .filter(|v| v == "0" || v == "1")
+        .unwrap_or_else(|| git_dirty(&root));
+    println!("cargo:rustc-env=VIFAST_BUILD_REV={rev}");
+    println!("cargo:rustc-env=VIFAST_BUILD_DIRTY={dirty}");
+    println!("cargo:warning=KT-86 build identity rev={rev} dirty={dirty}");
+    // Bản build **sau** phải tính lại danh tính: env đổi, HEAD/index đổi, hoặc mã nguồn trong
+    // phạm vi dirty đổi. Thiếu các dòng này cargo dùng lại build script cũ ⇒ ảnh mang rev cũ
+    // (đúng lớp lỗi KT-76). Mọi bất định chỉ dẫn tới **từ chối đo**, không dẫn tới nhận nhầm.
+    println!("cargo:rerun-if-env-changed=VIFAST_BUILD_REV");
+    println!("cargo:rerun-if-env-changed=VIFAST_BUILD_DIRTY");
+    for path in identity_watch_paths(&root) {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+}
+
+/// `git -C <root> <args>`: stdout đã trim khi exit 0, `None` khi không chạy được/lỗi.
+fn git_stdout(root: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("--no-optional-locks")
+        .args(args)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// 12 ký tự hex đầu của `HEAD` (thường hoá thường). `None` khi không có git/repo.
+fn git_head12(root: &Path) -> Option<String> {
+    let head = git_stdout(root, &["rev-parse", "--verify", "HEAD"])?;
+    let head = head.to_ascii_lowercase();
+    if head.len() < REV_LEN || !head.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(head[..REV_LEN].to_string())
+}
+
+/// `"1"` khi `v2/kernel`/`v2/lib` có thay đổi chưa commit (kể cả tệp chưa track); **mọi bất định
+/// ⇒ `"1"`** (`git` lỗi, không có git, không phải repo) — fail-closed như harness.
+fn git_dirty(root: &Path) -> String {
+    match git_stdout(
+        root,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+            "--ignore-submodules=all",
+            "--",
+            "v2/kernel",
+            "v2/lib",
+        ],
+    ) {
+        Some(out) if out.is_empty() => "0".to_string(),
+        _ => "1".to_string(),
+    }
+}
+
+/// Danh sách đường dẫn phải làm build script chạy lại (giữ danh tính không bị cũ).
+///
+/// KHÔNG watch cả `v2/kernel`: `v2/kernel/target/` nằm trong đó, mỗi lần build lại đổi ⇒ build
+/// script (và ~20 ELF U-mode) chạy lại mọi lần. Watch từng crate + `v2/lib` là đủ phạm vi dirty.
+fn identity_watch_paths(root: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    if let Some(git_dir) = git_stdout(root, &["rev-parse", "--absolute-git-dir"]) {
+        out.push(Path::new(&git_dir).join("HEAD"));
+    }
+    if let Some(index) = git_stdout(root, &["rev-parse", "--git-path", "index"]) {
+        let index = Path::new(&index);
+        out.push(if index.is_absolute() {
+            index.to_path_buf()
+        } else {
+            root.join(index)
+        });
+    }
+    for rel in [
+        "v2/kernel/vifast-kbin-riscv64",
+        "v2/kernel/vifast-core",
+        "v2/kernel/vifast-plat-common",
+        "v2/kernel/vifast-plat-riscv64",
+        "v2/kernel/vifast-plat-user",
+        "v2/kernel/Cargo.toml",
+        "v2/kernel/Cargo.lock",
+        "v2/lib",
+    ] {
+        out.push(root.join(rel));
+    }
+    out
+}
+
+/// 12 hex thường của `rev` (env có thể là SHA đầy đủ hoặc có khoảng trắng/xuống dòng).
+fn normalize_rev(value: &str) -> String {
+    let hex: String = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .take(REV_LEN)
+        .collect();
+    hex
+}
+
+/// `true` nếu đúng 12 ký tự hex (định dạng dòng bằng chứng của harness).
+fn is_rev12(value: &str) -> bool {
+    value.len() == REV_LEN && value.chars().all(|c| c.is_ascii_hexdigit())
 }

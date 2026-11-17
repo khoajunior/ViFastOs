@@ -1,0 +1,1 @@
+REPRO machine=Darwin-arm64 root=/Users/mps/dvchd/ViFastOs sha256=64a18ebff24af448a67ddf904cdeb9732091c9a02c8f00aa25cd9e16aa903cb0 size=205440 wall_s=14 build=1e84e92dc17e58ab text=130062 image=/private/tmp/kt77c-final1/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64

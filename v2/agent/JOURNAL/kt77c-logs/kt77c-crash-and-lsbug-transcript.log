@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# KT-77c — TRÍCH NGUYÊN VĂN hai sự cố **trong lúc làm** (không phải log gốc còn trên đĩa).
+#
+# Vì sao tệp này tồn tại: hai lần boot dưới đây ghi vào tệp nháp `/tmp/…` rồi bị **ghi đè** bởi lần
+# boot sau (cùng tên tệp), nên log gốc không còn. Nội dung dưới đây là **trích nguyên văn** những
+# dòng do chính QEMU/kernel in ra ở lần boot đó, lấy từ phiên làm việc của agent (không sửa chữ, chỉ
+# thêm tiêu đề mục). Các phép đo **dùng làm bằng chứng** của tài liệu `v2/docs/k6-product-fs.md` đều
+# nằm ở tệp log còn trên đĩa (`kt77c-boot-*.log`, `kt77c-parity-*.log`, `kt77c-build-*.log`).
+#
+# ---------------------------------------------------------------------------------------------
+# MỤC 1 — tràn guard page 64 KiB khi `Fs` (≈ 13 KiB) đi qua bốn tầng trả-về-theo-giá-trị
+#   Ảnh: bản `proc_fs.rs` đầu tiên (chưa có `StaticSlot`), `product-fs`, boot 1 hart, có `-drive`.
+#   Hệ quả: PANIC ngay sau dòng `# product rx: …`, TRƯỚC khi shell U-mode in `# shell: up`.
+# ---------------------------------------------------------------------------------------------
+# product rx: const:window_ticks=20000 const:watchdog_s=600 const:rx_path=uart-rx-irq->plic->ring->u-mode
+PANIC: guard page fault scause=0xf stval=0x80400000 sepc=0x8021f864 sstatus=0x8000000200006100
+# regs ra=0x80203bb8 sp=0x803fb5d0 gp=0x0 tp=0x0
+# regs a0=0x803feba0 a1=0x804054f8 a2=0x34a0 a3=0x80402040 a4=0x80400000 a5=0x34a0 a6=0x80406958 a7=0x0
+
+# ---------------------------------------------------------------------------------------------
+# MỤC 2 — tên tệp trong `ls` bị hỏng vì `ino` bị OR vào cùng MR word với byte tên
+#   Ảnh: bản `proc_fs.rs` thứ hai, `product-fs`, boot 1 hart, `-drive` 4 MiB (đĩa **đã có** FS từ
+#   lần boot trước: `/README` ino 2, `/p.txt` ino 3). Cơ chế: reply `ls` đặt `ino` ở `words[1]` rồi
+#   OR byte tên vào `words[1]` ⇒ `'p'(0x70) | 3 = 0x73 = 's'`.
+#   Hệ quả: `/p.txt` hiện thành `/s.txt`; nội dung vẫn đúng (`cat /p.txt` → `hello77`).
+# ---------------------------------------------------------------------------------------------
+shell>
+  f README
+  f s.txt
+# shell: ls n=2 path=/
+
+# ---------------------------------------------------------------------------------------------
+# MỤC 3 — cùng phép `ls` **sau khi sửa** (cùng đĩa, cùng ino: 2 và 3) — tên đúng
+#   Dòng dưới trích từ `kt77c-boot-reboot-read-smp1.log` (còn trên đĩa) để đối chứng Mục 2.
+# ---------------------------------------------------------------------------------------------
+shell>
+  f README
+  f p.txt
+# shell: ls n=2 path=/

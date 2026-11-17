@@ -1,0 +1,14 @@
+# evidence: image=artifacts/64a18ebff24af448a67ddf904cdeb9732091c9a02c8f00aa25cd9e16aa903cb0.bin sha256=64a18ebff24af448a67ddf904cdeb9732091c9a02c8f00aa25cd9e16aa903cb0
+# evidence: bat dau 2026-11-17T04:56:46Z
+# evidence: kt77c-boot-write-smp1 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-write-smp1.log
+# evidence: disk_sha256_sau_boot1=cb9ea10368235f0715086cc58a7eafffb6d9bf747f8464299daad138466d91f4
+# evidence: kt77c-boot-reboot-read-smp1 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-reboot-read-smp1.log
+# evidence: disk_sha256_sau_boot2=cb9ea10368235f0715086cc58a7eafffb6d9bf747f8464299daad138466d91f4
+# evidence: dia_khong_doi_giua_hai_boot=1 (boot 2 chi doc)
+# evidence: kt77c-boot-reboot-read-smp2 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-reboot-read-smp2.log
+# evidence: kt77c-boot-reboot-read-smp4 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-reboot-read-smp4.log
+# evidence: kt77c-boot-nodisk-smp1 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-nodisk-smp1.log
+# evidence: kt77c-boot-disk-broken-smp1 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-disk-broken-smp1.log
+# evidence: kt77c-boot-missing-disk-smp1 rc=0 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt77c-logs/kt77c-boot-missing-disk-smp1.log
+# evidence: xong 2026-11-17T04:56:59Z
+# evidence: qemu_con_sot_total=1

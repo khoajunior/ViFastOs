@@ -34,10 +34,30 @@ use vifast_plat_common::obj::CapId;
 use vifast_plat_common::trap::{TrapFrame, REG_SP};
 use vifast_plat_common::{Platform, PlatformWriter};
 use vifast_plat_riscv64::obj as aobj;
+#[cfg(feature = "product-fs")]
+use vifast_plat_riscv64::static_slot::StaticSlot;
 use vifast_plat_riscv64::user::{self, LoadedInit, Stop};
 use vifast_plat_riscv64::{core_bridge, uart_console, Riscv64Virt};
 
 use crate::proc_abi::*;
+/// **KT-77c**: dịch vụ FS của ảnh sản phẩm (chỉ có khi bật `product-fs`).
+#[cfg(feature = "product-fs")]
+use crate::proc_fs::{FsSvc, FsVol};
+
+/// Tham số FS của [`service`]: cặp **(trạng thái giao thức, `Fs` trong ô static)**. `Fs` **không**
+/// nằm trong khung stack nào ở đây — nó ở `.bss` qua
+/// [`vifast_plat_riscv64::static_slot::StaticSlot`] (xem `proc_fs.rs` đầu tệp).
+///
+/// Ca âm tiêu chí 5(c) build **không** `product-fs`: kiểu rỗng, không có mã FS nào trong ảnh,
+/// request FS của shell không được phục vụ (shell in `fs khong san sang` ⇒ parity FS đỏ).
+#[cfg(feature = "product-fs")]
+type FsArg<'a> = Option<(&'a mut FsSvc, &'a mut FsVol)>;
+#[cfg(not(feature = "product-fs"))]
+type FsArg<'a> = Option<&'a mut ()>;
+
+/// Ô `.bss` giữ `Fs` của ảnh sản phẩm (**một** lần dựng cho cả đời ảnh).
+#[cfg(feature = "product-fs")]
+static FS_SLOT: StaticSlot<FsVol> = StaticSlot::new();
 
 /// ELF U-mode do `build.rs` sinh (cùng nguồn với ảnh test: `init/procsrv_user.rs`,
 /// `init/shell_user.rs`); `CARGO_FEATURE_USER` bật ⇒ `build.rs` đã sinh hai tệp này.
@@ -62,6 +82,14 @@ const N_TCB: usize = 4;
 /// Cửa sổ RX mỗi vòng (tick 10 MHz): 2 ms — đủ để byte của một burst 16 B vào ring mà không làm
 /// shell chậm thấy được; số này là **thiết kế**, in kèm `const:` trong log (D2-102a).
 const RX_WINDOW_TICKS: u64 = 20_000;
+/// **D2-102a** — kiểu đầu vào của shell, in kèm nhãn `const:` trong dòng evidence (giá trị cấu
+/// hình, không phải số đo): byte đi từ **ngoài** qua UART, kernel không cắm script.
+const INPUT_MODE: &str = "serial";
+/// Số lần kernel tự bơm payload vào ring (ảnh sản phẩm: không lần nào).
+const INJECT_COUNT: u8 = 0;
+/// Đường byte của ảnh sản phẩm: ngắt RX của UART → PLIC → ring → U-mode.
+const RX_PATH: &str = "uart-rx-irq->plic->ring->u-mode";
+
 /// Watchdog: shell phải thoát hoặc máy phải còn tiến bộ trong 600 s; hết hạn ⇒ PANIC (runner đỏ),
 /// không treo im lặng. Dài hơn mọi ngưỡng boot của harness (20 s) nên không ảnh hưởng ca kiểm.
 const WATCHDOG_SECS: u64 = 600;
@@ -78,7 +106,7 @@ struct Task {
 struct Rig {
     tcb: [SlotRef; N_TCB],
     tcb_obj: [ObjId; N_TCB],
-    ep_slot: [SlotRef; 6],
+    ep_slot: [SlotRef; 7],
 }
 
 /// Trạng thái policy thu thập được (evidence + điều kiện dừng), không có phần TAP.
@@ -91,6 +119,8 @@ struct Svc {
     ps_n: usize,
     kill_ok: bool,
     shell_exit_core: Option<u64>,
+    /// Số reply FS đã gửi (KT-77c) — 0 ở ảnh **không** `product-fs`.
+    fs_replies: u64,
 }
 
 fn msg(label: u64, words: &[u64]) -> Message {
@@ -115,8 +145,12 @@ fn build_rig(untyped: ObjId) -> Rig {
         let us = SlotRef::new(root, 0);
         let uc = m.root_cap(untyped);
         m.put_cap(root, 0, uc).expect("KT-77b: cap untyped");
-        let ep_slots = [EP_FAULT, EP_PROC, EP_UART, EP_REPLY, EP_PS, EP_EVENTS];
-        let mut ep_slot = [SlotRef::new(root, 0); 6];
+        // **KT-77c**: thêm `EP_FS` (slot 7) — bố cục procsrv/shell/victim/kern không đổi, nên
+        // ảnh test (`proc_demo`) và ảnh sản phẩm vẫn dùng chung `proc_abi`.
+        let ep_slots = [
+            EP_FAULT, EP_PROC, EP_UART, EP_REPLY, EP_PS, EP_EVENTS, EP_FS,
+        ];
+        let mut ep_slot = [SlotRef::new(root, 0); 7];
         for (i, slot) in ep_slots.iter().enumerate() {
             let cap = m
                 .retype(us, ObjType::Endpoint, 0, 0)
@@ -176,7 +210,7 @@ fn build_rig(untyped: ObjId) -> Rig {
 
 /// Dịch vụ kernel giữa hai lượt U-mode — **cùng giao thức** với `proc_demo::service` (KT-65/KT-73),
 /// bỏ đúng phần harness: bơm script và đếm `captured_*`.
-fn service(m: &mut Machine, rig: &Rig, svc: &mut Svc) {
+fn service(m: &mut Machine, rig: &Rig, svc: &mut Svc, fs: &mut FsArg<'_>) {
     // 1) Sự kiện procsrv → kernel.
     while let Ok(Some(message)) = m.nb_recv(rig.tcb_obj[T_KERN], rig.ep_slot[5]) {
         svc.events += 1;
@@ -227,6 +261,33 @@ fn service(m: &mut Machine, rig: &Rig, svc: &mut Svc) {
             let _ = m.nb_send(rig.tcb_obj[T_KERN], rig.ep_slot[3], msg(PS_REPLY, &words));
             svc.ps_replies += 1;
             svc.ps_n = n;
+        }
+    }
+    // 4) **KT-77c** — `ls`/`cat`/ghi/`sync`: shell gửi `FS_REQ` (4 MR) trên endpoint slot 7,
+    //    kernel FS (`proc_fs::FsSvc`) trả **một** reply `FS_REPLY` trên endpoint reply. Một request
+    //    một reply nên shell không cần hàng đợi, và ngữ nghĩa `Yield`/`NBRecv` không đổi.
+    #[cfg(feature = "product-fs")]
+    {
+        if let Some((state, volume)) = fs.as_mut() {
+            while let Ok(Some(request)) = m.nb_recv(rig.tcb_obj[T_KERN], rig.ep_slot[6]) {
+                if u64::from(request.info.label()) != FS_REQ {
+                    continue;
+                }
+                let words = request.words();
+                let head = [
+                    words.first().copied().unwrap_or(0),
+                    words.get(1).copied().unwrap_or(0),
+                    words.get(2).copied().unwrap_or(0),
+                    words.get(3).copied().unwrap_or(0),
+                ];
+                let reply = state.request(volume, head);
+                let _ = m.nb_send(rig.tcb_obj[T_KERN], rig.ep_slot[3], msg(FS_REPLY, &reply));
+                svc.fs_replies += 1;
+            }
+        } else {
+            // Ảnh **không** FS: vẫn phải rút request khỏi hàng đợi để endpoint không đầy (không
+            // treo); shell nhận `timeout` và in `fs khong san sang` — parity FS đỏ (ca âm 5(c)).
+            while let Ok(Some(_)) = m.nb_recv(rig.tcb_obj[T_KERN], rig.ep_slot[6]) {}
         }
     }
 }
@@ -354,7 +415,7 @@ pub fn run(platform: &Riscv64Virt, load_untyped: CapId, core_untyped: ObjId) -> 
         let mut w = PlatformWriter(platform);
         let _ = writeln!(
             w,
-            "# product shell: harts={} procsrv=0x{:x} shell=0x{:x} victim=0x{:x} kern=0x{:x} const:ep_proc={} const:ep_ps={} const:ep_events={} const:slot_cspace={} input=serial no-inject=1",
+            "# product shell: harts={} procsrv=0x{:x} shell=0x{:x} victim=0x{:x} kern=0x{:x} const:ep_proc={} const:ep_ps={} const:ep_events={} const:slot_cspace={} const:input_mode={} const:inject={}",
             vifast_plat_riscv64::smp::hart_count(),
             rig.tcb_obj[T_PROCSRV],
             rig.tcb_obj[T_SHELL],
@@ -363,14 +424,30 @@ pub fn run(platform: &Riscv64Virt, load_untyped: CapId, core_untyped: ObjId) -> 
             EP_PROC,
             EP_PS,
             EP_EVENTS,
-            SLOT_CSPACE
+            SLOT_CSPACE,
+            INPUT_MODE,
+            INJECT_COUNT
         );
         let _ = writeln!(
             w,
-            "# product rx: const:window_ticks={} const:watchdog_s={} path=uart-rx-irq->plic->ring->u-mode",
-            RX_WINDOW_TICKS, WATCHDOG_SECS
+            "# product rx: const:window_ticks={} const:watchdog_s={} const:rx_path={}",
+            RX_WINDOW_TICKS, WATCHDOG_SECS, RX_PATH
         );
     }
+    // **KT-77c**: mở FS **trước** khi hạ U-mode (driver PCI/virtio-blk chạm MMIO ở S-mode).
+    // `medium=virtio-blk` khi có `-drive` (bền qua reboot); `medium=ram` (bay hơi) khi không có
+    // đĩa — cả hai đường đều in một dòng log, không im lặng và không treo.
+    // `open` dựng `Fs` **trong ô `.bss`** (`FS_SLOT`) và trả **tham chiếu** — không bản `Fs` nào
+    // nằm trong khung này (tránh tràn guard page 64 KiB; xem `proc_fs.rs` đầu tệp).
+    #[cfg(feature = "product-fs")]
+    let mut fs_open = crate::proc_fs::open(platform, &FS_SLOT);
+    #[cfg(feature = "product-fs")]
+    let mut fs_vol = fs_open.fs.take();
+    #[cfg(feature = "product-fs")]
+    let mut fs_state = fs_open.svc;
+    #[cfg(not(feature = "product-fs"))]
+    let mut fs_none: FsArg = None;
+
     let mut tasks = [
         Task {
             slot: SLOT_PROCSRV,
@@ -429,7 +506,18 @@ pub fn run(platform: &Riscv64Virt, load_untyped: CapId, core_untyped: ObjId) -> 
                 }
                 None => fail(platform, "khong chuyen duoc tcb sang Running"),
             }
-            core_bridge::with_machine(|m| service(m, &rig, &mut svc));
+            core_bridge::with_machine(|m| {
+                #[cfg(feature = "product-fs")]
+                {
+                    let mut arg: FsArg = fs_vol.as_deref_mut().map(|v| (&mut fs_state, v));
+                    service(m, &rig, &mut svc, &mut arg);
+                }
+                #[cfg(not(feature = "product-fs"))]
+                {
+                    let _ = &mut fs_none;
+                    service(m, &rig, &mut svc, &mut fs_none);
+                }
+            });
         }
         if let Some(code) = shell_code {
             // Cho procsrv nhận `FAULT_EXIT` của shell và in `# proc: recv exit` trước khi tắt:
@@ -443,17 +531,32 @@ pub fn run(platform: &Riscv64Virt, load_untyped: CapId, core_untyped: ObjId) -> 
                     let task = &mut tasks[T_PROCSRV];
                     let _ = turn(&rig, task, T_PROCSRV);
                 }
-                core_bridge::with_machine(|m| service(m, &rig, &mut svc));
+                core_bridge::with_machine(|m| {
+                    #[cfg(feature = "product-fs")]
+                    {
+                        let mut arg: FsArg = fs_vol.as_deref_mut().map(|v| (&mut fs_state, v));
+                        service(m, &rig, &mut svc, &mut arg);
+                    }
+                    #[cfg(not(feature = "product-fs"))]
+                    {
+                        let _ = &mut fs_none;
+                        service(m, &rig, &mut svc, &mut fs_none);
+                    }
+                });
                 if svc.faults >= 1 && svc.shell_exit_core.is_some() {
                     break;
                 }
             }
+            // **KT-77c**: tổng kết dịch vụ FS (số đo, không phải hằng) — in **trước** dòng halt để
+            // `grep '# product fs:'` thấy cả lúc mở volume lẫn lúc kết thúc.
+            #[cfg(feature = "product-fs")]
+            fs_state.report(platform, svc.fs_replies);
             let (head, tail, used, _) = uart_console::ring_stats();
             let stats = uart_console::stats();
             let mut w = PlatformWriter(platform);
             let _ = writeln!(
                 w,
-                "# product halt: shell_exit={} fault_seen={} events={} ps_replies={} ps_n={} kill_suspend={} proc_up={} rx_windows={} rx_irqs={} rx_bytes={} rx_late={} ring_used={} ring_head={} ring_tail={} ring_ok={}",
+                "# product halt: shell_exit={} fault_seen={} events={} ps_replies={} ps_n={} kill_suspend={} proc_up={} fs_replies={} rx_windows={} rx_irqs={} rx_bytes={} rx_late={} ring_used={} ring_head={} ring_tail={} ring_ok={}",
                 code,
                 svc.faults,
                 svc.events,
@@ -461,6 +564,7 @@ pub fn run(platform: &Riscv64Virt, load_untyped: CapId, core_untyped: ObjId) -> 
                 svc.ps_n,
                 svc.kill_ok as u8,
                 svc.procsrv_up as u8,
+                svc.fs_replies,
                 windows,
                 irqs,
                 stats.bytes,
