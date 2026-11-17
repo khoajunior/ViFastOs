@@ -1,0 +1,14 @@
+=== SOAK (fixture, cây bẩn) ===
+v2/test/boot/soak.sh: line 49: TARGET: unbound variable
+SOAK_EXIT=1
+
+=== PERSIST (fixture, cây bẩn) ===
+# qemu 11.1.3 (icount shift=6) — opensbi /opt/homebrew/share/qemu/opensbi-riscv64-generic-fw_dynamic.bin
+# build ảnh persist (riscv64gc-unknown-none-elf, release, --features ktest,vblk)
+# build vifast-fsutil (host)
+# image=ktest-persist path=/tmp/kt86/fix/v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-persist file=221248 data+bss=27352 budget=262144 stack=65536 guard=4096 trap_stack=16384 syscall_stack=32768 hart_stacks=831488 noload_hart=950272
+# rev-gate (KT-86): build + boot MỘT lần ảnh sản phẩm để đọc dòng '# build:'
+REV-STATE: root=/private/tmp/kt86/fix rev=339b2a390733 dirty=1 scope=[v2/kernel v2/lib]
+REV-GATE: REFUSE reason=dirty image_dirty=1 rev=339b2a390733 log=/tmp/kt86-logs/persist-gate/kt86-rev-gate.log
+# persist.sh: TỪ CHỐI ĐO (KT-86/D2-125.3) — không pha nào chạy
+PERSIST_EXIT=3

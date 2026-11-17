@@ -103,6 +103,27 @@ else
 fi
 
 export RUSTFLAGS="$REMAP -C strip=symbols ${VIFAST_REPRO_RUSTFLAGS:-}"
+
+# ---------------------------------------------------------------------------------------------
+# KT-86 (D2-125.3) — **danh tính bản dựng** đi cùng ảnh: `rev` 12 hex + cờ `dirty`.
+#
+# Định nghĩa rev/dirty nằm ở **một** chỗ: `v2/test/boot/build-rev.sh` (harness dùng đúng tệp đó),
+# nên script build và cổng đo không thể lệch định nghĩa. Ở đây chỉ **truyền** giá trị vào build
+# qua env (`build.rs` đọc rồi `cargo:rustc-env`) để ảnh in `# build: rev=… dirty=…` lúc boot.
+#
+# Không có git (bản sao cây nguồn của `repro-check.sh` chép **không** kèm `.git`) ⇒ `rev=unknown`,
+# `dirty=1`: ảnh **nói thật** là không biết nguồn, và cổng đo của harness sẽ **từ chối** ảnh đó.
+# Script **không** tự bịa rev — bịa đúng là lớp lỗi đang chặn (D2-108A).
+. "$HERE/../test/boot/build-rev.sh"
+BUILD_REV="$(vbrev_rev12 "$ROOT")"
+BUILD_DIRTY="$(vbrev_dirty "$ROOT")"
+if [ -z "$BUILD_REV" ]; then
+    BUILD_REV="unknown"
+    echo "# repro-build: CẢNH BÁO không đọc được git rev ở $ROOT — ảnh mang rev=unknown, cổng đo sẽ TỪ CHỐI" >&2
+fi
+export VIFAST_BUILD_REV="$BUILD_REV"
+export VIFAST_BUILD_DIRTY="$BUILD_DIRTY"
+
 # A1-175: **cấm** dùng `target/` của repo cho build canonical — nó là nơi ảnh phát hành
 # (`v2/kernel/target/<target>/release/<bin>`) do KT-75/76/78 soak/đo. Mặc định = thư mục tạm
 # riêng; nếu người dùng trỏ vào trong cây nguồn thì **fail-closed, không build**.
@@ -142,6 +163,7 @@ export RUSTC_WRAPPER="$WRAP_DIR/rustc-canon"
     echo "# repro-build: $(rustc -V) | $("$CARGO" -V) | toolchain=$(rustup show active-toolchain 2>/dev/null | tr '\n' ' ')"
     echo "# repro-build: RUSTFLAGS=[$RUSTFLAGS] ($REMAP_NOTE)"
     echo "# repro-build: CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<mặc định $ROOT/v2/kernel/target>}"
+    echo "# repro-build: build identity rev=$BUILD_REV dirty=$BUILD_DIRTY (KT-86; dirty = thay đổi chưa commit trong v2/kernel+v2/lib)"
 }
 
 t0="$(date +%s)"
@@ -167,4 +189,9 @@ else
 fi
 SIZE="$(wc -c <"$IMAGE" | tr -d ' ')"
 DIGEST="$(python3 "$HERE/../test/conformance/image_digest.py" "$IMAGE" 2>/dev/null || echo "build=? text=?")"
-echo "REPRO machine=$(uname -sm | tr ' ' '-') root=$ROOT sha256=$SHA size=$SIZE wall_s=$((t1 - t0)) $DIGEST image=$IMAGE"
+# KT-86: ảnh **phải** thật sự mang đúng danh tính vừa tính. Nếu build script bị cargo dùng lại
+# (cache) ⇒ ảnh mang rev cũ ⇒ **dừng, không dùng kết quả** (đúng lớp lỗi KT-76: "build sạch" thật
+# ra là no-op). Nhờ vậy `repro-build.sh` không bao giờ xuất một ảnh có nguồn gốc khác dòng REPRO.
+vbrev_image_has "$IMAGE" "$BUILD_REV" "$BUILD_DIRTY" ||
+    die "KT-86: ảnh KHÔNG mang danh tính build rev=$BUILD_REV dirty=$BUILD_DIRTY (build script bị cargo dùng lại?) — không dùng kết quả"
+echo "REPRO machine=$(uname -sm | tr ' ' '-') root=$ROOT sha256=$SHA size=$SIZE wall_s=$((t1 - t0)) rev=$BUILD_REV dirty=$BUILD_DIRTY $DIGEST image=$IMAGE"

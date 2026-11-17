@@ -55,21 +55,29 @@
 #   bash v2/test/boot/ktest.sh --log-path <ảnh> <SMP> [i]      # in đường dẫn log của runner
 #   bash v2/test/boot/ktest.sh --print-expected               # in bảng expected.txt đã đọc
 #   bash v2/test/boot/ktest.sh --print-evidence <ảnh> [SMP]    # in ordinal + regex từng evidence bắt buộc
+#   bash v2/test/boot/ktest.sh --check-rev <log> [<ảnh>]       # KT-86: cổng danh tính bản dựng trên MỘT log
 #   bash v2/test/boot/ktest.sh --help
 # Biến môi trường: `KT54_LOGDIR` (mặc định `/tmp/k3-ktest`), `KT54_EXPECTED` (chỉ `--check-log`,
 # dùng cho `selftest.sh` — vòng boot thật **luôn** đọc `v2/test/boot/expected.txt`).
 #
-# Exit: 0 = mọi boot sạch (hoặc `--check-log` xanh); 1 = có boot/log đỏ; 2 = lỗi cấu hình môi trường.
+# Exit: 0 = mọi boot sạch (hoặc `--check-log` xanh); 1 = có boot/log đỏ; 2 = lỗi cấu hình môi trường;
+#       3 = **TỪ CHỐI ĐO** (KT-86/D2-125.3: dòng `# build:` không có / lệch HEAD / dirty=1) — cổng đỏ
+#           trước phép đo, không slot nào chạy (không có `ok`).
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 V2_ROOT="$(cd "$HERE/../.." && pwd)"
 MANIFEST="$V2_ROOT/kernel/Cargo.toml"
 BUDGET="$HERE/budget.sh"
+# KT-86 (D2-125.3): cổng danh tính bản dựng — **một** nguồn sự thật cho rev/dirty
+# (cùng tệp mà `v2/tools/repro-build.sh` và `build.rs` dùng), không chép lại định nghĩa.
+. "$HERE/build-rev.sh"
 EXPECTED_FILE="$HERE/expected.txt"
 LOGDIR="${KT54_LOGDIR:-/tmp/k3-ktest}"
 TARGET="riscv64gc-unknown-none-elf"
 IMG_DIR="$V2_ROOT/kernel/target/$TARGET/release"
+# Ảnh **sản phẩm** (`src/main.rs`) — ảnh duy nhất in dòng `# build:` (KT-86).
+PRODUCT_IMAGE="$IMG_DIR/vifast-kbin-riscv64"
 LABELS="ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec" # thứ tự in bảng + thứ tự boot trong một vòng
 LABEL_COUNT=0                              # số ảnh (đếm từ LABELS; không hardcode 3/4)
 TIMEOUT_DS=200                        # 20 s/boot (D2-72 Q10), đơn vị 0,1 s
@@ -78,6 +86,8 @@ QEMU_MIN_MAJOR=9                      # sàn D2-72 Q2: QEMU >= 9.2
 QEMU_MIN_MINOR=2
 
 MODE=matrix
+# KT-86: đường dẫn ảnh cho `--check-rev` (rỗng ⇒ cổng chỉ kiểm log + HEAD/dirty).
+CHECK_IMAGE=""
 CHECK_LABEL=""
 CHECK_LOG=""
 CHECK_SMP=1
@@ -1202,6 +1212,12 @@ do_selftest_stack() {
 parse_args() {
     case "${1:-}" in
         '') return 0 ;;
+        --check-rev)
+            # KT-86: kiểm **một** log đã có (không build/boot) — dùng cho ca kiểm + selftest.
+            MODE=check-rev
+            CHECK_LOG="${2:-}"
+            CHECK_IMAGE="${3:-}"
+            ;;
         --check-log)
             MODE=check-log
             CHECK_LABEL="${2:-}"
@@ -1302,6 +1318,33 @@ do_check_log() {
     fi
     echo "not ok - check-log $label smp=$smp: thiếu$MISSING, log $log"
     return 1
+}
+
+# --------------------------------------------------- KT-86: cổng danh tính bản dựng
+# KT-86 (D2-125.3): ảnh phải **chứng minh** nó build từ đúng mã nguồn đang đứng ở HEAD **trước khi**
+# đo một slot nào. Ảnh test nằm ở các bin riêng (`src/ktest*.rs` — ngoài vùng ghi của KT-86) nên
+# không in dòng `# build:`; vì vậy cổng boot **ảnh sản phẩm** (`src/main.rs` — cùng crate, cùng
+# `build.rs`, cùng env danh tính trong cùng phiên build) rồi đối chiếu HEAD + trạng thái bẩn.
+# Cổng đỏ ⇒ `exit 3` ("TỪ CHỐI ĐO", khác "đo ra đỏ" = 1): **không** đo gì, không in `ok`.
+kt86_rev_gate() {
+    local log="$LOGDIR/kt86-rev-gate.log" build_log="$LOGDIR/kt86-product-build.log"
+    echo "# rev-gate (KT-86): đòi rev=HEAD và dirty=0 — build ảnh sản phẩm để đọc dòng '# build:'"
+    if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 \
+        --bin vifast-kbin-riscv64 --target "$TARGET" --release >"$build_log" 2>&1; then
+        tail -20 "$build_log" >&2
+        vbrev_refuse product-build-failed "log=$build_log"
+        return 1
+    fi
+    if [ ! -f "$PRODUCT_IMAGE" ]; then
+        vbrev_refuse product-image-missing "image=$PRODUCT_IMAGE"
+        return 1
+    fi
+    vbrev_summary "$V2_ROOT"
+    if ! boot_image "$PRODUCT_IMAGE" "$log" 1; then
+        vbrev_refuse probe-boot-failed "log=$log"
+        return 1
+    fi
+    vbrev_gate "$log" "$V2_ROOT" "$PRODUCT_IMAGE"
 }
 
 # ------------------------------------------------------- vòng boot thật
@@ -1423,6 +1466,12 @@ run_matrix() {
         echo "# image=$l ktest-strings=$hits"
     done
 
+    # KT-86 (D2-125.3): CỔNG DANH TÍNH — chạy **trước** mọi phép đo; đỏ ⇒ exit 3, không slot nào.
+    if ! kt86_rev_gate; then
+        echo "# ktest.sh: TỪ CHỐI ĐO (KT-86/D2-125.3) — ảnh/cây nguồn không chứng minh được nguồn gốc"
+        exit 3
+    fi
+
     local smp="" i="" skip=""
     for smp in $SMP_LIST; do
         check_manifests "$smp" || die "$EXPECT_ERR"
@@ -1488,6 +1537,10 @@ case "$MODE" in
     log-path) do_log_path ;;
     print-evidence) do_print_evidence "$PRINT_LABEL" "$PRINT_SMP" ;;
     selftest-stack) do_selftest_stack || exit 1 ;;
+    check-rev)
+        # KT-86: 0 = ĐO ĐƯỢC, 3 = TỪ CHỐI ĐO (giữ đúng quy ước mã thoát của runner).
+        vbrev_gate "$CHECK_LOG" "$V2_ROOT" "$CHECK_IMAGE" || exit 3
+        ;;
     check-log)
         do_check_log "$CHECK_LABEL" "$CHECK_LOG" "$CHECK_SMP" || exit 1
         echo "# check-log: PASS"

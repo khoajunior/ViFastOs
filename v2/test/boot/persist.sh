@@ -23,7 +23,8 @@
 #                                                #   trên đĩa bằng fsutil rồi đòi verify QEMU đỏ
 #   KT75_IMAGE=<elf> KT75_SKIP_BUILD=1 bash …    # dùng ảnh có sẵn (đỏ trước: ảnh không có persist)
 #   KT75_LOGDIR=<dir> bash …                     # nơi để log/ảnh đĩa (mặc định /tmp/kt75-persist)
-# Exit 0 = 10/10 boot xanh + 7/7 pha + ca âm đúng; 1 = có lỗi (in từng dòng `not ok`).
+# Exit 0 = 10/10 boot xanh + 7/7 pha + ca âm đúng; 1 = có lỗi (in từng dòng `not ok`);
+#      3 = TỪ CHỐI ĐO (KT-86/D2-125.3: `# build:` thiếu/lệch HEAD/dirty=1) — không pha nào chạy.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,6 +38,10 @@ FSUTIL="${KT75_FSUTIL:-$V2_ROOT/target/debug/vifast-fsutil}"
 LOGDIR="${KT75_LOGDIR:-/tmp/kt75-persist}"
 DISK="$LOGDIR/kt75-disk.img"
 HOSTPY="$HERE/persist_host.py"
+# KT-86 (D2-125.3): cổng danh tính bản dựng — nguồn sự thật duy nhất cho rev/dirty.
+. "$HERE/build-rev.sh"
+# Ảnh **sản phẩm** không feature — ảnh duy nhất in dòng `# build:` (KT-86).
+PRODUCT_IMAGE="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-riscv64"
 TIMEOUT_DS=900 # 90 s/boot (pha 7 ghi 144 block ⇒ ~900 request virtio dưới `-icount`)
 QEMU_MIN_MAJOR=9
 QEMU_MIN_MINOR=2
@@ -105,6 +110,34 @@ build_everything() {
     bash "$HERE/budget.sh" "$IMAGE" ktest-persist >"$LOGDIR/kt75-budget.log" 2>&1 ||
         die "budget ảnh persist VƯỢT trần (xem $LOGDIR/kt75-budget.log)"
     grep -E "^# image=" "$LOGDIR/kt75-budget.log" || true
+}
+
+# KT-86 (D2-125.3): **trước** 10 boot persist, ảnh phải chứng minh nguồn gốc: in
+# `# build: rev=<12 hex> dirty=<0|1>` (từ `const`, D2-102) khớp `git rev-parse HEAD` + cây sạch.
+# Ảnh persist là bin riêng (`src/ktest_persist.rs`, ngoài vùng ghi KT-86) nên không in dòng này;
+# build + boot **ảnh sản phẩm** (cùng crate/build script/env danh tính) làm chứng. Đỏ ⇒ exit 3
+# trước khi ghi/đọc bất kỳ pha nào (không có phép đo nào chạy trên artifact lệch nguồn).
+rev_gate() {
+    local plog="$LOGDIR/kt86-rev-gate.log" pbuild="$LOGDIR/kt86-product-build.log"
+    echo "# rev-gate (KT-86): build + boot MỘT lần ảnh sản phẩm để đọc dòng '# build:'"
+    vbrev_summary "$REPO_ROOT"
+    if ! cargo build --manifest-path "$KMANIFEST" -p vifast-kbin-riscv64 --bin vifast-kbin-riscv64 \
+        --target "$TARGET" --release >"$pbuild" 2>&1; then
+        tail -20 "$pbuild" >&2
+        vbrev_refuse product-build-failed "log=$pbuild"
+        return 1
+    fi
+    [ -f "$PRODUCT_IMAGE" ] || {
+        vbrev_refuse product-image-missing "image=$PRODUCT_IMAGE"
+        return 1
+    }
+    if ! qg_boot "$plog" "$TIMEOUT_DS" "$QEMU" $QEMU_ICOUNT \
+        -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$PRODUCT_IMAGE" \
+        -nographic -cpu rv64 -m 128M -smp 1 -no-reboot; then
+        vbrev_refuse probe-boot-failed "log=$plog"
+        return 1
+    fi
+    vbrev_gate "$plog" "$REPO_ROOT" "$PRODUCT_IMAGE"
 }
 
 setup_tools() {
@@ -375,6 +408,12 @@ main() {
             red_selftest || FAILS=$((FAILS + 1))
             ;;
         run | '')
+            # KT-86 (D2-125.3): cổng danh tính **trước** pha đầu tiên; đỏ ⇒ exit 3, không pha nào chạy.
+            # (`--red-selftest` là ca kiểm của **bộ kiểm**, không phải phép đo hiệu năng/ngưỡng ⇒ không cổng.)
+            if ! rev_gate; then
+                echo "# persist.sh: TỪ CHỐI ĐO (KT-86/D2-125.3) — không pha nào chạy"
+                exit 3
+            fi
             fresh_disk
             run_sequence || true
             # D2-102: KHÔNG in bằng hằng. `phases`/`ok` đọc từ **log b08** (đã qua `check_log` —

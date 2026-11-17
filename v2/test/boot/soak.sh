@@ -33,7 +33,8 @@
 # Biến môi trường: `SOAK_LOGDIR` (mặc định `/tmp/k3-soak`), `OPENSBI` (đường dẫn fw_dynamic).
 #
 # Exit: 0 = 0 lỗi/N (chỉ ở chế độ cổng, N ≥ 1.000); 1 = có boot đỏ / ảnh đổi giữa soak;
-#       2 = lỗi cấu hình (thiếu tool, N < 1.000, LANES ngoài [1,3], build/budget hỏng).
+#       2 = lỗi cấu hình (thiếu tool, N < 1.000, LANES ngoài [1,3], build/budget hỏng);
+#       3 = TỪ CHỐI ĐO (KT-86/D2-125.3: `# build:` thiếu/lệch HEAD/dirty=1) — 0 boot được đếm.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,8 +43,12 @@ REPO_ROOT="$(cd "$V2_ROOT/.." && pwd)"
 MANIFEST="$V2_ROOT/kernel/Cargo.toml"
 BUDGET="$HERE/budget.sh"
 DIGEST="$V2_ROOT/test/conformance/image_digest.py"
+# KT-86 (D2-125.3): cổng danh tính bản dựng — nguồn sự thật duy nhất cho rev/dirty.
+. "$HERE/build-rev.sh"
 TARGET="riscv64gc-unknown-none-elf"
 IMAGE="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-riscv64"
+# Ảnh **sản phẩm không feature** — ảnh duy nhất in dòng `# build:` (KT-86; phải đặt **sau** TARGET).
+PRODUCT_IMAGE="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-riscv64"
 LOGDIR="${SOAK_LOGDIR:-/tmp/k3-soak}"
 QEMU_MIN_MAJOR=9 # sàn D2-72 Q2: QEMU >= 9.2
 QEMU_MIN_MINOR=2
@@ -157,6 +162,8 @@ else
 fi
 
 mkdir -p "$LOGDIR" 2>/dev/null || true
+# KT-86: log boot của lần dò danh tính (cổng trước phép đo).
+REV_GATE_LOG="$LOGDIR/kt86-rev-gate.log"
 INFRA_LOG="$LOGDIR/kt78-infra.log"
 # KT-78/OD-K6-6: trạng thái hạ tầng **trước** phép đo (wall soak gồm cả build).
 qg_infra before "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
@@ -200,6 +207,32 @@ if [ "$GIT_DIRTY" != "0" ] && [ "$GIT_DIRTY" != "unknown" ]; then
         git -C "$REPO_ROOT" diff -- v2/kernel 2>/dev/null | shasum -a 256 | awk '{print $1}'
     )"
     echo "# git dirty: v2/kernel có $GIT_DIRTY tệp khác HEAD; sha256 patch=$PATCH_SHA"
+fi
+
+# --------------------------------------------------- KT-86: cổng danh tính bản dựng
+# KT-86 (D2-125.3): **trước** phép đo, ảnh phải chứng minh nguồn gốc — in `# build: rev=<12 hex>
+# dirty=<0|1>` (từ `const`, D2-102) khớp `git rev-parse HEAD` và cây nguồn sạch. Ảnh test nằm ở
+# bin riêng (`src/ktest*.rs`, ngoài vùng ghi KT-86) nên không in dòng này; soak boot **ảnh sản
+# phẩm** (`src/main.rs`, cùng crate/build script/env danh tính) làm chứng. Cổng đỏ ⇒ exit 3.
+echo "# rev-gate (KT-86): build + boot MỘT lần ảnh sản phẩm để đọc dòng '# build:'"
+vbrev_summary "$REPO_ROOT"
+if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 --bin vifast-kbin-riscv64 \
+    --target "$TARGET" --release >"$LOGDIR/kt86-product-build.log" 2>&1; then
+    tail -20 "$LOGDIR/kt86-product-build.log" >&2
+    vbrev_refuse product-build-failed "log=$LOGDIR/kt86-product-build.log"
+    echo "# soak.sh: TỪ CHỐI ĐO (KT-86/D2-125.3)"
+    exit 3
+fi
+if ! qg_boot "$REV_GATE_LOG" "$TIMEOUT_DS" "$QEMU" \
+    -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$PRODUCT_IMAGE" \
+    -nographic -cpu rv64 -m 128M -smp 1 -no-reboot; then
+    vbrev_refuse probe-boot-failed "log=$REV_GATE_LOG"
+    echo "# soak.sh: TỪ CHỐI ĐO (KT-86/D2-125.3)"
+    exit 3
+fi
+if ! vbrev_gate "$REV_GATE_LOG" "$REPO_ROOT" "$PRODUCT_IMAGE"; then
+    echo "# soak.sh: TỪ CHỐI ĐO (KT-86/D2-125.3) — không đếm một boot soak nào"
+    exit 3
 fi
 
 # ------------------------------------------------------------------ log

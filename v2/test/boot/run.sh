@@ -9,12 +9,16 @@
 # (AGENTS §9). Số đo thật do chính script này in ra; tài liệu không chép tay (QD §9 Q12).
 #
 # Dùng: bash v2/test/boot/run.sh [NBOOT] [SMP]   (mặc định 1 boot, 1 hart)
+# Exit 3 = **TỪ CHỐI ĐO** (KT-86/D2-125.3: dòng `# build:` thiếu/lệch HEAD/dirty=1) — cổng đỏ
+#          trước khi tính boot nào; 0/1 như cũ (cổng khác, không thay ngưỡng).
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 V2_ROOT="$(cd "$HERE/../.." && pwd)"
 MANIFEST="$V2_ROOT/kernel/Cargo.toml"
 BUDGET="$HERE/budget.sh"
+# KT-86 (D2-125.3): cổng danh tính bản dựng — nguồn sự thật duy nhất cho rev/dirty.
+. "$HERE/build-rev.sh"
 TARGET="riscv64gc-unknown-none-elf"
 IMAGE="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-riscv64"
 N_BOOT="${1:-1}"
@@ -102,6 +106,15 @@ while [ "$i" -le "$N_BOOT" ]; do
         fails=$((fails + 1))
         i=$((i + 1))
         continue
+    fi
+    # KT-86 (D2-125.3): cổng danh tính trên boot **đầu tiên** — ảnh phải in `# build: rev=<12 hex>
+    # dirty=<0|1>` khớp `git rev-parse HEAD` và cây nguồn sạch. Lệch ⇒ TỪ CHỐI ĐO (exit 3), và
+    # **không** boot nào được tính là `ok` (fail-closed: không đo trên artifact lệch nguồn).
+    if [ "$i" -eq 1 ]; then
+        if ! vbrev_gate "$out" "$V2_ROOT" "$IMAGE"; then
+            echo "# run.sh: TỪ CHỐI ĐO (KT-86/D2-125.3) — không boot nào được tính"
+            exit 3
+        fi
     fi
     if grep -q '^OpenSBI v' "$out"; then
         echo "# opensbi $(sed -n 's/^OpenSBI \(v[0-9][0-9.]*\).*/\1/p' "$out" | head -1)"
