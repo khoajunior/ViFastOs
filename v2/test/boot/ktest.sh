@@ -103,6 +103,15 @@ die() {
     exit 2
 }
 
+# KT-78 (OD-K6-6): **mọi** boot đi qua `qemu_guard.sh` — QEMU trong process group riêng, timeout
+# giết cả group, trap EXIT/INT/TERM/HUP dọn sạch, watchdog dọn khi cha chết (kể cả SIGKILL).
+. "$HERE/qemu_guard.sh"
+QG_DIR="${TMPDIR:-/tmp}"
+QG_LOG="$LOGDIR/qemu-guard.log"
+rm -f "$QG_LOG" 2>/dev/null # log guard **mới** mỗi lần chạy (tổng hợp theo run)
+qg_init || die "qemu_guard: không khởi tạo được (thiếu perl?) — OD-K6-6"
+INFRA_INVALID=0
+
 usage() {
     sed -n '3,40p' "${BASH_SOURCE[0]}" | sed -e 's/^# \{0,1\}//'
 }
@@ -998,33 +1007,13 @@ validate_norm() {
 
 # ------------------------------------------------------------- boot một ảnh
 
-# `boot_image <ảnh> <log> <smp>`: 0 = QEMU tự thoát; 124 = quá 20 s (đã kill đúng PID của script).
+# `boot_image <ảnh> <log> <smp> [tham số QEMU thêm]`: 0 = QEMU tự thoát; 124 = quá 20 s đã kill
+# **cả process group**; 125 = không khởi động được. Việc mở QEMU nằm trong `qemu_guard.sh` (KT-78).
 boot_image() {
-    local image="$1" out="$2" smp="$3" pid waited grace
+    local image="$1" out="$2" smp="$3"
     shift 3
-    # KT-72: ảnh `ktest-vblk` cần `-drive`/`-device virtio-blk-pci` (tham số thêm); ảnh khác
-    # không có tham số thêm nên dòng QEMU giữ **nguyên** như 12 boot matrix cũ.
-    "$QEMU" $QEMU_ICOUNT -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$image" -nographic \
-        -cpu rv64 -m 128M -smp "$smp" -no-reboot "$@" >"$out" 2>&1 &
-    pid=$!
-    waited=0
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT_DS" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-    done
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null # chỉ kill ĐÚNG pid do script này tạo (AGENTS §9)
-        grace=0
-        while kill -0 "$pid" 2>/dev/null && [ "$grace" -lt 50 ]; do
-            sleep 0.1
-            grace=$((grace + 1))
-        done
-        kill -9 "$pid" 2>/dev/null # vẫn đúng PID đó; thoát hẳn để không treo `wait`
-        wait "$pid" 2>/dev/null
-        return 124
-    fi
-    wait "$pid" 2>/dev/null
-    return 0
+    qg_boot "$out" "$TIMEOUT_DS" "$QEMU" $QEMU_ICOUNT -machine virt,aia=none,aclint=on -bios "$SBI" \
+        -kernel "$image" -nographic -cpu rv64 -m 128M -smp "$smp" -no-reboot "$@"
 }
 
 # Bảng tổng kết: SUMMARY = các dòng `ảnh|smp|boot|TAP|kết quả|log`.
@@ -1073,6 +1062,7 @@ run_one() {
             return 1
         fi
         : >"$con_base.out"
+        qg_tmp "$con_base.in" "$con_base.out"
         qextra=(-device virtio-serial-pci,id=vser0 \
             -chardev "pipe,id=ch0,path=$con_base" \
             -device virtconsole,bus=vser0.0,chardev=ch0)
@@ -1323,6 +1313,9 @@ run_matrix() {
     load_expected || die "$EXPECT_ERR"
     check_manifests "${SMP_LIST%% *}" || die "$EXPECT_ERR"
     mkdir -p "$LOGDIR" || die "không tạo được $LOGDIR"
+    # KT-78/OD-K6-6: trạng thái hạ tầng **trước** phép đo (wall của matrix gồm cả build — D2-100).
+    INFRA_LOG="$LOGDIR/kt78-infra.log"
+    qg_infra before "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
 
     command -v cargo >/dev/null 2>&1 || die "không có cargo"
     QEMU="$(command -v qemu-system-riscv64 || true)"
@@ -1457,6 +1450,11 @@ run_matrix() {
     [ "$ROWS" -eq "$want_rows" ] ||
         die "chạy THIẾU slot: $ROWS/$want_rows (NBOOT=$N_BOOT × smp=$SMP_COUNT × $LABEL_COUNT ảnh) — không coi là PASS"
     [ "$total_boots" -ge 1 ] || die "không boot lần nào (0/$want_rows) — không coi là PASS"
+    # KT-78/OD-K6-6: trạng thái hạ tầng **sau** phép đo; QEMU mồ côi/lạ ⇒ phép đo KHÔNG HỢP LỆ.
+    qg_infra after "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
+    echo "# infra: invalid=$INFRA_INVALID isolation_bad=$QG_ISO_BAD guard_log=$QG_LOG"
+qg_guard_summary "$QG_LOG" >"$LOGDIR/guard-summary.log" 2>/dev/null || true
+echo "# guard_summary_log=$LOGDIR/guard-summary.log"
     print_summary
     echo "# KTEST: $clean_boots/$total_boots boot sạch (smp=$SMP_ARG, NBOOT=$N_BOOT, ảnh/boot=$LABELS)"
     [ "$fails" -eq 0 ] || {

@@ -55,6 +55,17 @@ die() {
     exit 2
 }
 
+# KT-78 (OD-K6-6): mỗi boot đi qua `qemu_guard.sh` — QEMU trong process group riêng, timeout kill
+# **cả group**, trap dọn sạch, watchdog dọn khi cha chết (kể cả SIGKILL). `pid` của từng boot vẫn
+# là PID **do script này tạo** (lấy từ `$!` bên trong guard) ⇒ bằng chứng "7 pha = 10 tiến trình
+# QEMU khác nhau" của KT-75 giữ nguyên.
+. "$HERE/qemu_guard.sh"
+QG_DIR="${TMPDIR:-/tmp}"
+QG_LOG="$LOGDIR/qemu-guard.log"
+rm -f "$QG_LOG" 2>/dev/null # log guard **mới** mỗi lần chạy (tổng hợp theo run)
+qg_init || die "qemu_guard: không khởi tạo được (thiếu perl?) — OD-K6-6"
+INFRA_INVALID=0
+
 PYTHON=""
 find_python() {
     local c
@@ -150,24 +161,20 @@ run_boot() {
     dd if="$plan" of="$DISK" bs=512 count=1 conv=notrunc >/dev/null 2>&1 ||
         die "ghi kịch bản vào LBA 0 hỏng"
     before="$(sha_of "$DISK")"
-    "$QEMU" $QEMU_ICOUNT -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$IMAGE" \
-        -nographic -cpu rv64 -m 128M -smp 1 -no-reboot \
+    # KT-78: process group riêng + timeout kill cả group (125 = không khởi động được).
+    qg_boot "$log" "$TIMEOUT_DS" "$QEMU" $QEMU_ICOUNT -machine virt,aia=none,aclint=on -bios "$SBI" \
+        -kernel "$IMAGE" -nographic -cpu rv64 -m 128M -smp 1 -no-reboot \
         -drive "file=$DISK,format=raw,if=none,id=hd0" \
-        -device virtio-blk-pci,drive=hd0 >"$log" 2>&1 &
-    pid=$!
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT_DS" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-    done
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null # chỉ PID do script này tạo (AGENTS §9)
-        wait "$pid" 2>/dev/null
-        bad "$tag: quá $((TIMEOUT_DS / 10)) s (đã kill pid $pid), log $log"
+        -device virtio-blk-pci,drive=hd0
+    if [ "$?" -ne 0 ]; then
+        pid="$QG_LAST_PID"
+        bad "$tag: quá $((TIMEOUT_DS / 10)) s (đã kill group pgid=$pid), log $log"
         ROWS="$ROWS$tag|TIMEOUT|$pid|-|-
 "
         return 1
     fi
-    wait "$pid" 2>/dev/null
+    pid="$QG_LAST_PID"
+    waited="$QG_LAST_SECS" # giữ nguyên nghĩa cột `0.1s` và `secs=` của bảng (KT-75)
     after="$(sha_of "$DISK")"
     PIDS="$PIDS $pid"
     LAST_PID="$pid"
@@ -357,6 +364,9 @@ main() {
     RUN_KIND=run
     [ "$mode" = "--red-selftest" ] && RUN_KIND=red
     mkdir -p "$LOGDIR" || die "không tạo được $LOGDIR"
+    # KT-78/OD-K6-6: hạ tầng **trước** phép đo (wall persist gồm cả build).
+    INFRA_LOG="$LOGDIR/kt78-infra.log"
+    qg_infra before "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
     setup_tools
     build_everything
     case "$mode" in
@@ -385,6 +395,11 @@ main() {
             ;;
         *) die "tham số '$mode' không hiểu (dùng: --red-selftest)" ;;
     esac
+    # KT-78/OD-K6-6: hạ tầng **sau** phép đo; QEMU mồ côi/lạ ⇒ phép đo KHÔNG HỢP LỆ.
+    qg_infra after "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
+    echo "# infra: invalid=$INFRA_INVALID isolation_bad=$QG_ISO_BAD guard_log=$QG_LOG"
+qg_guard_summary "$QG_LOG" >"$LOGDIR/guard-summary.log" 2>/dev/null || true
+echo "# guard_summary_log=$LOGDIR/guard-summary.log"
     print_summary
     if [ "$FAILS" -ne 0 ]; then
         echo "# persist.sh: FAIL ($FAILS lỗi)"

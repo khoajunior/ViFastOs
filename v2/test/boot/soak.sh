@@ -59,6 +59,16 @@ die() {
     exit 2
 }
 
+# KT-78 (OD-K6-6): boot đi qua `qemu_guard.sh` — process group riêng, timeout kill **cả group**,
+# trap dọn sạch, watchdog dọn khi cha chết (kể cả SIGKILL). Soak 3 luồng = 3 subshell cùng script:
+# mỗi luồng giữ danh sách PGID của mình; registry trên đĩa dùng chung để watchdog dọn **tất cả**.
+. "$HERE/qemu_guard.sh"
+QG_DIR="${TMPDIR:-/tmp}"
+QG_LOG="$LOGDIR/qemu-guard.log"
+rm -f "$QG_LOG" 2>/dev/null # log guard **mới** mỗi lần chạy (tổng hợp theo run)
+qg_init || die "qemu_guard: không khởi tạo được (thiếu perl?) — OD-K6-6"
+INFRA_INVALID=0
+
 usage() {
     sed -n 's/^# \{0,1\}//; 2,48p' "${BASH_SOURCE[0]}" 2>/dev/null | sed -n '1,60p'
     echo "soak.sh: dùng: soak.sh [NBOOT] [LANES] | soak.sh --smoke N [LANES] | soak.sh --help"
@@ -146,6 +156,11 @@ else
     GIT_DIRTY=unknown
 fi
 
+mkdir -p "$LOGDIR" 2>/dev/null || true
+INFRA_LOG="$LOGDIR/kt78-infra.log"
+# KT-78/OD-K6-6: trạng thái hạ tầng **trước** phép đo (wall soak gồm cả build).
+qg_infra before "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
+
 echo "# build ảnh sản phẩm ($TARGET, release)"
 if ! cargo build --manifest-path "$MANIFEST" -p vifast-kbin-riscv64 --bin vifast-kbin-riscv64 \
     --target "$TARGET" --release >/tmp/kt57-soak-build.log 2>&1; then
@@ -201,20 +216,14 @@ boot_one() {
     local i="$1" out="$RUNDIR/boot-$i.log" pid="" waited=0 why="" got_build="" got_text="" n=0
     local tap="" plan="" ok1="" halt="" img=""
 
-    "$QEMU" "${QEMU_ARGS[@]}" >"$out" 2>&1 &
-    pid=$!
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT_DS" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-    done
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null # chỉ kill ĐÚNG pid do script này tạo (AGENTS §9)
-        wait "$pid" 2>/dev/null
+    # KT-78: QEMU trong process group riêng + timeout kill cả group (125 = không khởi động được).
+    qg_boot "$out" "$TIMEOUT_DS" "$QEMU" "${QEMU_ARGS[@]}"
+    if [ "$?" -ne 0 ]; then
+        pid="$QG_LAST_PID"
         printf 'fail %s timeout-%ss\n' "$i" "$((TIMEOUT_DS / 10))" >>"$RESULTS"
-        echo "boot $i/$N FAIL: quá $((TIMEOUT_DS / 10)) s (treo) log=$out" >&2
+        echo "boot $i/$N FAIL: quá $((TIMEOUT_DS / 10)) s (treo) pid=$pid log=$out" >&2
         return 1
     fi
-    wait "$pid" 2>/dev/null
 
     # (1) TAP khung — đúng một dòng mỗi mẫu, theo đúng thứ tự version < plan < ok.
     tap="$(grep -c -x -F 'TAP version 13' "$out" || true)"
@@ -287,6 +296,12 @@ IMG_CHANGED=0
 [ "$IMG_SHA_END" = "$IMG_SHA" ] || IMG_CHANGED=1
 
 # ------------------------------------------------------------------ tổng
+# KT-78/OD-K6-6: trạng thái hạ tầng **sau** phép đo; QEMU mồ côi/lạ ⇒ phép đo KHÔNG HỢP LỆ.
+qg_infra after "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
+echo "# infra: invalid=$INFRA_INVALID isolation_bad=$QG_ISO_BAD guard_log=$QG_LOG"
+qg_guard_summary "$QG_LOG" >"$LOGDIR/guard-summary.log" 2>/dev/null || true
+echo "# guard_summary_log=$LOGDIR/guard-summary.log"
+
 OK_COUNT="$(grep -c '^ok ' "$RESULTS" || true)"
 FAIL_COUNT="$(grep -c '^fail ' "$RESULTS" || true)"
 TOTAL=$((OK_COUNT + FAIL_COUNT))

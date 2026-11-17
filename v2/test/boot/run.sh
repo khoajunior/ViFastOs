@@ -20,12 +20,21 @@ IMAGE="$V2_ROOT/kernel/target/$TARGET/release/vifast-kbin-riscv64"
 N_BOOT="${1:-1}"
 SMP="${2:-1}"
 TIMEOUT_DS=200   # 20 s/boot (D2-72 Q10), đơn vị 0,1 s
+LOGDIR="${KT49_LOGDIR:-/tmp/k3-run}" # KT-78: log hạ tầng + guard (run.sh trước đây không có LOGDIR)
 QEMU_MIN_MAJOR=9 # sàn D2-72 Q2: QEMU >= 9.2
 QEMU_MIN_MINOR=2
 
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 die() { echo "run.sh: $*" >&2; exit 1; }
+
+# KT-78 (OD-K6-6): boot đi qua `qemu_guard.sh` — process group riêng + timeout kill cả group + trap.
+. "$HERE/qemu_guard.sh"
+QG_DIR="${TMPDIR:-/tmp}"
+QG_LOG="$LOGDIR/qemu-guard.log"
+rm -f "$QG_LOG" 2>/dev/null # log guard **mới** mỗi lần chạy (tổng hợp theo run)
+qg_init || die "qemu_guard: không khởi tạo được (thiếu perl?) — OD-K6-6"
+INFRA_INVALID=0
 
 command -v cargo >/dev/null 2>&1 || die "không có cargo"
 QEMU="$(command -v qemu-system-riscv64 || true)"
@@ -78,28 +87,22 @@ fi
 [ "${HITS:-0}" -eq 0 ] || die "ảnh sản phẩm chứa ${HITS} chuỗi 'ktest' (D2-08)"
 echo "# image=product ktest-strings=0"
 
+mkdir -p "$LOGDIR" 2>/dev/null || true
+INFRA_LOG="$LOGDIR/kt78-infra.log"
+qg_infra before "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
 echo "# boot: n=$N_BOOT smp=$SMP timeout=$((TIMEOUT_DS / 10))s"
 fails=0
 i=1
 while [ "$i" -le "$N_BOOT" ]; do
     out="/tmp/k3-product-boot-$i.log"
-    "$QEMU" -machine virt,aia=none,aclint=on -bios "$SBI" -kernel "$IMAGE" -nographic \
-        -cpu rv64 -m 128M -smp "$SMP" -no-reboot >"$out" 2>&1 &
-    pid=$!
-    waited=0
-    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$TIMEOUT_DS" ]; do
-        sleep 0.1
-        waited=$((waited + 1))
-    done
-    if kill -0 "$pid" 2>/dev/null; then
-        kill "$pid" 2>/dev/null # chỉ kill ĐÚNG pid do script này tạo (AGENTS §9)
-        wait "$pid" 2>/dev/null
-        echo "not ok $i - boot $i: quá $((TIMEOUT_DS / 10)) s (treo), log $out"
+    # KT-78: process group riêng + timeout kill cả group (125 = không khởi động được).
+    if ! qg_boot "$out" "$TIMEOUT_DS" "$QEMU" -machine virt,aia=none,aclint=on -bios "$SBI" \
+        -kernel "$IMAGE" -nographic -cpu rv64 -m 128M -smp "$SMP" -no-reboot; then
+        echo "not ok $i - boot $i: quá $((TIMEOUT_DS / 10)) s (treo, pid=$QG_LAST_PID), log $out"
         fails=$((fails + 1))
         i=$((i + 1))
         continue
     fi
-    wait "$pid" 2>/dev/null
     if grep -q '^OpenSBI v' "$out"; then
         echo "# opensbi $(sed -n 's/^OpenSBI \(v[0-9][0-9.]*\).*/\1/p' "$out" | head -1)"
     fi
@@ -118,4 +121,8 @@ done
 
 echo "# $((N_BOOT - fails))/$N_BOOT boot sạch (smp=$SMP)"
 [ "$fails" -eq 0 ] || exit 1
+qg_infra after "$INFRA_LOG" || INFRA_INVALID=$((INFRA_INVALID + 1))
+echo "# infra: invalid=$INFRA_INVALID isolation_bad=$QG_ISO_BAD guard_log=$QG_LOG"
+qg_guard_summary "$QG_LOG" >"$LOGDIR/guard-summary.log" 2>/dev/null || true
+echo "# guard_summary_log=$LOGDIR/guard-summary.log"
 echo "# run.sh: PASS"

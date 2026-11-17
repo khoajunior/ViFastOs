@@ -4,36 +4,29 @@ Người ghi: **Agent 2** dòng OS. Cập nhật **sau mỗi bước** (để n�
 Khởi tạo: 2026-11-12 bởi người điều phối (vòng vá sau review). Cập nhật lần đầu: 2026-11-12 bởi Agent 2.
 
 ```
-HEAD          : nền KT-75 là **`3776689d`** (`[KT-00]` D2-117); trong lúc làm, dòng ViScript
-                commit **`c9249b79`** (chỉ `viscript/agent/**` — `git show --stat` xác nhận) ⇒ HEAD
-                lúc soak là `c9249b79`, `dirty-kernel-paths=0`; **delta KT-76 chưa commit** (lead
-                commit theo pathspec). KT-76 **không sửa code**: chỉ DOD + log + docs + STATE/BLOCKED;
-                **không** chạm `viscript/`, `review/`, `spec/`, `docs/v1/`,
-                `docs/v2/ViFastOs-v2-thiet-ke.md`, `v2/kernel/**`, `v2/lib/**`.
-BUILD_ID      : ảnh **sản phẩm** **không đổi byte** so KT-75 — `sha256=fd202276…` (hash đầy đủ ở
-                `kt76-build-sha.log:15`), `build=ef566cfa583e34bb`, `text=49874`, `bytes=188552`
-                (**không feature**, D2-108A — không lẫn ảnh test) ⇒ soak chạy lại trên **đúng** sha đó; **tái lập
-                byte CHƯA chứng minh** (clean-build khác sha — nợ P20).
-Task          : **KT-76 (cổng K6 — `K6-DOD` + soak + L1 `seeds_total=400000`)** — **DONE** (task cổng:
-                DOD trung thực + cổng xanh), **phase K6 = KHÔNG ĐẠT** ("tương đương v1"): tám hạng mục
-                đo được của thiết kế §10.1 dòng K6 **ĐẠT**,
-                nhưng dòng **S1** ("tương đương v1" mức người dùng: ảnh sản phẩm có U-mode/shell)
-                **KHÔNG ĐẠT**. Bảy lỗi v1: N4/N6 ĐẠT; N1/N2/N3/N7 **KHÔNG ĐẠT** (N1 một phần); N5 N/A ở K6.
-Nguồn số     : `v2/agent/reports/K6-DOD.md` + `v2/docs/k3b-core.md` §24 + `JOURNAL/kt76-*`.
-                Script kiểm `JOURNAL/kt76-verify-numbers.sh` (tự phá: `kt76-verify-selfbreak.sh`);
-                tiêu chí trích bằng `kt76-extract-criteria.sh` (nguồn đọc-only, so từng byte).
-Cổng gần nhất : gate **PASS** `TESTS=729`/`SUITES=100`, matrix `KTEST=21/21`, soak `soak_ok=1000`
-                `soak_lanes=3`, persist `phases=7`/`boots=10`, conformance `trace_lines=61/61` +
-                `scn_cases=5/5`, L1 `smp_set=1,2,4,8` × `seeds=100000` × `op=64` — số nguyên văn
-                trong **khối trích** ở mục KT-76 cuối tệp.
-Nợ / BLOCKED  : **S1**: ảnh sản phẩm **thiếu U-mode/shell** ⇒ "tương đương v1" mức người dùng
-                **KHÔNG ĐẠT** (BLOCKED §K6-U-MODE; đề xuất KT-77 hoặc văn bản hạ phạm vi của
-                Agent 0). Nợ khác: `fsync` từ U-mode; `NoSpace`/torn-write; SMP trên ảnh persist;
-                ca âm cho bộ đếm (`overflow/size_bad/absent_bad/replayed/errors/recorded/fsync/
-                durable`, `id_mismatch/timeouts`); `MR4..MR63`; scheduler đa hart **chưa dùng** IPI;
-                console/blk **poll** chưa ngắt; ABI `Tcb.Exec(path)`; ca lỗi-muộn `exec`;
-                matrix **không** phủ ảnh persist; driver blk/console **không** vào ảnh sản phẩm —
-                danh sách đủ ở `K6-DOD.md` §6.
+HEAD          : nền `dbd97729` (`[KT-00]` `D2-119`); trong lúc làm, nhánh `main` tiến thêm do tab
+                khác (`d2dbb0cc` khi chạy cổng cuối — commit của tab khác), `dirty-kernel-paths=0`; **delta KT-78
+                chưa commit** (lead commit theo pathspec). KT-78 **không sửa code**: chỉ harness
+                (`v2/test/boot/**`), docs, STATE/BLOCKED, JOURNAL; **không** chạm `spec/`,
+                `v2/kernel/**`, `v2/lib/**`, `crates/`, `viscript/`, `review/`.
+BUILD_ID      : ảnh **sản phẩm** **không đổi byte** so KT-76 — `sha256=fd202276…` (đầy đủ ở
+                `kt78-product-sha.log`), `build=ef566cfa583e34bb`, `text=49874`, `bytes=188552`
+                (**không feature**, `D2-108A`) ⇒ soak chạy lại trên **đúng** sha đó; **tái lập byte
+                CHƯA chứng minh** (nợ `P20`, `KT-79`).
+Task          : **KT-78 (`OD-K6-6`: harness QEMU — process group riêng, timeout cứng, dọn dẹp)** —
+                **DONE** (đã vá **ba** phát hiện của reviewer KT-78): ca âm (a) cha chết
+                (`SIGKILL`/`SIGINT`/`SIGTERM`) ⇒ `0` QEMU trong `≤ 200 ms`; ca âm (b) boot treo ⇒
+                `exit=124`; ca âm bộ đếm `isolation` (`iso-bad`, `D2-108B`); đỏ-trước tái hiện
+                `D2-116` (QEMU `ppid=1`). Số nguyên văn trong **khối `scope=`** ở mục KT-78 cuối tệp.
+Nguồn số     : `v2/docs/k3b-core.md` §25 + `v2/docs/k6-harness.md` + `JOURNAL/kt78-*`. Script kiểm
+                `JOURNAL/kt78-verify-numbers.sh` (tự phá: `kt78-verify-selfbreak.sh`, chạy trên
+                **bản copy** — `D2-113F`).
+Cổng gần nhất : số **nguyên văn** chỉ nằm trong khối `scope=` ở mục KT-78 cuối tệp: `gate --fast`
+                PASS, matrix `21/21`, soak `0/1000`, persist bảy pha, hạ tầng `verdict=OK` trước và
+                sau **mỗi** phép đo. **Không** chép số ra khối này.
+Nợ / BLOCKED  : (giữ nguyên của KT-76, xem mục KT-76 cuối tệp). KT-78 thêm nợ nhỏ: phụ thuộc
+                `perl` cho process group; `loadavg` chỉ là lưới phụ; `qemu_own` của thân script
+                không đếm QEMU trong lane soak (xem `docs/k6-harness.md` §7).
 ```
 ```
 ## KT-64a — đồng bộ sim theo D2-89/D2-90 + parity `TlbFlush` (D2-92c)
@@ -3462,3 +3455,141 @@ EXIT=0
 
 **Freeze**: chỉ tài liệu/log của task; **không** sửa code (ảnh sản phẩm **trùng byte** KT-75 —
 `sha256=fd202276…`, `build=ef566cfa583e34bb`). Lead commit theo pathspec (D2-105a).
+
+## KT-78 — `OD-K6-6`: harness QEMU (process group riêng, timeout cứng, dọn dẹp) — 2026-11-17, Agent 2
+
+**Vào**: `KT-78` là task **đầu tiên** theo thứ tự Agent 0 (`OD-K6-6`); đọc nguyên văn
+`reports/QUYET-DINH-A0-K6-2026-11-17.md` (sha `0361fb7e…`) + `D2-119`; `D2-116` (QEMU `ppid=1` đốt
+hai core ⇒ số **thời gian** trong khoảng đó vô hiệu), `D2-113` (tự phá trên **bản copy**), `D2-112`
+(kiểm số theo scope), `D2-108A/B`, `D2-102/106`, `D2-100`, `D2-105`.
+
+**Hiện trạng trước khi sửa** (bốn script): `"$QEMU" … & pid=$!` + vòng `kill -0` + `kill $pid`
+(không `trap`, không process group, không watchdog) ⇒ cha chết thì QEMU mồ côi. `v2/bin/v2`
+**không** mở QEMU (`grep -c 'qemu-system' v2/bin/v2` = `0`) nên **không** sửa tệp đó.
+
+**Sửa**: `v2/test/boot/qemu_guard.sh` — `perl` `setpgrp`+`exec` ⇒ **process group riêng**
+(`PGID == PID`), perl ghi `pid`/`pgid` **đo bằng `getpgrp`** trước `exec`; timeout đếm bước `0,1 s`
+cộng trần `SECONDS`, hết hạn `kill -TERM -- -PGID` rồi `-KILL`; `trap EXIT/INT/TERM/HUP` dọn group
++ `rm` tệp tạm; **watchdog** `disown` bám PID cha ⇒ cha `SIGKILL` vẫn về `0` QEMU; `qg_infra` in hạ
+tầng trước/sau mỗi phép đo. Nối vào `ktest.sh`, `soak.sh`, `persist.sh`, `run.sh`; `gate`/`L1`
+chụp bằng `infra.sh`. Tài liệu hợp đồng: `docs/k6-harness.md`; phân tích đầy đủ: `docs/k3b-core.md`
+§25.
+
+**Đỏ-trước (D2-05)** — pattern cũ để lại QEMU `ppid=1`:
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# old-sigkill: SAU kill -KILL cha — QEMU pid=22859 ppid=1 (mồ côi: tái hiện D2-116)
+ok 1 - old-sigkill: ĐỎ TRƯỚC tái hiện: qemu_con_song=1 qemu_ppid=1 (D2-116)
+```
+
+**Ca âm (a)** — cha chết khi QEMU đang chạy ⇒ `0` QEMU trong `≤ 200 ms` (< `5 s`):
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# guard-sigkill: qemu_gone_ms=100 wrapper_rc=137 qemu_total=0 baseline=0
+ok 3 - guard-sigkill: 0 QEMU còn sống sau 100 ms (<5000 ms); wrapper_rc=137
+# guard-sigint: qemu_gone_ms=100 wrapper_rc=130 qemu_total=0 baseline=0
+# guard-sigterm: qemu_gone_ms=100 wrapper_rc=143 qemu_total=0 baseline=0
+```
+
+**Ca âm (b)** — boot treo (khách `j .` bốn byte qua `-bios`) ⇒ timeout kích hoạt, `exit=124`:
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# guard-timeout: exit=124 elapsed_ms=5567 timeout_ds=20 qemu_total=0 baseline=0
+ok 7 - guard-timeout: timeout kích hoạt: exit=124 sau 5567 ms (không treo vô hạn), 0 QEMU còn
+```
+
+**Ca âm hạ tầng** — bộ đếm `qemu_ppid1` phải khác `0` khi có QEMU mồ côi (D2-108B):
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# infra-orphan: # infra orphan: qemu_total=1 qemu_ppid1=1 qemu_own=0 qemu_foreign=1 loadavg_1m=2.91 loadavg_5m=2.70 loadavg_15m=3.53 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=qemu_ppid1=1
+# MEASUREMENT_INVALID tag=orphan ly_do=qemu_ppid1=1
+ok 9 - infra-orphan: phép đo bị đánh dấu KHÔNG HỢP LỆ khi có QEMU PPID 1 (verdict=KHONG_HOP_LE)
+# guard_selftest: cases=10 ok=10 logdir=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt78-guard/run-20261117T015708Z
+# guard_selftest: PASS
+```
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# iso-bad: wrapper_rc=0 boot_start=[# boot_start seq=1 pid=26055 pgid=22825 isolated=0 timeout_ds=200 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt78-guard/run-20261117T015708Z/iso-bad/qemu.log]
+ok 10 - iso-bad: QEMU KHÔNG qua setpgrp ⇒ isolated=0, isolation_bad=1, infra KHONG_HOP_LE (bộ đếm có ca âm — D2-108B)
+```
+
+**Hạ tầng + cổng chạy lại sau khi sửa** (không retry — `D2-07`):
+
+```text scope=kt78-ktest-matrix.log
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=2.98 loadavg_5m=2.72 loadavg_15m=3.52 ncpu=12 boot_done=0 verdict=OK
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=5.63 loadavg_5m=3.58 loadavg_15m=3.78 ncpu=12 boot_done=21 verdict=OK
+# infra: invalid=0 isolation_bad=0 guard_log=/tmp/k3-ktest/qemu-guard.log
+# guard_summary_log=/tmp/k3-ktest/guard-summary.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```
+`# guard_summary_log=/tmp/...` chỉ là **con trỏ** tới `guard-summary.log` trong thư mục làm việc —
+**không** phải nguồn số; nguồn số là các dòng nằm trong chính khối `scope=` này.
+
+```text scope=kt78-gate-summary.log
+TESTS=729 / SUITES=100
+```
+
+```text scope=kt78-gate.log
+# infra before-gate: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=4.91 loadavg_5m=5.73 loadavg_15m=5.40 ncpu=12 boot_done=0 verdict=OK
+--- L1: OK (1082 ms, đo bởi cổng)
+v2 gate --fast: PASS (gen-check ON từ KT-05; L1 sim 1.000 seed)
+GATE_EXIT=0
+# infra after-gate: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=4.03 loadavg_5m=5.11 loadavg_15m=5.21 ncpu=12 boot_done=0 verdict=OK
+INFRA_EXIT=0
+```
+
+```text scope=kt78-check.log
+--- clippy: OK
+v2 check: PASS (L1 chạy trong gate --fast)
+CHECK_EXIT=0
+```
+
+```text scope=kt78-clippy.log
+CLIPPY_EXIT=0
+```
+
+```text scope=kt78-soak.log
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=7.71 loadavg_5m=5.72 loadavg_15m=4.67 ncpu=12 boot_done=0 verdict=OK
+# infra: invalid=0 isolation_bad=0 guard_log=/tmp/k3-soak/qemu-guard.log
+# guard_summary_log=/tmp/k3-soak/guard-summary.log
+# soak: xong wall=238s (4 boot/s); ok=1000 fail=0 tổng=1000/1000
+# soak: BUILD_ID=ef566cfa583e34bb sha256=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da git=d2dbb0cc09a24bb7b5f2201ae7412b633a50f0e7
+# soak: 0/1000 lỗi (PASS)
+# soak.sh: PASS
+SOAK_EXIT=0
+```
+`# guard_summary_log=/tmp/...` chỉ là **con trỏ** tới `guard-summary.log` trong thư mục làm việc —
+**không** phải nguồn số; nguồn số là các dòng nằm trong chính khối `scope=` này.
+
+```text scope=kt78-soak-qemu-guard.log
+# guard_summary boot_end=1000 isolated_1=1000 isolated_0=0 isolated_unknown=0 rc_0=1000 rc_124=0
+```
+
+```text scope=kt78-persist.log
+# persist: phases=7 ok=7 boots=10 neg=1 host_checks=10
+# infra: invalid=0 isolation_bad=0 guard_log=/tmp/kt75-persist/qemu-guard.log
+# pids: 73995 74036 74079 74125 74173 74218 74258 74304 74344 74381 (mỗi boot một tiến trình QEMU mới)
+# reboot: boots=10 pids=10 phase_reboots=7 (7 pha; mỗi pha ghi ở một tiến trình, đọc lại ở tiến trình KHÁC)
+```
+
+**Ảnh sản phẩm không đổi** (harness-only change; `D2-108A`):
+
+```text scope=kt78-product-sha.log
+BUILD_EXIT=0
+bytes=188552
+```
+
+```text scope=kt78-soak-sha-before.log
+fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+```
+
+**Vá sau review KT-78** (ba phát hiện, đều **không** đổi ngữ nghĩa cổng): (a) `D2-108B` — thêm ca
+`iso-bad` (QEMU chạy **không** qua `setpgrp`, hook `QG_FORCE_NO_SETPGRP` chỉ cho test) ⇒ `isolated=0`,
+`isolation_bad=1`, `qg_infra` kết luận `KHONG_HOP_LE`; (b) `D2-112` — verifier **chỉ** miễn khối
+`text scope=`, fence khác kiểm như prose (bịt đường chèn fence chứa số bịa; tự phá thêm đường thứ
+năm); (c) `D2-106` — dòng tổng hợp do `qg_guard_summary` (awk, công thức in kèm) sinh, và
+`kt78-collect-guard.sh` sinh lại tệp bằng chứng. Sau vá chạy lại gate/matrix/soak/persist trên đúng
+ảnh `fd202276…` (sha kiểm trước/sau không đổi; HEAD `d2dbb0cc`).
+
+**Không chạm**: `spec/`, `v2/kernel/**`, `v2/lib/**`, `crates/`, `viscript/`, `review/`; `expected.txt`
+và mọi ngưỡng nguyên. **Freeze**: không job nền, `0` QEMU; lead commit theo pathspec (`D2-105a`).

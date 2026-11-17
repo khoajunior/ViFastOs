@@ -1883,3 +1883,176 @@ EXIT=0
 # L1 OK: 100000 lượt (smp [8], seeds 100000)
 EXIT=0
 ```
+
+## 25. KT-78 — harness QEMU: process group riêng, timeout cứng, dọn dẹp (OD-K6-6 / D2-116)
+
+Hợp đồng đầy đủ của harness: [`k6-harness.md`](k6-harness.md). Mã mới: `v2/test/boot/qemu_guard.sh`
+(`qg_init`/`qg_boot`/`qg_tmp`/`qg_infra`/`qg_own`/`qg_cleanup`), `guard_selftest.sh` (ca âm),
+`infra.sh` (chụp hạ tầng quanh `gate`/`L1`); nối vào `ktest.sh`, `soak.sh`, `persist.sh`, `run.sh`.
+Tệp `v2/bin/v2` **không** sửa: tệp đó **không** mở QEMU (`grep -c 'qemu-system' v2/bin/v2` = `0`).
+
+- **Lỗi gốc (D2-116)**: bốn script boot đều mở QEMU bằng `"$QEMU" … & pid=$!` rồi chỉ `kill $pid`,
+  **không** `trap`, **không** process group ⇒ cha chết (SIGINT/SIGKILL) thì QEMU bị nhận nuôi và
+  sống tiếp. `guard_selftest.sh --mode old` dựng lại **đúng** pattern cũ ⇒ QEMU còn sống với
+  `ppid=1` (đỏ-trước, log trong repo).
+- **Sửa**: `perl` `setpgrp`+`exec` ⇒ QEMU **leader** của group riêng (`PGID == PID`); perl ghi
+  `pid`/`pgid` **đo bằng `getpgrp`** trước `exec` (boot thoát nhanh vẫn có bằng chứng); timeout =
+  đếm bước `0,1 s` (như cũ) **cộng trần `SECONDS`** (gấp đôi danh nghĩa, cộng năm giây) rồi
+  `kill -TERM -- -PGID` → `-KILL`; `trap EXIT/INT/TERM/HUP` dọn **mọi** group + `rm` tệp tạm;
+  **watchdog** `disown` bám PID cha ⇒ cha bị `SIGKILL` vẫn về `0 QEMU`. Không `pkill -f`
+  (AGENTS §9); mỗi lần kill kiểm group **có** QEMU nên không giết nhầm.
+- **Hạ tầng**: `qg_infra` in `qemu_total/qemu_ppid1/qemu_own/qemu_foreign/loadavg_*/ncpu/verdict`
+  **trước và sau** mỗi phép đo (matrix/soak/persist/run, và `gate`/`L1` qua `infra.sh`);
+  `qemu_ppid1>0` **hoặc** `qemu_foreign>0` **hoặc** `loadavg_1m>ncpu` ⇒ `verdict=KHONG_HOP_LE` +
+  `WARNING` + `# MEASUREMENT_INVALID` (không đổi exit code của cổng). Ca âm của bộ đếm: `infra-orphan`
+  tạo QEMU `ppid=1` có kiểm soát ⇒ phép đo **phải** bị đánh dấu không hợp lệ.
+- **Ca âm (a) / (b)**: `guard-sigkill`/`guard-sigint`/`guard-sigterm` (cha chết) và `guard-timeout`
+  (khách `j .` bốn byte nạp bằng `-bios`) đều có log; mỗi ca ghi `alive_before=[pid ppid pgid stat]`
+  **trước** khi gửi signal ⇒ ca chỉ có giá trị khi QEMU thật sự còn sống lúc đó (chống ca âm rỗng,
+  D2-108B). `old-sigkill`/`old-sigint` là **đỏ-trước** (QEMU `ppid=1`), nên bộ đếm
+  `qemu_orphan=1` **có** ca khác không.
+- **Không đổi ngữ nghĩa cổng**: số boot/seed/ngưỡng/`expected.txt` nguyên; **không** chèn dòng vào
+  log QEMU (bằng chứng process group ở tệp riêng `qemu-guard.log`); ảnh sản phẩm **không đổi byte**
+  so KT-76 ⇒ soak chạy lại trên **đúng** ảnh đó.
+- **Nợ/giới hạn**: phụ thuộc `perl` (thiếu ⇒ `qg_init` fail-closed, harness dừng); `loadavg` chỉ là
+  lưới phụ (máy mười hai nhân bị hai QEMU mồ côi chỉ thêm khoảng hai đơn vị tải ⇒ bộ đếm QEMU mới
+  là detector chính); `qemu_own` của thân script **không** đếm QEMU trong lane soak (chỉ gọi
+  trước/sau phép đo nên không ảnh hưởng kết luận); tái lập **byte** của build vẫn là nợ **P20**.
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# old-sigkill: SAU kill -KILL cha — QEMU pid=22859 ppid=1 (mồ côi: tái hiện D2-116)
+ok 1 - old-sigkill: ĐỎ TRƯỚC tái hiện: qemu_con_song=1 qemu_ppid=1 (D2-116)
+# old-sigint: SAU kill -INT cha — QEMU pid=22893 ppid=1 (mồ côi: tái hiện D2-116)
+```
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# guard-sigkill: qemu_gone_ms=100 wrapper_rc=137 qemu_total=0 baseline=0
+ok 3 - guard-sigkill: 0 QEMU còn sống sau 100 ms (<5000 ms); wrapper_rc=137
+# guard-sigint: qemu_gone_ms=100 wrapper_rc=130 qemu_total=0 baseline=0
+# guard-sigterm: qemu_gone_ms=100 wrapper_rc=143 qemu_total=0 baseline=0
+```
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# guard-timeout: exit=124 elapsed_ms=5567 timeout_ds=20 qemu_total=0 baseline=0
+ok 7 - guard-timeout: timeout kích hoạt: exit=124 sau 5567 ms (không treo vô hạn), 0 QEMU còn
+```
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# infra-orphan: # infra orphan: qemu_total=1 qemu_ppid1=1 qemu_own=0 qemu_foreign=1 loadavg_1m=2.91 loadavg_5m=2.70 loadavg_15m=3.53 ncpu=12 boot_done=0 verdict=KHONG_HOP_LE ly_do=qemu_ppid1=1
+# MEASUREMENT_INVALID tag=orphan ly_do=qemu_ppid1=1
+ok 9 - infra-orphan: phép đo bị đánh dấu KHÔNG HỢP LỆ khi có QEMU PPID 1 (verdict=KHONG_HOP_LE)
+```
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# iso-bad: wrapper_rc=0 boot_start=[# boot_start seq=1 pid=26055 pgid=22825 isolated=0 timeout_ds=200 log=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt78-guard/run-20261117T015708Z/iso-bad/qemu.log]
+ok 10 - iso-bad: QEMU KHÔNG qua setpgrp ⇒ isolated=0, isolation_bad=1, infra KHONG_HOP_LE (bộ đếm có ca âm — D2-108B)
+```
+
+```text scope=kt78-guard/selftest-20261117T015708Z.log
+# guard_selftest: cases=10 ok=10 logdir=/Users/mps/dvchd/ViFastOs/v2/agent/JOURNAL/kt78-guard/run-20261117T015708Z
+# guard_selftest: PASS
+```
+
+```text scope=kt78-ktest-matrix.log
+# infra before: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=2.98 loadavg_5m=2.72 loadavg_15m=3.52 ncpu=12 boot_done=0 verdict=OK
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=5.63 loadavg_5m=3.58 loadavg_15m=3.78 ncpu=12 boot_done=21 verdict=OK
+# infra: invalid=0 isolation_bad=0 guard_log=/tmp/k3-ktest/qemu-guard.log
+# guard_summary_log=/tmp/k3-ktest/guard-summary.log
+# KTEST: 21/21 boot sạch (smp=matrix, NBOOT=1, ảnh/boot=ktest ktest-guard ktest-user ktest-proc ktest-vblk ktest-con ktest-exec)
+```
+`# guard_summary_log=/tmp/...` chỉ là **con trỏ** tới `guard-summary.log` trong thư mục làm việc —
+**không** phải nguồn số; nguồn số là các dòng nằm trong chính khối `scope=` này.
+
+```text scope=kt78-gate-summary.log
+TESTS=729 / SUITES=100
+```
+
+```text scope=kt78-gate.log
+# infra before-gate: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=4.91 loadavg_5m=5.73 loadavg_15m=5.40 ncpu=12 boot_done=0 verdict=OK
+--- L1: OK (1082 ms, đo bởi cổng)
+v2 gate --fast: PASS (gen-check ON từ KT-05; L1 sim 1.000 seed)
+GATE_EXIT=0
+# infra after-gate: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=4.03 loadavg_5m=5.11 loadavg_15m=5.21 ncpu=12 boot_done=0 verdict=OK
+INFRA_EXIT=0
+```
+
+```text scope=kt78-check.log
+--- clippy: OK
+v2 check: PASS (L1 chạy trong gate --fast)
+CHECK_EXIT=0
+```
+
+```text scope=kt78-clippy.log
+CLIPPY_EXIT=0
+```
+
+```text scope=kt78-soak.log
+# infra after: qemu_total=0 qemu_ppid1=0 qemu_own=0 qemu_foreign=0 loadavg_1m=7.71 loadavg_5m=5.72 loadavg_15m=4.67 ncpu=12 boot_done=0 verdict=OK
+# infra: invalid=0 isolation_bad=0 guard_log=/tmp/k3-soak/qemu-guard.log
+# guard_summary_log=/tmp/k3-soak/guard-summary.log
+# soak: xong wall=238s (4 boot/s); ok=1000 fail=0 tổng=1000/1000
+# soak: BUILD_ID=ef566cfa583e34bb sha256=fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da git=d2dbb0cc09a24bb7b5f2201ae7412b633a50f0e7
+# soak: 0/1000 lỗi (PASS)
+# soak.sh: PASS
+SOAK_EXIT=0
+```
+`# guard_summary_log=/tmp/...` chỉ là **con trỏ** tới `guard-summary.log` trong thư mục làm việc —
+**không** phải nguồn số; nguồn số là các dòng nằm trong chính khối `scope=` này.
+
+```text scope=kt78-soak-qemu-guard.log
+# guard_summary boot_end=1000 isolated_1=1000 isolated_0=0 isolated_unknown=0 rc_0=1000 rc_124=0
+```
+
+```text scope=kt78-persist.log
+# persist: phases=7 ok=7 boots=10 neg=1 host_checks=10
+# infra: invalid=0 isolation_bad=0 guard_log=/tmp/kt75-persist/qemu-guard.log
+# pids: 73995 74036 74079 74125 74173 74218 74258 74304 74344 74381 (mỗi boot một tiến trình QEMU mới)
+# reboot: boots=10 pids=10 phase_reboots=7 (7 pha; mỗi pha ghi ở một tiến trình, đọc lại ở tiến trình KHÁC)
+```
+
+```text scope=kt78-persist-qemu-guard.log
+# guard_summary boot_end=10 isolated_1=10 isolated_0=0 isolated_unknown=0 rc_0=10 rc_124=0
+# boot_end seq=1 pid=73995 pgid=73995 isolated=1 rc=0 secs=0.1 log=/tmp/kt75-persist/b01.log
+# boot_end seq=10 pid=74381 pgid=74381 isolated=1 rc=0 secs=0.1 log=/tmp/kt75-persist/b10.log
+```
+
+```text scope=kt78-product-sha.log
+BUILD_EXIT=0
+fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da  v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64
+bytes=188552
+build=ef566cfa583e34bb text=49874
+```
+
+**Freeze**: chỉ harness + tài liệu/log; **không** chạm kernel/lib/spec (ảnh sản phẩm **trùng byte**
+KT-76). Delta của task để lead commit theo pathspec (D2-105a).
+
+## 26. KT-79 — build tái lập byte (OD-K6-3): **ĐẠT ĐỦ 2 máy × 2 đường dẫn** (K6)
+
+Tài liệu đầy đủ: [`k6-repro.md`](k6-repro.md). Log: `v2/agent/JOURNAL/kt79-{machines,baseline-diff,repro-check,negative,plain-sha,gate,verify,selfbreak}.log`
++ `kt79b-{ps-setup,ps-builds}.log`.
+
+**Nguyên nhân P20 (chứng minh bằng diff byte):** crate `v2/lib/vifast-alloc` nằm **ngoài** workspace
+`v2/kernel` nên cargo truyền **đường dẫn tuyệt đối** cho rustc; panic location của crate đó bị nhúng
+nguyên văn vào `.rodata`. Hai chỗ checkout khác độ dài ⇒ `.rodata` khác cỡ (`14424` vs `14464`) ⇒
+mọi tham chiếu `auipc/addi` trong `.text` đổi (`781` byte khác) ⇒ sha khác. `.symtab`/`.strtab`
+cũng khác vì metadata hash crate ngoài workspace băm từ đường dẫn tuyệt đối. Chênh `8 B` của P20
+chỉ là **hệ quả độ dài**.
+
+**Biện pháp:** `v2/tools/repro-build.sh` (+ bản Windows) = `--remap-path-prefix` tuyệt đối
+canonical + `-C strip=symbols` + `CARGO_INCREMENTAL=0`/`SOURCE_DATE_EPOCH=0` + toolchain **ghim
+tường minh 1.99.1** (`RUSTUP_TOOLCHAIN`, không đặt pin ở gốc repo — A1-174) +
+`RUSTC_WRAPPER=v2/tools/rustc-canon.rs` (metadata hằng số + chuẩn hoá `\`→`/`).
+`.text` digest vẫn đọc được: `build=2cbe9bbe339d7c02 text=49874`; budget `data+bss=200696`.
+
+**Kết quả:** 4 build / **2 máy** (macOS + Linux `ps@ps`) × **2 đường dẫn tuyệt đối khác nhau**
+⇒ **cùng** `sha256=c1072d72…`, `size=82552` (`kt79-repro-check.log`, `kt79b-ps-builds.log`).
+Ca âm `--negative`: **ĐỎ** đúng thiết kế. Máy thứ hai cài toolchain trong `$HOME` (không sudo;
+gỡ bằng `rm -rf ~/.rustup ~/.cargo`) — log `kt79b-ps-setup.log`.
+**Không hồi quy:** build **trơn** vẫn ra `fd202276…`/`188552` (`kt79-plain-sha.log`) ⇒ matrix
+`21/21` + soak `0/1000` của KT-76 vẫn áp cho artifact phát hành; `gate --fast` PASS.
+**A1-175:** mọi build canonical/repro dùng `CARGO_TARGET_DIR` **riêng** (mặc định `mktemp -d`);
+trỏ vào cây nguồn ⇒ fail-closed; `repro-build`/`repro-check` kiểm sha ảnh phát hành **trước/sau**
+(phải không đổi), có ca âm — ảnh phát hành không bao giờ bị build repro ghi đè.
+**Nợ:** host Windows (psvn) cho thứ tự monomorphization khác ⇒ sha khác (dữ kiện phụ, A1-173);
+harness `v2/test/boot/**` chạy `cargo` trần từ gốc repo nên không còn được ghim — muốn ghim thì
+gọi `repro-build.sh` hoặc đặt `RUSTUP_TOOLCHAIN=1.99.1` (đề xuất cho KT-78/A0).

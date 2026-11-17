@@ -450,3 +450,20 @@ của thiết kế**; tôi **không** được tự định nghĩa lại cho d�
 N/A trong `K6-DOD.md` §4; nợ kỹ thuật (fsync U-mode, `NoSpace`/torn-write, SMP persist, ca âm bộ
 đếm, `MR4..MR63`, IPI core, poll chưa ngắt, `Tcb.Exec(path)`, lỗi-muộn `exec`, matrix không phủ
 persist, driver không vào ảnh sản phẩm) liệt kê đủ ở `K6-DOD.md` §6 với `file:line` + đề xuất.
+
+## KT-78 — harness QEMU (`OD-K6-6`): **DONE**, không BLOCKED; ba giới hạn **có văn bản**
+
+- **Không** mục nào bị chặn: ca âm (a) cha chết (`SIGKILL`/`SIGINT`/`SIGTERM`) và (b) boot treo đều
+  có log trong repo; `qemu_ppid1=0` và `qemu_foreign=0` **trước và sau** mỗi phép đo (matrix/soak/
+  persist/run + `gate`/`L1`); cổng xanh lại (`gate --fast`, matrix, soak, persist) trên **đúng** ảnh
+  sản phẩm cũ; đỏ-trước tái hiện `D2-116` bằng chính pattern cũ (QEMU `ppid=1`).
+- Giới hạn **có văn bản** (không phải chặn, theo `OD-K6-6`; chi tiết `docs/k6-harness.md` §7):
+  1. phụ thuộc `perl` cho `setpgrp` (macOS không có `setsid`): thiếu `perl` ⇒ `qg_init` trả `2` và
+     harness **dừng** (fail-closed) chứ không chạy QEMU thiếu process group;
+  2. trần `loadavg_1m > ncpu` chỉ là **lưới phụ** — máy mười hai nhân với hai QEMU mồ côi chỉ thêm
+     khoảng hai đơn vị tải, nên bộ đếm QEMU mới là detector chính (ghi rõ để không đọc `verdict=OK`
+     thành “máy chắc chắn rảnh”);
+  3. `qemu_own` của thân script **không** đếm QEMU trong lane soak (chỉ gọi trước/sau phép đo nên
+     không ảnh hưởng kết luận).
+- **Không** thuộc KT-78: tái lập **byte** của build (nợ `P20`, `KT-79`); KT-78 **không** sửa
+  `v2/kernel/**`, `v2/lib/**`, `spec/` (ảnh sản phẩm **trùng byte** KT-76).
