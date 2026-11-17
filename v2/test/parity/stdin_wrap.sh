@@ -29,9 +29,17 @@ mkfifo "$FIFO" || exit 2
 # Giữ một fd RDWR trên FIFO để `open` của QEMU **không** chặn (QEMU phải chạy ngay, không chờ
 # writer) — đo được: byte bơm vào lúc QEMU chưa vào vòng lặp chính thì bị mất.
 exec 8<>"$FIFO" || exit 2
+# Bơm **nhiều lần** trong cửa sổ 40..190 ms: đo được nguyên nhân hỏng là QEMU (khi máy bận) có thể
+# chưa vào vòng lặp chính lúc byte được ghi ⇒ byte đọc quá sớm bị mất; và một lần bơm duy nhất có
+# thể rơi đúng lúc cửa sổ RX của kernel đang mở ⇒ bị gộp. Bơm lặp cùng payload: lần nào tới sau khi
+# chardev sẵn sàng sẽ vào được shell; lệnh lặp không đổi kết quả (`serial_min_count` đã tính).
 (
     sleep "$DELAY"
-    cat "$PAY" >&8
+    i=0
+    while [ "$i" -lt 8 ]; do
+        cat "$PAY" >&8
+        sleep 0.02
+        i=$((i + 1))
+    done
     rm -f "$FIFO"
-) &
-exec "$@" <"$FIFO"
+) &exec "$@" <"$FIFO"

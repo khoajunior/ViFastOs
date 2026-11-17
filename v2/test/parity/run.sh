@@ -43,13 +43,14 @@ IMAGE_ARG=ktest-proc
 SMP=1
 TIMEOUT_DS=200 # 20 s/boot (cùng ngưỡng harness D2-72 Q10)
 SEND_DELAY_MS=50
+SUFFIX=""
 NEG=""
 
 usage() {
     cat <<'EOF'
 Dùng: bash v2/test/parity/run.sh [--mode transcript|serial] [--image ktest-proc|product|<path>]
                                  [--negative wrong-expect|no-send] [--smp N]
-                                 [--send-delay-ms N] [--logdir DIR]
+                                 [--send-delay-ms N] [--logdir DIR] [--log-suffix S]
 EOF
 }
 
@@ -66,6 +67,7 @@ while [ $# -gt 0 ]; do
         --smp) SMP="${2:-}"; shift 2 ;;
         --send-delay-ms) SEND_DELAY_MS="${2:-}"; shift 2 ;;
         --logdir) LOGDIR="${2:-}"; shift 2 ;;
+        --log-suffix) SUFFIX="${2:-}"; shift 2 ;;
         -h | --help) usage; exit 0 ;;
         *) die "tham số lạ: $1" ;;
     esac
@@ -104,6 +106,7 @@ fi
 mkdir -p "$LOGDIR" 2>/dev/null || die "không tạo được logdir $LOGDIR"
 TAG="$(printf '%s-%s-smp%s' "$MODE" "$IMAGE_KIND" "$SMP")"
 [ -n "$NEG" ] && TAG="$TAG-neg-$NEG"
+TAG="$TAG$SUFFIX"
 LOG="$LOGDIR/kt77a-$TAG.log"
 QMULOG="$LOGDIR/kt77a-qemu-$TAG.log"
 INFRA_LOG="$LOGDIR/kt77a-infra.log"
@@ -121,7 +124,13 @@ note() { printf '%s\n' "$*" | tee -a "$LOG"; }
 note "# run.sh: task=KT-77a mode=$MODE image=$IMAGE_KIND smp=$SMP negative=${NEG:-none}"
 note "# run.sh: toml=$TOML"
 note "# run.sh: image=$IMAGE qemu=$QEMU opensbi=$SBI"
-note "# run.sh: guard=$GUARD (không sửa) boot_timeout=$((TIMEOUT_DS / 10))s send_delay_ms=$SEND_DELAY_MS"
+note "# run.sh: guard=$GUARD (khong sua) boot_timeout=$((TIMEOUT_DS / 10))s send_delay_ms=$SEND_DELAY_MS"
+IMG_SHA="$(shasum -a 256 "$IMAGE" 2>/dev/null | awk '{print $1}')"
+IMG_BYTES="$(wc -c <"$IMAGE" 2>/dev/null | tr -d ' ')"
+IMG_FROZEN=0
+if [ -f "$ROOT/artifacts/$IMG_SHA.bin" ]; then IMG_FROZEN=1; fi
+note "# parity: image_path=$IMAGE image_sha256=$IMG_SHA image_bytes=$IMG_BYTES"
+note "# parity: artifacts_bin=artifacts/$IMG_SHA.bin co=$IMG_FROZEN (dong bang artifacts/<sha>.bin thuoc KT-84)"
 
 qg_infra before "$INFRA_LOG" | tee -a "$LOG"
 

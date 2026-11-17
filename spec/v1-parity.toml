@@ -21,8 +21,17 @@
 #   v1_output  đầu ra đã đo/ghi ở v1 (nếu bằng chứng có nêu); rỗng = không có
 #   note       khác biệt parity đã biết (v1 vs v2)
 #
-# Đếm: 26 lệnh — khớp con số bảng lệnh shell sinh tự động của v1
-# (`docs/v1/overnight-log.md:2982` = 25 lệnh ở vòng 175; `:3397` = 26 lệnh sau khi thêm `loop`).
+# Đếm: **28 mục** = **22 builtin** của shell v1 (bảng sinh tự động ở tag `v1-archive`:
+# `v1-archive:docs/11-hien-tai/16-van-hanh.md` mục SHELL-TABLE, 22 dòng) + **6 applet ngoài**
+# (`ps`, `free`, `df`, `uname`, `uptime`, `jobs`) — ở v1 chúng là chương trình `/bin/<tên>`
+# (`v1-archive:crates/vifast-bin/src/main.rs:221-239`), shell gọi qua fallback exec-from-FS
+# (`v1-archive:crates/vifast-client/src/main.rs:1180-1210`). Con số "25/26 lệnh" trong
+# `docs/v1/overnight-log.md:2982,3397` là số builtin mà generator đếm ở các vòng 175/201, **không**
+# gồm applet và **không** phải trạng thái cuối của tag.
+# **Không** đưa vào: `args` — applet **debug** in argv (`v1-archive:crates/vifast-bin/src/main.rs:236`),
+# không phải lệnh người dùng; ghi ở đây để không bỏ im lặng (A0 có thể yêu cầu thêm).
+# Bằng chứng có **hai loại**: `docs/v1/...` (kho lưu v1, đọc-only) và `v1-archive:<đường dẫn>:dòng`
+# (mã/tài liệu ở đúng tag `v1-archive` = `ca2eaf54`/r323).
 
 schema = 1
 runner = 'v2/test/parity/run.sh'
@@ -31,11 +40,19 @@ runner = 'v2/test/parity/run.sh'
 task = 'KT-77a'
 decision = 'OD-K6-2 (Agent 0, 17/11/2026) — Agent 1 thi hành theo D2-121'
 v1_tag = 'v1-archive'
-evidence_rule = 'moi muc phai co source = file:dong trong docs/v1; khong co bang chung thi khong dua vao'
-serial_newline_v1 = 'v1 nhan \r (docs/v1/agent2-report-62.md:23)'
+evidence_rule = 'moi muc phai co source = file:dong, hoac trong docs/v1 (kho luu) hoac v1-archive:<path>:dong (ma/tai lieu o tag v1-archive); khong co bang chung thi khong dua vao'
+serial_newline_v1 = 'v1 nhan \r (docs/v1/agent2-report-62.md:24)'
+
 serial_newline_v2 = 'shell v2 nhan \n (v2/kernel/vifast-kbin-riscv64/init/shell_user.rs:299)'
 image_test = 'v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-ktest-proc'
 image_product = 'v2/kernel/target/riscv64gc-unknown-none-elf/release/vifast-kbin-riscv64'
+
+[image]
+# D2-122(2): ảnh đo được ghi sha+size trong log của runner (`v2/test/parity/run.sh`);
+# đóng băng `artifacts/<sha>.bin` thuộc KT-84. Ảnh sản phẩm hiện tại là **trước canonical**
+# (fd202276…) — KHÔNG dùng làm bằng chứng v2.0.
+canonical = 'chua co (KT-84 dong bang artifacts/<sha>.bin)'
+product_pre_canonical = 'fd20227658832a3718b390b0cd7aab563396e23e01ecbd04632f7a9c4393a6da'
 
 [serial]
 # Quy ước attribution của chế độ serial (đo được trên ktest-proc):
@@ -50,7 +67,7 @@ attribution = 'help/ps dem >= serial_min_count; echo/kill dung chuoi dac trung'
 name = 'help'
 args = ''
 send = 'help\nhelp\n'
-expect = '^# shell: help cmds=6$'
+expect = '^# shell: help cmds=[0-9]+$'
 timeout_ms = 2000
 serial_min_count = 2
 source = 'docs/v1/agent2-report-21.md:81'
@@ -101,6 +118,34 @@ status = 'active'
 note = 'v1 in KILL EXEC OK|SKIP; v2 in # shell: kill pid=N code=0 => parity mot phan'
 
 [[command]]
+name = 'cd'
+args = '<path>'
+send = 'cd /\n'
+expect = 'doi thu muc hien tai; v1 in cwd <path>'
+timeout_ms = 2000
+source = 'v1-archive:crates/vifast-client/src/main.rs:883'
+source_more = 'v1-archive:docs/11-hien-tai/16-van-hanh.md:109'
+counter_evidence = 'docs/v1/overnight-log.md:3664-3669 (vong 222) ghi da REVERT cd/pwd vi vuot ngan sach trang; nhung ma o tag v1-archive (ca2eaf54/r323) lai CO cd/pwd => hai du kien mau thuan, khong tu chon'
+decision = 'cho Agent 0'
+v1_output = 'cwd <path>'
+status = 'deferred-K7'
+reason = 'hai du kien mau thuan: (a) v1-archive code co cd (main.rs:883) va bang lenh co dong cd (:109); (b) docs/v1/overnight-log.md:3664-3669 ghi vong 222 da revert. Khong duoc im lang; shell v2 chua co builtin cd/pwd => cho Agent 0 quyet (BLOCKED-CHO-A0)'
+
+[[command]]
+name = 'pwd'
+args = ''
+send = 'pwd\n'
+expect = 'in thu muc hien tai (v1: cwd())'
+timeout_ms = 2000
+source = 'v1-archive:crates/vifast-client/src/main.rs:878'
+source_more = 'v1-archive:docs/11-hien-tai/16-van-hanh.md:121'
+counter_evidence = 'docs/v1/overnight-log.md:3664-3669 (vong 222) ghi da REVERT cd/pwd vi vuot ngan sach trang; nhung ma o tag v1-archive (ca2eaf54/r323) lai CO pwd => hai du kien mau thuan, khong tu chon'
+decision = 'cho Agent 0'
+v1_output = 'cwd <path>'
+status = 'deferred-K7'
+reason = 'hai du kien mau thuan: (a) v1-archive code co pwd (main.rs:878) va bang lenh co dong pwd (:121); (b) docs/v1/overnight-log.md:3664-3669 ghi vong 222 da revert. Khong duoc im lang; shell v2 chua co builtin cd/pwd => cho Agent 0 quyet (BLOCKED-CHO-A0)'
+
+[[command]]
 name = 'time'
 args = ''
 send = 'time\n'
@@ -109,7 +154,7 @@ timeout_ms = 2000
 source = 'docs/v1/agent2-report-21.md:81'
 v1_output = ''
 status = 'deferred-K7'
-reason = 'shell v2 chua co lenh time (shell_user.rs:247-269 chi co help/echo/ps/wait/kill/exit); can syscall dong ho tren shell => K7'
+reason = 'thieu BUILTIN time trong shell v2 (shell_user.rs:247-269 chi co help/echo/ps/wait/kill/exit); syscall dong ho ClockRead (11) DA CO (spec/abi.toml:117, v2/kernel/vifast-plat-riscv64/src/user.rs:1229, TAP ktest_user.rs:1105) => khong phai ABI moi; chi can builtin => K7'
 
 [[command]]
 name = 'ls'
@@ -231,8 +276,8 @@ args = ''
 send = 'free\n'
 expect = '<trong>/<tong> KiB'
 timeout_ms = 2000
-source = 'docs/v1/overnight-log.md:2640'
-source_more = 'docs/v1/overnight-log.md:3470'
+source = 'docs/v1/overnight-log.md:2641'
+source_more = 'docs/v1/overnight-log.md:3469'
 v1_output = '24/344 KiB free'
 status = 'deferred-K7'
 reason = 'can syscall MemInfo (v1) chua co tren v2; khong mo ABI trong KT-77a => K7'
@@ -244,7 +289,7 @@ send = 'df\n'
 expect = 'used/total block cua vung du lieu FS'
 timeout_ms = 2000
 source = 'docs/v1/overnight-log.md:2387'
-source_more = 'docs/v1/overnight-log.md:3470'
+source_more = 'docs/v1/overnight-log.md:3469'
 v1_output = '12/8162 blocks'
 status = 'deferred-K7'
 reason = 'can opcode STATFS/ABI FS tu shell chua co tren v2 => K7'
@@ -259,7 +304,7 @@ source = 'docs/v1/overnight-log.md:2576'
 source_more = 'docs/v1/overnight-log.md:3470'
 v1_output = '2s'
 status = 'deferred-K7'
-reason = 'shell v2 chua co lenh uptime; can syscall Clock tren shell => K7'
+reason = 'thieu BUILTIN uptime trong shell v2; du lieu dong ho da co qua ClockRead (11) (spec/abi.toml:117, user.rs:1229) => chi can builtin, khong can ABI moi; ở v1 uptime la applet /bin/uptime (v1-archive:crates/vifast-bin/src/main.rs:224) => K7'
 
 [[command]]
 name = 'uname'
@@ -315,7 +360,7 @@ timeout_ms = 2000
 source = 'docs/v1/overnight-log.md:2903'
 v1_output = 'jobs: 2 runnable'
 status = 'deferred-K7'
-reason = 'can syscall TcbInfo tren shell (v2 chua co) => K7'
+reason = 'thieu BUILTIN jobs trong shell v2; du lieu can (state tung TCB) DA CO trong reply PS_REQ ma shell v2 dang dung: shell_user.rs:189-218 tu doc entry = pid<<5 | state<<1 | suspended va in state=... => chi can builtin dem Ready/Running, KHONG can ABI moi; ở v1 jobs la applet (v1-archive:crates/vifast-bin/src/main.rs:233) => K7'
 
 [[command]]
 name = 'loop'

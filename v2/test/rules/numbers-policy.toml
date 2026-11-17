@@ -42,11 +42,17 @@ date = "2026-11-17"
 # (kt71..kt79) kiểm tại thời điểm viết; ghim sha256 để không ai thêm số vào mà không bị thấy.
 # Ngày ghi ngoại lệ: 2026-11-17. Người ghi: Agent 2 dòng OS (KT-80).
 
-[[legacy]]
+# `v2/agent/reports/A1-decision-log.md` — **loại khỏi tài liệu đích** (không phải ngoại lệ sha):
+# đây là **sổ quyết định sống** của Agent 1, được ghi thêm sau **mỗi** quyết định (ví dụ A1-177
+# trong commit 25d15a29). Ghim sha sẽ đỏ oan mỗi lần Agent 1 ghi, mà KT-80 không được sửa tệp của
+# vai khác. Quyết định phạm vi **có tên + ngày + chủ + điều kiện quay lại**; mất tệp ⇒
+# `E1_EXCLUDED_STALE`; tệp vẫn nằm trong repo và vẫn được người đọc kiểm.
+[[excluded]]
 path = "v2/agent/reports/A1-decision-log.md"
-sha256 = "28208db4a29acc459da1ca3788df89e264201b3199833a760a5879b1908a45c8"
-reason = "sổ quyết định Agent 1, viết trước OD-K6-5, ngoài vùng ghi KT-80"
+owner = "Agent 1"
+reason = "sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng"
 date = "2026-11-17"
+revisit = "khi Agent 1 chốt sổ, hoặc trước KT-82 (văn bản đóng K6)"
 
 [[legacy]]
 path = "v2/agent/reports/BRIEFING-Agent0-K6.md"
@@ -168,11 +174,3 @@ date = "2026-11-17"
 # vi phạm luật mới" — nhưng phải **có tên + lý do + ngày + sha**, và phải **trả nợ**: khi KT-77a
 # (hoặc K7) đưa số vào khối `scope=` thì xoá mục này. Sửa nội dung tệp ⇒ ĐỎ (phải xử lý lại),
 # nên nó không thể âm thầm thành "miễn trừ vĩnh viễn".
-[[legacy]]
-path = "v2/docs/k6-parity.md"
-sha256 = "31ce3441f7ee37fcc1de2d0802283a7be558972e002deba4ac2275938c4d2820"
-kind = "pre_existing"
-owner = "KT-77a"
-debt = "100 lỗi E1_* khi chạy `v2 check-rules --law 1` (số đo trong prose + khối scope= chép kèm tiền tố `số-dòng:`); chuyển số vào khối scope= rồi xoá ngoại lệ"
-reason = "viết song song KT-80, commit 6f8f63a5 TRƯỚC khi luật 1 vào cổng; ngoài vùng ghi của KT-80"
-date = "2026-11-17"
