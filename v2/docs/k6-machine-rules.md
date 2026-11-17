@@ -99,7 +99,7 @@ và tên cột bị bỏ phải có thật trong bảng gốc (nếu không ⇒ 
 
 ## 6. Luật VIII — ca phá cũ là ca hồi quy
 
-`v2/test/rules/verify-script-regressions.txt` liệt kê **mười ba** đường phá đã từng lọt qua các
+`v2/test/rules/verify-script-regressions.txt` liệt kê **mười lăm** đường phá đã từng lọt qua các
 verifier tiền nhiệm, mỗi dòng ghi: id · luật · mã lỗi kỳ vọng · cách phá · mô tả. Tài liệu này
 **không chép tay** danh sách đó — nó trích nguyên văn từ registry:
 
@@ -114,6 +114,8 @@ scope-tmp | 1 | E1_SCOPE_OUTSIDE_REPO | scope-tmp | `scope=/tmp/...` (log ngoài
 scope-negative-source | 1 | E1_SCOPE_FORBIDDEN | scope-negative-source | `scope=` trỏ log ca âm
 counter-unproven | 3 | E3_UNPROVEN_IN_OK | counter-unproven | `proven=false` nhưng nằm trong khối ok
 counter-undeclared | 3 | E3_COUNTER_UNDECLARED | counter-undeclared | `counter=` không khai registry
+counter-proven-no-negative | 3 | E3_NEGATIVE_ZERO | counter-proven-no-negative | `proven=true` nhưng log ca âm không chứng minh bộ đếm khác 0
+assign-key-value | 1 | E1_NUMBER_ASSIGNED | assign-key-value | số đo dạng `key=value` ở prose (phản biện KT-80: `drops=5` từng lọt)
 criteria-drop-column | 7 | E7_COLUMN_MISMATCH | criteria-drop-column | bản trích bỏ một cột
 log-after-report | 2 | E2_ORDER | log-after-report | commit báo cáo TRƯỚC commit log
 legacy-changed | 1 | E1_LEGACY_SHA | legacy-changed | ngoại lệ lịch sử bị sửa nội dung
@@ -137,7 +139,7 @@ Bước cổng gọi `check-rules` (nhãn bước trong log cổng là `luật m
 (đã có trong danh sách đích), luật I kiểm luôn tài liệu này:
 
 ```text scope=kt80-check-rules.log
-# verify-numbers: ok=5 fail=0 wall_ms=10348 law_wall_ms={1:826,2:1454,3:93,7:56,8:7731}
+# verify-numbers: ok=5 fail=0 wall_ms=11259 law_wall_ms={1:911,2:1502,3:69,7:24,8:8630}
 ```
 
 Ngân sách OD-K6-5 cho cả năm luật là **sáu mươi giây**; số đo thực tế nằm trong khối trên. Luật
@@ -160,15 +162,21 @@ SIZE_AFTER=188552
 CLIPPY_EXIT=0
 ```
 
-Ảnh sản phẩm **không đổi** trước/sau (`kt80-sha-before.log`, `kt80-sha-after.log`). Lưu ý D2-116(c):
+Ảnh sản phẩm **không đổi** trước/sau (`kt80-sha-before.log`, `kt80-sha-after.log`) — nhưng đây là
+**ảnh trước canonical** (`fd202276…`), **KHÔNG** dùng làm bằng chứng v2.0 (D2-122: ảnh canonical của
+KT-79 là `c1072d72…`/82552; ảnh phát hành chưa được tuyên bố tái lập byte). Lưu ý D2-116(c):
 lúc kết thúc cổng có QEMU **của task khác** (một wrapper `stdin_wrap.sh` mồ côi) ⇒ **wall của cổng
 không dùng để kết luận hiệu năng**; năm luật thì đo riêng ở khối trên khi đã kiểm **không còn** QEMU (`kt80-orphan.log` rỗng).
 
 ## 8. Ngoại lệ và giới hạn đã biết
 
 - **Số ngoại lệ**: `legacy=` trong khối `scope=` của mục §7 = **mười chín** tệp **lịch sử** (viết
-  trước OD-K6-5, ngoài vùng ghi KT-80), ghim `sha256` của bản **đã commit** (HEAD) nên bản nháp
-  đang sửa của task khác không làm đỏ oan; commit bản sửa là ĐỎ cho tới khi xử lý lại.
+  trước ngày OD-K6-5 hiệu lực, `2026-11-17`), **cộng bốn** tệp **có trước luật** nhưng vi phạm
+  **đường `key=value`** mới siết theo phản biện (`K6-DOD` chủ KT-76, `k6-exec` chủ KT-74,
+  `k6-persist` chủ KT-75, `k6-parity` chủ KT-77a) — mỗi mục có `owner` + `debt` + `sha256` của bản
+  HEAD, in `# note` mỗi lần chạy. Tất cả ghim `sha256` của bản **đã commit** (HEAD) nên bản nháp
+  đang sửa của task khác không làm đỏ oan; commit bản sửa là ĐỎ cho tới khi xử lý lại. Phạm vi
+  ngoại lệ: **chỉ** tệp có trước ngày luật hiệu lực; **không** có mục nào cho tài liệu mới.
   Ban đầu có thêm **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, viết song song) với đúng
   cơ chế `kind="pre_existing"` + chủ + nợ; KT-77a đã **sửa tài liệu cho đúng luật** ở commit
   `de55b786` (số vào khối `scope=`, không ngoại lệ) nên mục đó đã được **xoá** — hiện `k6-parity.md`
@@ -179,10 +187,11 @@ không dùng để kết luận hiệu năng**; năm luật thì đo riêng ở 
   định (ví dụ A1-177); ghim sha sẽ đỏ oan mỗi lần ghi, mà KT-80 không được sửa tệp của vai khác.
   Quyết định phạm vi có tên + ngày + chủ + điều kiện quay lại; tệp mất ⇒ `E1_EXCLUDED_STALE`.
   Không có ngoại lệ/loại trừ nào cho tài liệu **mới** sau khi luật đã vào cổng.
-- **Giới hạn kế thừa của bộ tách số** (giữ tương thích kt76, đã ghi ở `numeric_tokens`): token số
-  **đứng riêng** mới bị bắt; giá trị dính sau `key=` (ví dụ `writes=0`) được coi là định danh
-  trường evidence. Các ca phá đã đăng ký ở luật VIII không dựa vào giới hạn này; muốn siết tiếp
-  thì thêm ca phá + sửa `numeric_tokens` trong **cùng** một lần (đúng luật VIII).
+- **Bộ tách số** (sau phản biện KT-80): bắt cả token số **đứng riêng** lẫn **giá trị số dính sau
+  dấu `=`** ở prose — ví dụ các khoá `drops`, `TESTS`, `wall_ms`, `fail` đi kèm số (phản biện chỉ
+  đúng: trước đây chỉ lấy token tách bằng khoảng trắng nên dạng này lọt). Trừ **định danh**: hex/
+  `0x`, giá trị băm (`sha*`, `build`, `digest`, `hash`), ngày, giờ. Ca hồi quy `assign-key-value` ở
+  luật VIII giữ đúng đường này (mỗi lần sửa verifier phải kèm ca phá của lần trước).
 - **`v2/agent/STATE.md` không nằm trong danh sách đích** của luật I (D2-112d): số của STATE thuộc
   từng task và đã có verifier riêng của task đó; luật I chỉ áp cho `reports/*.md` + `k6-*.md`.
 - Luật III chỉ kiểm dòng **khai** `counter=<tên>`; bộ đếm nằm trong văn xuôi (không khai) vẫn phải

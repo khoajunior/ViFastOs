@@ -93,6 +93,17 @@ NUMERIC = re.compile(r"^[0-9][0-9.,/:%-]*$")
 QUOTED = re.compile(r"“([^”]+)”")
 HEADING_SECTION = re.compile(r"^#{1,6}\s+(\d{1,2}(?:\.\d{1,2})*)\.?(?:\s|$)")
 COUNTER_TOKEN = re.compile(r"(?<![A-Za-z0-9_])counter=([a-z][a-z0-9_]*)")
+# Reviewer KT-80 (chặn): `drops=5` / `TESTS=729` trong prose từng lọt vì `numeric_tokens` chỉ lấy
+# token tách bằng khoảng trắng. Bắt **giá trị số dính sau `=`** — trừ định danh: hex/0x, sha/build/
+# digest/hash (giá trị băm), ngày, giờ. `wall_ms=9845`, `fail=0`, `seeds_total=400000` ⇒ ĐỎ.
+ASSIGN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_.-]*=([0-9][0-9A-Za-z_+.,:/%-]*)")
+IDENT_KEYS = {"sha", "sha256", "sha512", "build", "digest", "hash"}
+ASSIGN_IDENT_VALUE = [
+    re.compile(r"^0x[0-9a-fA-F_]+$"),           # hex
+    re.compile(r"^[0-9a-fA-F]{8,}$"),           # băm/định danh hex dài
+    re.compile(r"^\d{4}-\d{2}-\d{2}$"),        # ngày
+    re.compile(r"^\d{2}:\d{2}(:\d{2})?$"),      # giờ
+]
 
 
 class ConfigError(Exception):
@@ -472,6 +483,16 @@ def law1(root, ctx):
                     continue
                 fails.append((rel, lineno, "E1_NUMBER_OUTSIDE",
                               f"số '{tok}' ngoài khối `scope=` (phải là số đo trích từ log)"))
+            # (reviewer KT-80) số đo dạng `key=value` ở prose — dạng bằng chứng repo dùng nhiều nhất
+            for m in ASSIGN.finditer(scan):
+                key = scan[max(0, m.start()):m.start() + m.group(0).index("=")]
+                value = m.group(1).rstrip(".,;:)%")
+                if not value or key.lower() in IDENT_KEYS:
+                    continue
+                if any(rx.fullmatch(value) for rx in ASSIGN_IDENT_VALUE):
+                    continue
+                fails.append((rel, lineno, "E1_NUMBER_ASSIGNED",
+                              f"số '{key}={value}' ngoài khối `scope=` (số đo gán trong prose)"))
     ctx["law1_checked"] = checked
     return fails
 
@@ -1022,6 +1043,23 @@ def sabotage_counter_unproven(root):
     )
 
 
+def sabotage_assign_key_value(root):
+    # phản biện KT-80 (chặn): số đo dạng `key=value` trong prose (dạng bằng chứng repo dùng nhiều nhất)
+    p = os.path.join(root, "v2", "agent", "reports", "T.md")
+    open(p, "a").write("\nĐo được drops=5 sau khi chạy.\n")
+
+
+def sabotage_counter_proven_no_negative(root):
+    # chiều thứ hai của luật 3: proven=true nhưng log ca âm KHÔNG cho thấy bộ đếm khác 0
+    p = os.path.join(root, "v2", "test", "rules", "counters.toml")
+    lines = []
+    for line in open(p, encoding="utf-8").read().splitlines():
+        if line.startswith("negative_log = "):
+            line = 'negative_log = "v2/agent/JOURNAL/good.log"'
+        lines.append(line)
+    open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+
+
 def sabotage_counter_undeclared(root):
     p = os.path.join(root, "v2", "agent", "reports", "T.md")
     open(p, "a").write("\n```text scope=good.log\n# kt80: counter=khong_khai value=0\n```\n")
@@ -1083,6 +1121,8 @@ SABOTAGES = {
     "scope-negative-source": sabotage_scope_negative_source,
     "counter-unproven": sabotage_counter_unproven,
     "counter-undeclared": sabotage_counter_undeclared,
+    "assign-key-value": sabotage_assign_key_value,
+    "counter-proven-no-negative": sabotage_counter_proven_no_negative,
     "criteria-drop-column": sabotage_criteria_drop_column,
     "log-after-report": sabotage_log_after_report,
     "legacy-changed": sabotage_legacy_changed,

@@ -32,6 +32,8 @@ scope-tmp | 1 | E1_SCOPE_OUTSIDE_REPO | scope-tmp | `scope=/tmp/...` (log ngoài
 scope-negative-source | 1 | E1_SCOPE_FORBIDDEN | scope-negative-source | `scope=` trỏ log ca âm
 counter-unproven | 3 | E3_UNPROVEN_IN_OK | counter-unproven | `proven=false` nhưng nằm trong khối ok
 counter-undeclared | 3 | E3_COUNTER_UNDECLARED | counter-undeclared | `counter=` không khai registry
+counter-proven-no-negative | 3 | E3_NEGATIVE_ZERO | counter-proven-no-negative | `proven=true` nhưng log ca âm không chứng minh bộ đếm khác 0
+assign-key-value | 1 | E1_NUMBER_ASSIGNED | assign-key-value | số đo dạng `key=value` ở prose (phản biện KT-80: `drops=5` từng lọt)
 criteria-drop-column | 7 | E7_COLUMN_MISMATCH | criteria-drop-column | bản trích bỏ một cột
 log-after-report | 2 | E2_ORDER | log-after-report | commit báo cáo TRƯỚC commit log
 legacy-changed | 1 | E1_LEGACY_SHA | legacy-changed | ngoại lệ lịch sử bị sửa nội dung

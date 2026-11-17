@@ -218,3 +218,41 @@ ok 4 - luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)
 ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
 ok - md5 cây thật KHÔNG đổi trước/sau (0f234fc71a15ae7849969fb62555d3c1c44d3ead3277bf5154b3197330bac77d)
 # selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi
+TAP version 13
+1..5
+    đối chứng dương: luật 1 XANH trên bản copy
+    (ĐỎ nhưng KHÔNG có mã [E1_NUMBER_OUTSIDE])
+    # verify-numbers: root=/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/kt80-selfbreak.QRQuFw/case-1 docs=24 legacy=23 laws=1
+    # note - luat 1: ngoại lệ 'có trước luật' [v2/agent/reports/K6-DOD.md] chủ KT-76: 26 số dạng key=value ở prose (siết luật 1 theo phản biện KT-80); chuyển vào khối scope= khi mở lại
+    # note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-exec.md] chủ KT-74: 3 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
+    # note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-persist.md] chủ KT-75: 28 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
+    # note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 4 số dạng key=value ở prose (qemu_foreign/qemu_ppid1/inject_ok); KT-77a sửa khi mở lại
+    # note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
+    not ok - luat 1: v2/agent/reports/K6-DOD.md: E1_LEGACY_SHA nội dung ngoại lệ đã đổi (sha256 khác) — phải đưa số vào khối scope= hoặc cập nhật ngoại lệ có tên+lý do+ngày
+    not ok - luat 1: 1 lỗi (docs_checked=1 pre_existing=4 excluded=1)
+    # verify-numbers: ok=0 fail=1 wall_ms=72 law_wall_ms={1:9}
+not ok 1 - luat 1: số ngoài khối scope ⇒ ĐỎ (E1_NUMBER_OUTSIDE)
+    đối chứng dương: luật 2 XANH khi log commit trước
+ok 2 - luat 2: báo cáo commit trước log ⇒ ĐỎ (E2_ORDER)
+    đối chứng dương: luật 3 XANH trên bản copy
+ok 3 - luat 3: bộ đếm proven=false nằm trong khối ok ⇒ ĐỎ (E3_UNPROVEN_IN_OK)
+    đối chứng dương: luật 7 XANH trên bản copy
+ok 4 - luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)
+    đối chứng dương: self-test XANH trên verifier nguyên bản
+ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
+ok - md5 cây thật KHÔNG đổi trước/sau (436a4f9709e08bde37a6afdac785311b3d38700ce5429814dfd1048dcfb84c94)
+# selfbreak: 1 lỗi / 5 ca
+TAP version 13
+1..5
+    đối chứng dương: luật 1 XANH trên bản copy
+ok 1 - luat 1: số dạng key=value ở prose ⇒ ĐỎ (E1_NUMBER_ASSIGNED)
+    đối chứng dương: luật 2 XANH khi log commit trước
+ok 2 - luat 2: báo cáo commit trước log ⇒ ĐỎ (E2_ORDER)
+    đối chứng dương: luật 3 XANH trên bản copy
+ok 3 - luat 3: bộ đếm proven=false nằm trong khối ok ⇒ ĐỎ (E3_UNPROVEN_IN_OK)
+    đối chứng dương: luật 7 XANH trên bản copy
+ok 4 - luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)
+    đối chứng dương: self-test XANH trên verifier nguyên bản
+ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
+ok - md5 cây thật KHÔNG đổi trước/sau (c616fedde5a9e9dc8fea83ab18acd5ff0323a0f759c3c9fb705535ffa56bf2d6)
+# selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi

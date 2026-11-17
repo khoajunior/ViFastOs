@@ -3666,7 +3666,7 @@ QEMU: `qemu_ppid1=0 qemu_foreign=0` trước/sau mọi lần đo (`kt77a-infra.l
   có ca âm khác không; bản trích tiêu chí đủ **cột**; ca phá cũ là **ca hồi quy** (`--self-test`).
 - **Registry:** `v2/test/rules/{numbers-policy,counters,criteria}.toml`,
   `v2/test/rules/verify-script-regressions.txt`. **Ca phá:** `v2/test/rules/selfbreak.sh`.
-- **Ngoại lệ (báo lead):** **mười chín** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80),
+- **Ngoại lệ (báo lead):** **mười chín** tệp lịch sử + **bốn** tệp vi phạm **đường `key=value`** mới siết theo phản biện (`K6-DOD`/KT-76, `k6-exec`/KT-74, `k6-persist`/KT-75, `k6-parity`/KT-77a — có chủ + nợ + sha HEAD) (viết trước OD-K6-5, ngoài vùng ghi KT-80),
   ghim `sha256` **của bản HEAD** trong `[[legacy]]`; **một** tệp **loại khỏi tài liệu đích**
   (`[[excluded]]`: `A1-decision-log.md` — sổ quyết định sống của Agent 1, có chủ + ngày + điều kiện
   quay lại). Ngoại lệ `v2/docs/k6-parity.md` (có trước luật, KT-77a) đã được **xoá** sau khi KT-77a

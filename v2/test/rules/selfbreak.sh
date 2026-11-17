@@ -149,9 +149,10 @@ case_law1() {
     copy_repo "$d"
     run_law "$d" 1 || return 1
     echo "    đối chứng dương: luật 1 XANH trên bản copy"
-    # phá: số đo **ngoài** khối scope (đường phá kinh điển của D2-109C)
-    printf '\nSố test của cổng: 729.\n' >>"$d/v2/agent/reports/K6-DOD.md"
-    run_law "$d" 1 E1_NUMBER_OUTSIDE
+    # phá: số đo dạng `key=value` **ngoài** khối scope trên tài liệu đang bị kiểm
+    # (đúng đường phá của reviewer KT-80: `drops=5` ở prose từng lọt — D2-109C + phản biện)
+    printf '\nSố test của cổng: drops=5.\n' >>"$d/v2/docs/k6-machine-rules.md"
+    run_law "$d" 1 E1_NUMBER_ASSIGNED
 }
 
 # ------------------------------------------------------------------ luật 2
@@ -261,7 +262,7 @@ PYEOF
 
 echo "TAP version 13"
 echo "1..5"
-check_case "luat 1: số ngoài khối scope ⇒ ĐỎ (E1_NUMBER_OUTSIDE)" case_law1
+check_case "luat 1: số dạng key=value ở prose ⇒ ĐỎ (E1_NUMBER_ASSIGNED)" case_law1
 check_case "luat 2: báo cáo commit trước log ⇒ ĐỎ (E2_ORDER)" case_law2
 check_case "luat 3: bộ đếm proven=false nằm trong khối ok ⇒ ĐỎ (E3_UNPROVEN_IN_OK)" case_law3
 check_case "luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)" case_law7
