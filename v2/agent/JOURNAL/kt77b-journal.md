@@ -15,7 +15,7 @@ review), dừng trong hạn (không rơi về (b)).
    (22 > 0) trong khi ảnh sản phẩm 0 (`kt77b-harness-scan.log:3-11`); sai expect ⇒ exit 3
    (`kt77b-neg-wrong-expect.log:23`).
 5. **Ngân sách**: ảnh 176.768 ≤ 262.144; `.data+.bss` 203.232 ≤ 262.144; `size_of::<Machine>()`
-   = 189.384 ≤ 196.608 **không đổi** (`kt77b-budget.log:2-3`, `kt77b-run-exit-smp1.log:41`).
+   = 189.384 ≤ 196.608 **không đổi** (`kt77b-budget.log:2-3`, `kt77b-run-exit-smp1.log:74`).
 6. **Tách phụ thuộc harness**: `user = ["ktest"]` (crate arch) ⇒ nay `user = ["umode"]` +
    `ktest` giữ riêng; `obj.rs` bốn hàm kernel đổi sang `any(ktest, umode)`; kbin thêm feature
    `product-shell = ["user"]`. Ảnh sản phẩm **không** có marker harness.
