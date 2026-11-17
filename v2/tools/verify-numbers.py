@@ -365,6 +365,47 @@ def context_excluded(ctx, rel):
     return {}
 
 
+def queue_status(root, task):
+    """Trạng thái của task trong `v2/agent/QUEUE.md` (None nếu không thấy)."""
+    path = os.path.join(root, "v2", "agent", "QUEUE.md")
+    if not os.path.isfile(path):
+        return None
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if not line.lstrip().startswith("|"):
+            continue
+        row = cells(line)
+        if not row:
+            continue
+        name = row[0].strip("*` ")
+        if name == task:
+            for cell in row[1:]:
+                token = cell.strip("*` ")
+                if token in ("READY", "BLOCKED", "REVIEW", "DONE"):
+                    return token
+    return None
+
+
+def entry_expiry(ctx, entry):
+    """Deadline máy kiểm cho ngoại lệ: `expires_at` (ngày) hoặc `expires_task` (trạng thái QUEUE).
+
+    Reviewer KT-80 đề xuất: `debt` bằng văn xuôi thì người phải nhớ; hạn máy kiểm thì tự ĐỎ.
+    `expires_task` hết hạn khi task đó đã **không còn BLOCKED** (đang/đã đóng) — với KT-82 nghĩa là
+    “trước văn bản đóng K6”. `KT80_TODAY=YYYY-MM-DD` để test tất định.
+    """
+    reasons = []
+    at = entry.get("expires_at")
+    if at:
+        today = os.environ.get("KT80_TODAY") or time.strftime("%Y-%m-%d")
+        if today >= at:
+            reasons.append(f"expires_at={at} < hôm nay {today}")
+    task = entry.get("expires_task")
+    if task:
+        status = queue_status(ctx["root"], task)
+        if status in ("READY", "REVIEW", "DONE"):
+            reasons.append(f"expires_task={task} đang {status} (đã qua hạn)")
+    return "; ".join(reasons)
+
+
 def law1(root, ctx):
     """Số do script sinh từ log đã commit + trích nguyên văn. Trả list lỗi."""
     fails = []
@@ -383,6 +424,10 @@ def law1(root, ctx):
         if not re.fullmatch(r"[0-9a-f]{64}", want or ""):
             fails.append((rel, 0, "E1_LEGACY_SHA", "ngoại lệ thiếu sha256 (64 hex)"))
             continue
+        expires = entry_expiry(ctx, entry)
+        if expires:
+            fails.append((rel, 0, "E1_EXPIRED",
+                          f"ngoại lệ quá hạn ({expires}) — phải sửa tài liệu cho đúng luật rồi xoá mục"))
         got = sha256_committed(ctx, rel)
         if got != want:
             fails.append(
@@ -487,8 +532,10 @@ def law1(root, ctx):
             for m in ASSIGN.finditer(scan):
                 key = scan[max(0, m.start()):m.start() + m.group(0).index("=")]
                 value = m.group(1).rstrip(".,;:)%")
-                if not value or key.lower() in IDENT_KEYS:
+                if not value:
                     continue
+                # Reviewer delta KT-80: miễn theo **hình dạng GIÁ TRỊ** (hex/0x, hex ≥ 8, ngày, giờ),
+                # KHÔNG miễn theo tên khoá — `build=729`, `sha=5`, `digest=0` vẫn là số bịa ⇒ ĐỎ.
                 if any(rx.fullmatch(value) for rx in ASSIGN_IDENT_VALUE):
                     continue
                 fails.append((rel, lineno, "E1_NUMBER_ASSIGNED",
@@ -1060,6 +1107,29 @@ def sabotage_counter_proven_no_negative(root):
     open(p, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 
 
+def sabotage_assign_ident_key_bad_value(root):
+    # reviewer delta KT-80: tên khoá "trông như hash" không được miễn giá trị số bịa
+    p = os.path.join(root, "v2", "agent", "reports", "T.md")
+    open(p, "a").write("\nbuild=729\n")
+
+
+def sabotage_pre_existing_expired(root):
+    # ngoại lệ pre_existing quá hạn (expires_at) ⇒ luật 1 phải ĐỎ
+    p = os.path.join(root, "v2", "agent", "reports", "T.md")
+    pinned = sha256_file(p)
+    pol = os.path.join(root, "v2", "test", "rules", "numbers-policy.toml")
+    with open(pol, "a") as fh:
+        fh.write(
+            "\n[[legacy]]\n"
+            'path = "v2/agent/reports/T.md"\n'
+            f'sha256 = "{pinned}"\n'
+            'kind = "pre_existing"\n'
+            'expires_at = "2000-01-01"\n'
+            'reason = "ca phá luật 8: ngoại lệ quá hạn"\n'
+            'date = "2026-11-17"\n'
+        )
+
+
 def sabotage_counter_undeclared(root):
     p = os.path.join(root, "v2", "agent", "reports", "T.md")
     open(p, "a").write("\n```text scope=good.log\n# kt80: counter=khong_khai value=0\n```\n")
@@ -1122,6 +1192,8 @@ SABOTAGES = {
     "counter-unproven": sabotage_counter_unproven,
     "counter-undeclared": sabotage_counter_undeclared,
     "assign-key-value": sabotage_assign_key_value,
+    "assign-ident-key-bad-value": sabotage_assign_ident_key_bad_value,
+    "pre-existing-expired": sabotage_pre_existing_expired,
     "counter-proven-no-negative": sabotage_counter_proven_no_negative,
     "criteria-drop-column": sabotage_criteria_drop_column,
     "log-after-report": sabotage_log_after_report,

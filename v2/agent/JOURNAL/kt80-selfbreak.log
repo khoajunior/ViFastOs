@@ -256,3 +256,49 @@ ok 4 - luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)
 ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
 ok - md5 cây thật KHÔNG đổi trước/sau (c616fedde5a9e9dc8fea83ab18acd5ff0323a0f759c3c9fb705535ffa56bf2d6)
 # selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi
+TAP version 13
+1..5
+    (kỳ vọng XANH nhưng exit=1)
+    # verify-numbers: root=/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T/kt80-selfbreak.XyxySG/case-1 docs=25 legacy=23 laws=1
+    Traceback (most recent call last):
+      File "/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T//kt80-selfbreak.XyxySG/case-1/v2/tools/verify-numbers.py", line 1400, in <module>
+        sys.exit(main())
+                 ^^^^^^
+      File "/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T//kt80-selfbreak.XyxySG/case-1/v2/tools/verify-numbers.py", line 1359, in main
+        fails = law1(root, ctx)
+                ^^^^^^^^^^^^^^^
+      File "/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T//kt80-selfbreak.XyxySG/case-1/v2/tools/verify-numbers.py", line 427, in law1
+        expires = entry_expiry(ctx, entry)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T//kt80-selfbreak.XyxySG/case-1/v2/tools/verify-numbers.py", line 403, in entry_expiry
+        status = queue_status(ctx["root"], task)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/var/folders/jp/05hgrzxj65bgh355l2zs2zz80000gn/T//kt80-selfbreak.XyxySG/case-1/v2/tools/verify-numbers.py", line 376, in queue_status
+        cells = cells(line)
+                ^^^^^
+    UnboundLocalError: cannot access local variable 'cells' where it is not associated with a value
+not ok 1 - luat 1: số dạng key=value ở prose ⇒ ĐỎ (E1_NUMBER_ASSIGNED)
+    đối chứng dương: luật 2 XANH khi log commit trước
+ok 2 - luat 2: báo cáo commit trước log ⇒ ĐỎ (E2_ORDER)
+    đối chứng dương: luật 3 XANH trên bản copy
+ok 3 - luat 3: bộ đếm proven=false nằm trong khối ok ⇒ ĐỎ (E3_UNPROVEN_IN_OK)
+    đối chứng dương: luật 7 XANH trên bản copy
+ok 4 - luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)
+    đối chứng dương: self-test XANH trên verifier nguyên bản
+ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
+ok - md5 cây thật KHÔNG đổi trước/sau (69b385f1b8440fcd69078b052de4e18b6c5cb6e89a2d847234ec8a241d957fae)
+# selfbreak: 1 lỗi / 5 ca
+TAP version 13
+1..5
+    đối chứng dương: luật 1 XANH trên bản copy
+ok 1 - luat 1: số dạng key=value ở prose ⇒ ĐỎ (E1_NUMBER_ASSIGNED)
+    đối chứng dương: luật 2 XANH khi log commit trước
+ok 2 - luat 2: báo cáo commit trước log ⇒ ĐỎ (E2_ORDER)
+    đối chứng dương: luật 3 XANH trên bản copy
+ok 3 - luat 3: bộ đếm proven=false nằm trong khối ok ⇒ ĐỎ (E3_UNPROVEN_IN_OK)
+    đối chứng dương: luật 7 XANH trên bản copy
+ok 4 - luat 7: bản trích bỏ một cột ⇒ ĐỎ (E7_COLUMN_MISMATCH)
+    đối chứng dương: self-test XANH trên verifier nguyên bản
+ok 5 - luat 8: verifier bị làm yếu ⇒ self-test ĐỎ (E8_CASE_GREEN)
+ok - md5 cây thật KHÔNG đổi trước/sau (36707b4fb8eb7db70edb654495c80109af3a85bb74d27459d36238df9fdcb50e)
+# selfbreak: 5/5 ca phá ĐỎ đúng mã; cây thật không đổi

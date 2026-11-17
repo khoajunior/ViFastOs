@@ -40,7 +40,7 @@ cụ, không copy-paste bốn bản) + ba registry; (3) cài luật 1/2/3/7/8 + 
 | Bộ đếm | `v2/test/rules/counters.toml` | `proven`, `negative_log`, `negative_pattern`; hai bộ đếm mẫu từ KT-78 |
 | Bộ đếm — sinh evidence | `v2/test/rules/counter-evidence.sh` | đọc giá trị thật từ log KT-78, fail-closed |
 | Tiêu chí | `v2/test/rules/criteria.toml` | nguồn gốc + số cột; `<!-- cot-bo: … -->` |
-| Hồi quy luật 8 | `v2/test/rules/verify-script-regressions.txt` | mười lăm đường phá đã từng lọt |
+| Hồi quy luật 8 | `v2/test/rules/verify-script-regressions.txt` | mười bảy đường phá đã từng lọt |
 | Ca phá từng luật | `v2/test/rules/selfbreak.sh` | 5 luật, đối chứng dương + âm, `mktemp -d`, shasum cây thật |
 | Cổng | `v2/bin/v2` | lệnh `check-rules`; `do_check` gọi bước `luật máy K6 (KT-80)` |
 | Tài liệu | `v2/docs/k6-machine-rules.md` | hợp đồng đầy đủ + bằng chứng; `v2/docs/k3b-core.md` §27 |
@@ -85,7 +85,7 @@ Kiểm bằng log (không viết tay số):
 
 ```text scope=kt80-check-rules.log
 # verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=24 legacy=20 laws=1,2,3,7,8
-# verify-numbers: ok=5 fail=0 wall_ms=11259 law_wall_ms={1:911,2:1502,3:69,7:24,8:8630}
+# verify-numbers: ok=5 fail=0 wall_ms=13105 law_wall_ms={1:1129,2:1935,3:77,7:26,8:9822}
 ```
 
 ## 5. Ca phá (ĐỎ thật) và self-test

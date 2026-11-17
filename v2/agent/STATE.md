@@ -3666,16 +3666,13 @@ QEMU: `qemu_ppid1=0 qemu_foreign=0` trước/sau mọi lần đo (`kt77a-infra.l
   có ca âm khác không; bản trích tiêu chí đủ **cột**; ca phá cũ là **ca hồi quy** (`--self-test`).
 - **Registry:** `v2/test/rules/{numbers-policy,counters,criteria}.toml`,
   `v2/test/rules/verify-script-regressions.txt`. **Ca phá:** `v2/test/rules/selfbreak.sh`.
-- **Ngoại lệ (báo lead):** **mười chín** tệp lịch sử + **bốn** tệp vi phạm **đường `key=value`** mới siết theo phản biện (`K6-DOD`/KT-76, `k6-exec`/KT-74, `k6-persist`/KT-75, `k6-parity`/KT-77a — có chủ + nợ + sha HEAD) (viết trước OD-K6-5, ngoài vùng ghi KT-80),
-  ghim `sha256` **của bản HEAD** trong `[[legacy]]`; **một** tệp **loại khỏi tài liệu đích**
-  (`[[excluded]]`: `A1-decision-log.md` — sổ quyết định sống của Agent 1, có chủ + ngày + điều kiện
-  quay lại). Ngoại lệ `v2/docs/k6-parity.md` (có trước luật, KT-77a) đã được **xoá** sau khi KT-77a
-  sửa tài liệu cho đúng luật ở `de55b786`; tài liệu đó nay **được kiểm**. **Không** còn ngoại lệ cho
-  tài liệu mới.
-- **Tài liệu:** [`docs/k6-machine-rules.md`](../docs/k6-machine-rules.md) + `docs/k3b-core.md` §27;
-  nhật ký `JOURNAL/kt80-journal.md`.
-- **Phối hợp (D2-105a):** `STATE.md`/`BLOCKED.md` ghi **append** (mục KT-77a ở trên do task song
-  song thêm); **không** chạm `v2/test/parity/**`, `spec/v1-parity.toml`.
+- **Ngoại lệ (báo lead):** **mười chín** tệp lịch sử (viết trước OD-K6-5, ngoài vùng ghi KT-80) +
+  **bốn** tệp `kind="pre_existing"` vi phạm đường `key=value` mới siết (K6-DOD/KT-76, k6-exec/KT-74,
+  k6-persist/KT-75, k6-parity/KT-77a) — mỗi mục có `owner` + nợ + `sha256` bản HEAD + **hạn máy kiểm
+  `expires_task="KT-82"`** (quá hạn ⇒ luật I tự ĐỎ `E1_EXPIRED`, A1-179); **một** tệp loại khỏi tài
+  liệu đích (`[[excluded]]`: `A1-decision-log.md`, sổ quyết định sống của Agent 1, có owner/date/
+  revisit). Mục `k6-parity` **đang gánh bốn số** — lead đã quyết gỡ, KT-77a đưa bốn số vào `scope=`
+  rồi xoá mục; **không** thêm ngoại lệ mới, tài liệu KT-80 tự nó là đích bị kiểm.
 - **Ghi nhận cho lead:** `v2/docs/k6-parity.md` (KT-77a, commit `6f8f63a5`) **chưa đạt** luật 1 —
   `v2 check-rules --law 1` báo 100 lỗi `E1_*` (số đo trong prose; khối `scope=` chép kèm tiền tố
   `số-dòng:`). KT-80 không sửa tệp của task khác; đã ghi ngoại lệ có tên+ngày+sha+chủ+nợ để lead
@@ -3707,3 +3704,30 @@ test** (`proc_demo.rs:338`) — ảnh sản phẩm muốn `ps` chạy được p
 ca âm exit 3/4/5; vòng `-r2` trước đó có 1 lần serial 3/4 (`echo` timeout) giữ nguyên làm bằng chứng.
 Vòng `-r2b` có **QEMU của tab KT-77b** ⇒ `qemu_foreign=1`, `verdict=KHONG_HOP_LE` (không dùng số thời
 gian). `spec/v1-parity.toml` nay **28 mục** (22 builtin + 6 applet; `args` là applet debug, không đưa vào).
+
+## KT-77b — ảnh **sản phẩm** có U-mode + shell (OD-K6-2) — DONE phần lớn (không rơi về (b))
+
+**Ảnh canonical có shell**: `39ca3cc6…`, 176.768 B, `build=6e90c73c43f9b4aa`, `text=106764`
+(`JOURNAL/kt77b-logs/kt77b-build-shell-canonical.log:5`); build hai lần hai target dir ⇒ cùng sha.
+Boot tới `shell>` ở **smp 1/2/4**; `# shell: up` do shell U-mode in. Parity serial **4/4 active**
+× 3 cấu hình hart, exit 0. **Ba ca âm**: shell tắt ⇒ exit 5; detector harness (ảnh sản phẩm 0,
+ảnh test 22 > 0); sai expect ⇒ exit 3. Ngân sách: ảnh 176.768 ≤ 262.144, `.data+.bss` 203.232 ≤
+262.144, `size_of::<Machine>()` = 189.384 ≤ 196.608 **không đổi**.
+
+**Thay đổi kiến trúc**: crate arch `user = ["ktest"]` → `user = ["umode"]` + `ktest` riêng; bốn
+hàm kernel (`obj.rs`: `copy_kernel_low_root`/`switch_root`/`restore_kernel_root`/`set_sum`) đổi
+sang `cfg(any(ktest, umode))`; kbin thêm `product-shell = ["user"]`. Ảnh sản phẩm **không** link
+`probe`/`proc_demo`/TAP (detector bằng máy). **Không** ghi `BLOCKED-CHO-A0`: phụ thuộc là gán nhãn
+feature sai, sửa thu hẹp được, ảnh test vẫn 10/10 TAP (`kt77b-regress-ktest-proc.log`).
+
+**Chưa xong** (ghi để không đọc nhầm là đủ OD-K6-2): tiêu chí 2 mới đạt phần `active` (ls/cat/ghi/
+đọc lại sau reboot/exec là `deferred-K7` trong spec đóng băng); tiêu chí 4 (ma trận + soak) do lead
+đo riêng; nợ K7: ngắt RX khi ở U-mode (trap không đổi `satp`), ELF đủ symbol (KT-84), ảnh test đổi
+`.text` vì prompt `shell>` ⇒ ma trận chạy lại. Cổng: `v2 check` PASS, `gate --fast` PASS
+(`JOURNAL/kt77b-logs/kt77b-{v2-check,gate-fast}.log`). **Vá tài liệu theo luật 1 (KT-80):** mọi số
+đo của `docs/k6-product-shell.md` nay nằm trong khối `scope=` trích nguyên văn; `fault_seen` được
+ghi rõ là **một** fault `FaultKind::Exit{0}` của shell (không phải W^X); tiêu chí hai ghi **CHƯA
+ĐẠT**. Tự kiểm sau vá: `check-rules --law 1` ok, `selfbreak` **5/5**, `v2 check` PASS
+(`JOURNAL/kt77b-logs/kt77b-{law1,selfbreak,selfcheck-docs}.log`). Cây từng đỏ vì file **của KT-80b**
+(`k6-machine-rules.md:179`) đang được ghi đồng thời — bằng chứng `JOURNAL/kt77b-logs/kt77b-concurrent-red.log`. Chi tiết: `docs/k6-product-shell.md` +
+`JOURNAL/kt77b-journal.md`.

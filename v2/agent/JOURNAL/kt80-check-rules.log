@@ -227,3 +227,80 @@ ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
 ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
 ok - luat 8: cases=15 (8630 ms)
 # verify-numbers: ok=5 fail=0 wall_ms=11259 law_wall_ms={1:911,2:1502,3:69,7:24,8:8630}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=25 legacy=23 laws=1,2,3,7,8
+Traceback (most recent call last):
+  File "/Users/mps/dvchd/ViFastOs/v2/tools/verify-numbers.py", line 1400, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/mps/dvchd/ViFastOs/v2/tools/verify-numbers.py", line 1359, in main
+    fails = law1(root, ctx)
+            ^^^^^^^^^^^^^^^
+  File "/Users/mps/dvchd/ViFastOs/v2/tools/verify-numbers.py", line 427, in law1
+    expires = entry_expiry(ctx, entry)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mps/dvchd/ViFastOs/v2/tools/verify-numbers.py", line 403, in entry_expiry
+    status = queue_status(ctx["root"], task)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mps/dvchd/ViFastOs/v2/tools/verify-numbers.py", line 376, in queue_status
+    cells = cells(line)
+            ^^^^^
+UnboundLocalError: cannot access local variable 'cells' where it is not associated with a value
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=25 legacy=23 laws=1,2,3,7,8
+# note - luat 1: ngoại lệ 'có trước luật' [v2/agent/reports/K6-DOD.md] chủ KT-76: 26 số dạng key=value ở prose (siết luật 1 theo phản biện KT-80); chuyển vào khối scope= khi mở lại
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-exec.md] chủ KT-74: 3 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-persist.md] chủ KT-75: 28 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 4 số dạng key=value ở prose (qemu_foreign/qemu_ppid1/inject_ok); KT-77a sửa khi mở lại
+# note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
+not ok - luat 1: v2/docs/k6-machine-rules.md:179: E1_NUMBER_OUTSIDE số '1' ngoài khối `scope=` (phải là số đo trích từ log)
+not ok - luat 1: 1 lỗi (docs_checked=2 pre_existing=4 excluded=1)
+ok - luat 2: pairs=89 pending=0 (1692 ms)
+ok - luat 3: counters=2 used=2 (76 ms)
+ok - luat 7: extractions=3 (27 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test counter-proven-no-negative: ĐỎ đúng mã E3_NEGATIVE_ZERO
+ok - self-test assign-key-value: ĐỎ đúng mã E1_NUMBER_ASSIGNED
+ok - self-test assign-ident-key-bad-value: ĐỎ đúng mã E1_NUMBER_ASSIGNED
+ok - self-test pre-existing-expired: ĐỎ đúng mã E1_EXPIRED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=17 (8756 ms)
+# verify-numbers: ok=4 fail=1 wall_ms=11722 law_wall_ms={1:1060,2:1692,3:76,7:27,8:8756}
+# verify-numbers: root=/Users/mps/dvchd/ViFastOs docs=25 legacy=23 laws=1,2,3,7,8
+# note - luat 1: ngoại lệ 'có trước luật' [v2/agent/reports/K6-DOD.md] chủ KT-76: 26 số dạng key=value ở prose (siết luật 1 theo phản biện KT-80); chuyển vào khối scope= khi mở lại
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-exec.md] chủ KT-74: 3 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-persist.md] chủ KT-75: 28 số dạng key=value ở prose; chuyển vào khối scope= khi mở lại
+# note - luat 1: ngoại lệ 'có trước luật' [v2/docs/k6-parity.md] chủ KT-77a: 4 số dạng key=value ở prose (qemu_foreign/qemu_ppid1/inject_ok); KT-77a sửa khi mở lại
+# note - luat 1: loại khỏi tài liệu đích [v2/agent/reports/A1-decision-log.md] chủ Agent 1: sổ quyết định sống (append mỗi quyết định), không phải báo cáo số đo; số đo trong sổ thuộc verifier của task tương ứng
+ok - luat 1: docs_checked=2 pre_existing=4 excluded=1 (1129 ms)
+ok - luat 2: pairs=89 pending=0 (1935 ms)
+ok - luat 3: counters=2 used=2 (77 ms)
+ok - luat 7: extractions=3 (26 ms)
+ok - self-test union-haystack: ĐỎ đúng mã E1_NOT_VERBATIM
+ok - self-test heading-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test heading-not-reset: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test decimal-x-y: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test fence-text-no-scope: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test bare-small-number: ĐỎ đúng mã E1_NUMBER_OUTSIDE
+ok - self-test scope-tmp: ĐỎ đúng mã E1_SCOPE_OUTSIDE_REPO
+ok - self-test scope-negative-source: ĐỎ đúng mã E1_SCOPE_FORBIDDEN
+ok - self-test counter-unproven: ĐỎ đúng mã E3_UNPROVEN_IN_OK
+ok - self-test counter-undeclared: ĐỎ đúng mã E3_COUNTER_UNDECLARED
+ok - self-test counter-proven-no-negative: ĐỎ đúng mã E3_NEGATIVE_ZERO
+ok - self-test assign-key-value: ĐỎ đúng mã E1_NUMBER_ASSIGNED
+ok - self-test assign-ident-key-bad-value: ĐỎ đúng mã E1_NUMBER_ASSIGNED
+ok - self-test pre-existing-expired: ĐỎ đúng mã E1_EXPIRED
+ok - self-test criteria-drop-column: ĐỎ đúng mã E7_COLUMN_MISMATCH
+ok - self-test log-after-report: ĐỎ đúng mã E2_ORDER
+ok - self-test legacy-changed: ĐỎ đúng mã E1_LEGACY_SHA
+ok - luat 8: cases=17 (9822 ms)
+# verify-numbers: ok=5 fail=0 wall_ms=13105 law_wall_ms={1:1129,2:1935,3:77,7:26,8:9822}

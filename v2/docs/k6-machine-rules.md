@@ -99,7 +99,7 @@ và tên cột bị bỏ phải có thật trong bảng gốc (nếu không ⇒ 
 
 ## 6. Luật VIII — ca phá cũ là ca hồi quy
 
-`v2/test/rules/verify-script-regressions.txt` liệt kê **mười lăm** đường phá đã từng lọt qua các
+`v2/test/rules/verify-script-regressions.txt` liệt kê **mười bảy** đường phá đã từng lọt qua các
 verifier tiền nhiệm, mỗi dòng ghi: id · luật · mã lỗi kỳ vọng · cách phá · mô tả. Tài liệu này
 **không chép tay** danh sách đó — nó trích nguyên văn từ registry:
 
@@ -116,6 +116,8 @@ counter-unproven | 3 | E3_UNPROVEN_IN_OK | counter-unproven | `proven=false` nh�
 counter-undeclared | 3 | E3_COUNTER_UNDECLARED | counter-undeclared | `counter=` không khai registry
 counter-proven-no-negative | 3 | E3_NEGATIVE_ZERO | counter-proven-no-negative | `proven=true` nhưng log ca âm không chứng minh bộ đếm khác 0
 assign-key-value | 1 | E1_NUMBER_ASSIGNED | assign-key-value | số đo dạng `key=value` ở prose (phản biện KT-80: `drops=5` từng lọt)
+assign-ident-key-bad-value | 1 | E1_NUMBER_ASSIGNED | assign-ident-key-bad-value | tên khoá "trông như hash" + số bịa (`build=729`) — delta reviewer-kt80b
+pre-existing-expired | 1 | E1_EXPIRED | pre-existing-expired | ngoại lệ `pre_existing` quá hạn `expires_at` (A1-179)
 criteria-drop-column | 7 | E7_COLUMN_MISMATCH | criteria-drop-column | bản trích bỏ một cột
 log-after-report | 2 | E2_ORDER | log-after-report | commit báo cáo TRƯỚC commit log
 legacy-changed | 1 | E1_LEGACY_SHA | legacy-changed | ngoại lệ lịch sử bị sửa nội dung
@@ -139,7 +141,7 @@ Bước cổng gọi `check-rules` (nhãn bước trong log cổng là `luật m
 (đã có trong danh sách đích), luật I kiểm luôn tài liệu này:
 
 ```text scope=kt80-check-rules.log
-# verify-numbers: ok=5 fail=0 wall_ms=11259 law_wall_ms={1:911,2:1502,3:69,7:24,8:8630}
+# verify-numbers: ok=5 fail=0 wall_ms=13105 law_wall_ms={1:1129,2:1935,3:77,7:26,8:9822}
 ```
 
 Ngân sách OD-K6-5 cho cả năm luật là **sáu mươi giây**; số đo thực tế nằm trong khối trên. Luật
@@ -171,12 +173,18 @@ không dùng để kết luận hiệu năng**; năm luật thì đo riêng ở 
 ## 8. Ngoại lệ và giới hạn đã biết
 
 - **Số ngoại lệ**: `legacy=` trong khối `scope=` của mục §7 = **mười chín** tệp **lịch sử** (viết
-  trước ngày OD-K6-5 hiệu lực, `2026-11-17`), **cộng bốn** tệp **có trước luật** nhưng vi phạm
-  **đường `key=value`** mới siết theo phản biện (`K6-DOD` chủ KT-76, `k6-exec` chủ KT-74,
-  `k6-persist` chủ KT-75, `k6-parity` chủ KT-77a) — mỗi mục có `owner` + `debt` + `sha256` của bản
-  HEAD, in `# note` mỗi lần chạy. Tất cả ghim `sha256` của bản **đã commit** (HEAD) nên bản nháp
-  đang sửa của task khác không làm đỏ oan; commit bản sửa là ĐỎ cho tới khi xử lý lại. Phạm vi
-  ngoại lệ: **chỉ** tệp có trước ngày luật hiệu lực; **không** có mục nào cho tài liệu mới.
+  trước ngày OD-K6-5 hiệu lực, `2026-11-17`) + các tệp `kind = "pre_existing"` (vi phạm **đường
+  `key=value`** mới siết theo phản biện: `K6-DOD` chủ KT-76, `k6-exec` chủ KT-74, `k6-persist` chủ
+  KT-75, `k6-parity` chủ KT-77a). Mỗi mục có `owner` + `debt` + `sha256` của bản HEAD + **hạn máy
+  kiểm** `expires_task = "KT-82"` (và `expires_at` nếu cần): quá hạn ⇒ luật I tự ĐỎ `E1_EXPIRED`,
+  không phụ thuộc trí nhớ người (A1-179). Ghim sha của bản **đã commit** (HEAD) nên bản nháp đang
+  sửa của task khác không làm đỏ oan; commit bản sửa là ĐỎ cho tới khi xử lý lại.
+  **Trạng thái đúng luôn đọc từ máy**: `pre_existing=` và các dòng `# note` của lần chạy, không
+  chép tay số tệp vào đây. Riêng `k6-parity.md`: mục `pre_existing` **vẫn đang gánh bốn số**
+  (`E1_NUMBER_ASSIGNED` tại các dòng số đo trong prose) — **không** phải “đã xoá”; lead đã quyết
+  định gỡ ngoại lệ và KT-77a sẽ đưa bốn số vào khối `scope=` (A1-179), sau đó tài liệu thuộc danh
+  sách **được kiểm**. KT-80 không thêm ngoại lệ mới.
+- **Không** có mục nào cho tài liệu mới; tài liệu của chính KT-80 là đích bị kiểm.
   Ban đầu có thêm **một** tệp **có trước luật** (`v2/docs/k6-parity.md`, viết song song) với đúng
   cơ chế `kind="pre_existing"` + chủ + nợ; KT-77a đã **sửa tài liệu cho đúng luật** ở commit
   `de55b786` (số vào khối `scope=`, không ngoại lệ) nên mục đó đã được **xoá** — hiện `k6-parity.md`

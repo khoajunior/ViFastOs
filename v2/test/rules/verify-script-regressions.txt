@@ -34,6 +34,8 @@ counter-unproven | 3 | E3_UNPROVEN_IN_OK | counter-unproven | `proven=false` nh�
 counter-undeclared | 3 | E3_COUNTER_UNDECLARED | counter-undeclared | `counter=` không khai registry
 counter-proven-no-negative | 3 | E3_NEGATIVE_ZERO | counter-proven-no-negative | `proven=true` nhưng log ca âm không chứng minh bộ đếm khác 0
 assign-key-value | 1 | E1_NUMBER_ASSIGNED | assign-key-value | số đo dạng `key=value` ở prose (phản biện KT-80: `drops=5` từng lọt)
+assign-ident-key-bad-value | 1 | E1_NUMBER_ASSIGNED | assign-ident-key-bad-value | tên khoá "trông như hash" + số bịa (`build=729`) — delta reviewer-kt80b
+pre-existing-expired | 1 | E1_EXPIRED | pre-existing-expired | ngoại lệ `pre_existing` quá hạn `expires_at` (A1-179)
 criteria-drop-column | 7 | E7_COLUMN_MISMATCH | criteria-drop-column | bản trích bỏ một cột
 log-after-report | 2 | E2_ORDER | log-after-report | commit báo cáo TRƯỚC commit log
 legacy-changed | 1 | E1_LEGACY_SHA | legacy-changed | ngoại lệ lịch sử bị sửa nội dung
