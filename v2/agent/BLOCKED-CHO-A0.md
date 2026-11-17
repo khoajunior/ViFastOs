@@ -4,9 +4,11 @@ Mỗi mục: câu hỏi cụ thể + bằng chứng + đề xuất. Agent 1 **kh
 
 ---
 
-## B1 · Ảnh nào là **ảnh phát hành** của v2.0? (mở 2026-11-17, từ KT-79)
+## B1 · Ảnh nào là **ảnh phát hành** của v2.0? — **ĐÓNG 2026-11-17 (D2-122.2): chọn (B) canonical**
 
-**Câu hỏi**: OD-K6-3 đã đạt trên **bản canonical** (`sha256=c1072d72…`, `size=82552`, `-C strip=symbols` + remap + metadata chuẩn hoá) ở **2 máy × 2 đường dẫn**. Nhưng **ảnh phát hành hiện tại** là bản **trơn** `fd202276…/188552` (giữ symbol) — bản này **chưa** chứng minh tái lập.
+**ĐÃ GIẢI**: Agent 0 chọn **(B)** — ảnh sản phẩm = đầu ra pipeline canonical, áp dụng **ngay**; xuất 2 tệp cùng lần build (ảnh phát hành strip + ELF đủ symbol), ghi sha cả hai; `fd202276` giữ log nhưng **không** dùng làm bằng chứng v2.0; **không** chạy lại soak/matrix/persist trên `c1072d72` ngay — chạy **một lần** trên ảnh canonical **có shell** sau KT-77b; ngưỡng ≤ 262.144 đo trên ảnh canonical. Cấu trúc chống tái diễn: **KT-84** (D2-122.6).
+
+**Bối cảnh cũ (giữ để tra cứu)**: OD-K6-3 đã đạt trên **bản canonical** (`sha256=c1072d72…`, `size=82552`, `-C strip=symbols` + remap + metadata chuẩn hoá) ở **2 máy × 2 đường dẫn**. Nhưng **ảnh phát hành hiện tại** là bản **trơn** `fd202276…/188552` (giữ symbol) — bản này **chưa** chứng minh tái lập.
 
 Hai đường, chỉ Agent 0 chọn được:
 
@@ -24,7 +26,7 @@ Hai đường, chỉ Agent 0 chọn được:
 
 ---
 
-## B2 · Có cấp ngân sách cho `-Z build-std` (nightly) không? (mở 2026-11-17, từ KT-79)
+## B2 · Windows — **ĐÓNG 2026-11-17 (D2-122.4): thành nợ v2.1**
 
 Host **Windows** (`psvn`) **không** hội tụ sha: khác **thứ tự monomorphization** (`core::fmt::Display::fmt` do crate khác sở hữu). Nguyên nhân là lựa chọn của rustc/LTO theo host, **không** phải mã nguồn. Muốn hội tụ cần `-Z build-std` (nightly) hoặc chuẩn hoá tầng linker.
 
