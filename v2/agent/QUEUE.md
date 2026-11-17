@@ -192,7 +192,7 @@ APPROVED 2026-11-13 Agent 0 — K1b (D2-49, 1 hart + hoãn push migration K1c)**
 | KT-80 | **K6** 8 luật máy vào cổng (OD-K6-5) | KT-76 | 3 h | DONE | 56935bbc; 5 luật trong `v2 check`/`gate --fast` (wall 12,5 s); **17 ca hồi quy**; `key=value` bắt theo **hình dạng giá trị** (`build=729` đỏ); `expires_task` cho `pre_existing` (quá hạn tự `E1_EXPIRED`); selfbreak 5/5 |
 | KT-77c | **K6** FS + vblk vào ảnh sản phẩm (tiêu chí 2, D2-123.2) | KT-77b | 3 h | READY | `ls`/`cat`/ghi/đọc-lại-sau-reboot chuyển deferred→active; 3 h, không xin thêm |
 | KT-85 | **K6** chặn commit bằng máy: worktree mỗi task + hook `VIFAST_ROLE` (D2-123.4) | KT-80 | 1 h | DONE | 1d98835b; hook ở `.git/hooks` (common dir ⇒ chặn mọi worktree), fail-closed; 3 ca âm PASS; lead tự thử: `env -u VIFAST_ROLE git commit` ⇒ DENY |
-| KT-85b | **K6** hook `reference-transaction` + `commit-msg` (D2-125.2) | KT-85 | 1 h | READY | chặn cherry-pick/merge/reset vào main; kiểm git ≥ 2.28; ca âm 3 loại |
+| KT-85b | **K6** hook `reference-transaction` + `commit-msg` (D2-125.2) | KT-85 | 1 h | DONE | a6e216ec; 4 hook ở git-common-dir; ca âm agent2 cherry-pick/merge/reset ⇒ DENY, `refs/heads/main` không đổi; cổng git ≥ 2.28; `install.sh --check` PASS |
 | KT-86 | **K6** nhúng `git rev` + dirty vào ảnh, harness từ chối đo nếu lệch (D2-125.3) | KT-85 | 2 h | READY | ca âm: sửa mã không commit ⇒ bị từ chối |
 | KT-84 | **K6** đo trên ảnh ĐÓNG BĂNG (D2-122.6) | KT-86 | 3 h | BLOCKED | `target-task/<mã>` mỗi task; copy ảnh vào `artifacts/<sha256>.bin`; mọi phép đo trỏ tệp này; ca âm ghi đè target |
 
