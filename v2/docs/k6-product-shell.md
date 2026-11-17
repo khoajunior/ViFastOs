@@ -2,8 +2,8 @@
 
 **Ngày**: 2026-11-17 · **Task**: KT-77b · **Quyết định**: OD-K6-1, OD-K6-2, D2-122 (ảnh canonical),
 D2-08 (không harness trong ảnh sản phẩm), D2-119.
-**Trạng thái**: **đạt tiêu chí một, ba, năm, sáu** của OD-K6-2; **tiêu chí hai đạt phần `active`
-của `spec/v1-parity.toml`** (bốn lệnh) — phần "liệt kê thư mục / đọc tệp / ghi tệp / đọc lại sau
+**Trạng thái**: **đạt tiêu chí một, ba, năm, sáu** của OD-K6-2; **tiêu chí hai CHƯA ĐẠT** (mới chạy được phần `active`
+của `spec/v1-parity.toml`, bốn lệnh) — phần "liệt kê thư mục / đọc tệp / ghi tệp / đọc lại sau
 reboot / chạy chương trình" đang là `deferred-K7` **trong spec đã đóng băng**, nên **không** được
 tính là đạt trọn tiêu chí hai; **tiêu chí bốn** (ma trận + soak) thuộc bước đo của lead, tài liệu
 này chỉ cung cấp log boot một/hai/bốn hart.
@@ -92,9 +92,18 @@ Bằng chứng một boot sạch có `exit` (halt hẳn, không bị timeout): s
 `Exit`, ring rỗng và hợp lệ:
 
 ```text scope=v2/agent/JOURNAL/kt77b-logs/kt77b-run-exit-smp1.log
+# u-mode exit: code=0 faultkind=Exit{0} tcb=14 state=BlockedOnSend
 # proc: recv exit pid=14 code=0
 # product halt: shell_exit=0 fault_seen=1 events=6 ps_replies=1 ps_n=3 kill_suspend=1 proc_up=1 rx_windows=296 rx_irqs=0 rx_bytes=32 rx_late=32 ring_used=0 ring_head=2 ring_tail=2 ring_ok=1
 ```
+
+**Đọc đúng `fault_seen`**: đây là **một** fault `FaultKind::Exit{0}` của shell — **không** phải page
+fault, không phải W^X. Shell gọi `Exit(0)` (`init/shell_user.rs`, nhánh `exit`), core ghi
+`Tcb.last_fault` khi procsrv `NBRecv` fault đã xếp hàng (`v2/kernel/vifast-core/src/core_ipc.rs:319`;
+nhánh procsrv đang chờ là `v2/kernel/vifast-core/src/core_ipc.rs:802`), procsrv báo `EV_FAULT` và runtime đếm ở
+`v2/kernel/vifast-kbin-riscv64/src/proc_rt.rs:185`. Ca W^X chủ đích **không** có trên ảnh sản
+phẩm: nó chỉ nằm trong ảnh test (`v2/kernel/vifast-kbin-riscv64/src/ktest_proc.rs`, TAP cuối) và
+kết thúc bằng `PANIC: u-mode fault …` — log ảnh test ở §10.
 
 ## 5. Prompt `shell>`
 
